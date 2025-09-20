@@ -1,0 +1,46 @@
+/* C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\master.css */
+:root{--bd-green:#16a34a;--bd-green-700:#15803d;--bd-border:#e5e7eb;--bd-bg:#f9fafb}
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{margin:0;background:var(--bd-bg);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,"Apple Color Emoji","Segoe UI Emoji"}
+/* Header */
+.bd-root .bd-header{position:fixed;top:0;left:0;right:0;height:64px;background:#fff;border-bottom:1px solid var(--bd-border);z-index:50}
+.bd-root .bd-header-inner{height:100%;max-width:1280px;margin:0 auto;padding:0 16px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+/* Tabs */
+.bd-tabs{display:flex;align-items:center;gap:8px;overflow:auto}
+.bd-tab{height:36px;padding:0 16px;border:1px solid var(--bd-border);border-radius:9999px;background:#fff;color:#111827;font-size:14px;cursor:pointer}
+.bd-tab:hover{background:#f9fafb}
+.bd-tab--active{background:var(--bd-green);border-color:var(--bd-green);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.bd-tab:focus{outline:none}
+.bd-tab:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(16,185,129,.35)}
+/* Buttons / Inputs */
+.bd-btn{height:36px;padding:0 14px;border:1px solid var(--bd-border);border-radius:9999px;background:#fff;font-size:14px;cursor:pointer}
+.bd-btn:hover{background:#f9fafb}
+.bd-btn--primary{background:var(--bd-green);border-color:var(--bd-green);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.bd-btn--primary:hover{background:var(--bd-green-700)}
+.bd-divider{width:1px;height:24px;background:var(--bd-border);margin:0 8px}
+.bd-input{height:36px;padding:0 10px;border:1px solid var(--bd-border);border-radius:8px;background:#fff;font-size:14px;width:100%}
+.bd-textarea{min-height:120px;padding:8px 10px;border:1px solid var(--bd-border);border-radius:8px;background:#fff;font-size:14px;width:100%;resize:vertical}
+.bd-label{font-size:12px;color:#6b7280;margin-bottom:4px}
+.bd-help{font-size:12px;color:#6b7280}
+/* Cards */
+.bd-card{background:#fff;border:1px solid var(--bd-border);border-radius:12px;padding:16px}
+.bd-card-title{font-size:14px;color:#4b5563}
+.bd-card-value{margin-top:4px;font-size:32px;font-weight:800;letter-spacing:-.01em}
+/* Main container spacing */
+.bd-main{padding-top:64px}
+.bd-section{max-width:1280px;margin:0 auto;padding:16px}
+/* Tables */
+.bd-table{width:100%;border-collapse:separate;border-spacing:0}
+.bd-table th,.bd-table td{padding:8px 12px;border-bottom:1px solid var(--bd-border);font-size:14px}
+.bd-table thead th{font-size:12px;color:#6b7280;background:#fafafa}
+.bd-table tr:nth-child(odd){background:#fafafa22}
+/* Modal */
+.bd-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:60;display:flex;align-items:center;justify-content:center}
+.bd-modal{background:#fff;border:1px solid var(--bd-border);border-radius:12px;max-width:920px;width:96vw;max-height:80vh;display:flex;flex-direction:column}
+.bd-modal-header{padding:12px 16px;border-bottom:1px solid var(--bd-border);display:flex;align-items:center;justify-content:space-between}
+.bd-modal-body{padding:16px;overflow:auto}
+.bd-modal-footer{padding:12px 16px;border-top:1px solid var(--bd-border);display:flex;gap:8px;justify-content:flex-end}
+/* Drop zone */
+.bd-drop{padding:24px;border:2px dashed var(--bd-border);border-radius:12px;background:#fff;text-align:center;transition:background .15s,border-color .15s}
+.bd-drop--active{background:#ecfdf5;border-color:#86efac}

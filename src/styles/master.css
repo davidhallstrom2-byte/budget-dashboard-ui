@@ -1,0 +1,26 @@
+/* C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\styles\master.css */
+:root{--bd-green:#16a34a;--bd-green-700:#15803d;--bd-border:#e5e7eb;--bd-bg:#f9fafb}
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{margin:0;background:var(--bd-bg);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,"Apple Color Emoji","Segoe UI Emoji"}
+/* Header */
+.bd-root .bd-header{position:fixed;top:0;left:0;right:0;height:64px;background:#fff;border-bottom:1px solid var(--bd-border);z-index:50}
+.bd-root .bd-header-inner{height:100%;max-width:1280px;margin:0 auto;padding:0 16px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+/* Tabs */
+.bd-tabs{display:flex;align-items:center;gap:8px;overflow:auto}
+.bd-tab{height:36px;padding:0 16px;border:1px solid var(--bd-border);border-radius:9999px;background:#fff;color:#111827;font-size:14px;cursor:pointer}
+.bd-tab:hover{background:#f9fafb}
+.bd-tab--active{background:var(--bd-green);border-color:var(--bd-green);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+/* Toolbar buttons */
+.bd-btn{height:36px;padding:0 14px;border:1px solid var(--bd-border);border-radius:9999px;background:#fff;font-size:14px;cursor:pointer}
+.bd-btn:hover{background:#f9fafb}
+.bd-btn--primary{background:var(--bd-green);border-color:var(--bd-green);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.bd-btn--primary:hover{background:var(--bd-green-700)}
+.bd-divider{width:1px;height:24px;background:var(--bd-border);margin:0 8px}
+/* Cards */
+.bd-card{background:#fff;border:1px solid var(--bd-border);border-radius:12px;padding:16px}
+.bd-card-title{font-size:14px;color:#4b5563}
+.bd-card-value{margin-top:4px;font-size:32px;font-weight:800;letter-spacing:-.01em}
+/* Main container spacing */
+.bd-main{padding-top:64px}
+.bd-section{max-width:1280px;margin:0 auto;padding:16px}

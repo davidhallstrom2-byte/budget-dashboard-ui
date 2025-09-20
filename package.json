@@ -1,0 +1,29 @@
+{
+  "name": "budget-dashboard-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "^0.462.0",
+    "pdfjs-dist": "^5.4.149",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.15.4",
+    "tesseract.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^5.0.2",
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.24.2",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.13",
+    "vite": "^7.1.4"
+  }
+}
