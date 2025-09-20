@@ -5,3 +5,6 @@ npm-debug.log*
 .vscode/
 .restore_tmp_*/
 screenshots/
+
+.restore_tmp_*/
+screenshots/
