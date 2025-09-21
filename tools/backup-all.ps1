@@ -1,154 +1,185 @@
-<# ============================================================================
- Backup both repos + create timestamped snapshot branches on GitHub
+<# =======================================================================
+Backup both repos + create timestamped snapshot branches on GitHub
 
- - Commits any local changes (single “backup” commit)
- - Tries to rebase main on origin/main when safe
- - Pushes main (if you’re on it)
- - ALWAYS creates a snapshot branch from the exact current commit:
-     snap/YYYYMMDD-HHMMSS
-   …so you can revert to any point in time.
+- Commits any local changes (single “backup” commit)
+- Tries to rebase main on origin/main when safe
+- Pushes main (if you’re on it)
+- ALWAYS creates a snapshot branch from the exact current commit:
+    snap/YYYYMMDD-HHMMSS[-label]
+  …so you can revert to any point in time.
 
- Tested with PowerShell 7.x
-============================================================================ #>
+Tested with PowerShell 7.x
+======================================================================= #>
 
 [CmdletBinding()]
-param()
+param(
+  # Optional readable label to append to the snapshot branch name.
+  # Allowed chars: letters, numbers, - _ .
+  [string]$Label = ''
+)
 
 $ErrorActionPreference = 'Stop'
-$PSStyle.OutputRendering = 'Host'  # no weird encoding in messages
+$PSStyle.OutputRendering = 'Host'  # nice colors, but no weird encoding
 
-# ---- Paths (edit if you ever move things) -----------------------------------
-$UI     = 'C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui'
-$PLUGIN = 'C:\Users\david\Local Sites\main-dashboard\app\public\wp-content\plugins\budget-state'
-$REMOTE = 'origin'
+# ---- Config: edit here if paths change --------------------------------
+$UIRepo      = 'C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui'
+$PluginRepo  = 'C:\Users\david\Local Sites\main-dashboard\app\public\wp-content\plugins\budget-state'
+$RemoteName  = 'origin'
+$MainBranch  = 'main'
+# ----------------------------------------------------------------------
 
-# ---- Helpers ----------------------------------------------------------------
 function Invoke-Git {
   param(
-    [string]$Cwd,
-    [Parameter(ValueFromRemainingArguments = $true)]
+    [string]$RepoPath,
+    [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$Args
   )
-  Push-Location $Cwd
+  Push-Location $RepoPath
   try {
-    Write-Host "git $($Args -join ' ')" -ForegroundColor DarkGray
+    Write-Host ("git " + ($Args -join ' ')) -ForegroundColor DarkGray
     & git @Args
   } finally {
     Pop-Location
   }
 }
 
-function Get-GitBranch {
-  param([string]$Repo)
-  Push-Location $Repo
+function Get-GitHeadName {
+  param([string]$RepoPath)
+  Push-Location $RepoPath
   try {
-    $b = (& git rev-parse --abbrev-ref HEAD).Trim()
-    if (-not $b) { 'HEAD' } else { $b }
+    $name = (git rev-parse --abbrev-ref HEAD).Trim()
+    if (-not $name) { return 'HEAD' }
+    return $name
   } catch {
-    'HEAD'
+    return 'HEAD'
   } finally {
     Pop-Location
   }
 }
 
-function In-Rebase {
-  param([string]$Repo)
-  return (Test-Path (Join-Path $Repo '.git\rebase-merge')) -or
-         (Test-Path (Join-Path $Repo '.git\rebase-apply'))
+function Test-GitRebaseInProgress {
+  param([string]$RepoPath)
+  return Test-Path (Join-Path $RepoPath '.git\rebase-apply') -or
+         Test-Path (Join-Path $RepoPath '.git\rebase-merge')
 }
 
-function Commit-Local-Changes {
-  param([string]$Repo,[string]$Msg)
-  Push-Location $Repo
+function Commit-AnyChanges {
+  param([string]$RepoPath)
+
+  Push-Location $RepoPath
   try {
-    $dirty = (& git status --porcelain)
-    if ($dirty) {
-      & git add -A
-      & git commit -m $Msg | Out-Null
-      Write-Host "Committed local changes -> $Msg" -ForegroundColor Yellow
+    $status = (git status --porcelain).Trim()
+    if ($status) {
+      git add -A | Out-Null
+      git commit -m ("backup: " + (Get-Date -Format 'yyyy-MM-dd HH:mm')) | Out-Null
+      Write-Host "Committed local changes." -ForegroundColor Yellow
+      return $true
     } else {
       Write-Host "No local changes to commit." -ForegroundColor DarkGray
+      return $false
     }
   } finally {
     Pop-Location
   }
 }
 
-function Push-Snapshot {
+function Try-Rebase-Main {
   param(
-    [string]$Repo,
-    [string]$Remote,
-    [string]$SnapName  # e.g., 'snap/20250921-074212'
+    [string]$RepoPath,
+    [string]$RemoteName,
+    [string]$MainBranch
   )
-  # This works even if you’re detached or mid-rebase:
-  Invoke-Git $Repo push -u $Remote "HEAD:$SnapName"
-  $name = Split-Path -Leaf $Repo
-  $slug = if ($name -eq 'ui') { 'budget-dashboard-ui' } else { 'budget-state' }
-  $url  = "https://github.com/davidhallstrom2-byte/$slug/tree/$($SnapName -replace '/','%2F')"
-  Write-Host "Snapshot branch pushed: $SnapName" -ForegroundColor Green
-  Write-Host "View: $url" -ForegroundColor Green
+
+  if (Test-GitRebaseInProgress $RepoPath) {
+    Write-Warning "Rebase in progress — skipping rebase step."
+    return
+  }
+
+  $head = Get-GitHeadName $RepoPath
+  if ($head -ne $MainBranch) {
+    Write-Host "Not on $MainBranch (currently $head) — skipping rebase." -ForegroundColor DarkGray
+    return
+  }
+
+  Invoke-Git $RepoPath fetch $RemoteName --prune | Out-Null
+  Write-Host "Rebasing $MainBranch onto $RemoteName/$MainBranch ..." -ForegroundColor DarkGray
+  Invoke-Git $RepoPath rebase --autostash "$RemoteName/$MainBranch"
+  Write-Host "Rebase complete." -ForegroundColor DarkGray
+}
+
+function Push-Main-If-On-Main {
+  param(
+    [string]$RepoPath,
+    [string]$RemoteName,
+    [string]$MainBranch
+  )
+  $head = Get-GitHeadName $RepoPath
+  if ($head -ne $MainBranch) {
+    Write-Host "Not on $MainBranch (currently $head) — skipping main push." -ForegroundColor DarkGray
+    return
+  }
+
+  Invoke-Git $RepoPath push $RemoteName $MainBranch
+  Write-Host "Pushed $MainBranch to $RemoteName." -ForegroundColor Green
+}
+
+function New-Snapshot-Branch {
+  param(
+    [string]$RepoPath,
+    [string]$RemoteName,
+    [string]$Label
+  )
+
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  # sanitize label -> keep letters, numbers, dash underscore dot only
+  $cleanLabel = ($Label -replace '[^A-Za-z0-9._-]', '').Trim()
+  $branchName = if ($cleanLabel) { "snap/$stamp-$cleanLabel" } else { "snap/$stamp" }
+
+  # Always push exact current commit to a new remote branch.
+  # Use fully-qualified ref on the remote side to avoid ambiguity.
+  $dest = "refs/heads/$branchName"
+  Invoke-Git $RepoPath push -u $RemoteName "HEAD:$dest"
+
+  Write-Host ("Snapshot branch pushed: " + $branchName) -ForegroundColor Green
+  $slug = $branchName.Replace('/','%2F')
+  Write-Host ("View: " + "https://github.com/davidhallstrom2-byte/" +
+              (Split-Path $RepoPath -Leaf) + "/tree/$slug") -ForegroundColor DarkGray
 }
 
 function Backup-Repo {
-  param([string]$RepoPath)
+  param(
+    [string]$Name,
+    [string]$RepoPath,
+    [string]$RemoteName,
+    [string]$MainBranch,
+    [string]$Label
+  )
 
-  if (-not (Test-Path (Join-Path $RepoPath '.git'))) {
-    throw "Not a git repo: $RepoPath"
-  }
+  Write-Host ("`n================  {0}  ================" -f $Name) -ForegroundColor Cyan
+  Write-Host ("Repo: {0}" -f $RepoPath) -ForegroundColor DarkGray
 
-  $ts    = Get-Date -Format 'yyyyMMdd-HHmmss'
-  $snap  = "snap/$ts"
-  $name  = Split-Path -Leaf $RepoPath
+  # 1) Fetch/prune
+  Invoke-Git $RepoPath fetch $RemoteName --prune | Out-Null
 
-  Write-Host ""
-  Write-Host "================  $name  ================" -ForegroundColor Cyan
-  Write-Host "Repo: $RepoPath" -ForegroundColor Cyan
+  # 2) Commit any local changes
+  Commit-AnyChanges $RepoPath | Out-Null
 
-  # 1) Make sure we can talk to remote
-  Invoke-Git $RepoPath fetch $REMOTE --prune
+  # 3) Try rebase main if safe
+  Try-Rebase-Main -RepoPath $RepoPath -RemoteName $RemoteName -MainBranch $MainBranch
 
-  # 2) Commit any local changes (if any)
-  Commit-Local-Changes -Repo $RepoPath -Msg "chore(backup): $ts"
+  # 4) Push main if we are on main
+  Push-Main-If-On-Main -RepoPath $RepoPath -RemoteName $RemoteName -MainBranch $MainBranch
 
-  # 3) If not in the middle of a rebase, try to rebase main forward
-  $branch = Get-GitBranch -Repo $RepoPath
-  if (-not (In-Rebase -Repo $RepoPath) -and $branch -eq 'main') {
-    try {
-      Invoke-Git $RepoPath rebase --autostash "$REMOTE/main"
-      Write-Host "Rebased main onto $REMOTE/main." -ForegroundColor DarkGray
-    } catch {
-      Write-Warning "Rebase failed; keeping local state. (You can resolve later.)"
-      Invoke-Git $RepoPath rebase --abort | Out-Null
-    }
-  } elseif (In-Rebase -Repo $RepoPath) {
-    Write-Warning "Rebase in progress — skipping rebase step."
-  } else {
-    Write-Host "Current branch: $branch (no rebase attempt)." -ForegroundColor DarkGray
-  }
-
-  # 4) Push main if we’re on main
-  if ($branch -eq 'main') {
-    try {
-      Invoke-Git $RepoPath push $REMOTE main
-      Write-Host "Pushed main to $REMOTE." -ForegroundColor Green
-    } catch {
-      Write-Warning "Couldn’t push main (non–fast-forward? Resolve later)."
-    }
-  } else {
-    Write-Host "Not on main (currently $branch) — skipping main push." -ForegroundColor DarkGray
-  }
-
-  # 5) ALWAYS push a snapshot from the exact current commit
-  Push-Snapshot -Repo $RepoPath -Remote $REMOTE -SnapName $snap
+  # 5) ALWAYS push a snapshot branch from exactly current commit
+  New-Snapshot-Branch -RepoPath $RepoPath -RemoteName $RemoteName -Label $Label
 }
 
-# ---- Run --------------------------------------------------------------------
-$started = Get-Date
-Write-Host "Backup started: $started" -ForegroundColor Cyan
+# Pretty banner
+Write-Host ("PowerShell " + $PSVersionTable.PSVersion.ToString()) -ForegroundColor DarkGray
+Write-Host ("Backup started: " + (Get-Date)) -ForegroundColor DarkGray
 
-Backup-Repo -RepoPath $UI
-Backup-Repo -RepoPath $PLUGIN
+# Run both
+Backup-Repo -Name 'ui'           -RepoPath $UIRepo     -RemoteName $RemoteName -MainBranch $MainBranch -Label $Label
+Backup-Repo -Name 'budget-state' -RepoPath $PluginRepo -RemoteName $RemoteName -MainBranch $MainBranch -Label $Label
 
-$ended = Get-Date
-Write-Host ""
-Write-Host "✓ All backups done. ($([int]($ended - $started).TotalSeconds)s)" -ForegroundColor Green
+Write-Host "`n✓ All backups done." -ForegroundColor Green
