@@ -1,3 +1,7 @@
-﻿@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 single import */
+@import "tailwindcss";
+
+/* (optional) small defaults so you see styling immediately */
+:root { color-scheme: light; }
+body { @apply bg-gray-50 text-gray-900; }
+a { @apply text-blue-600 hover:underline; }
