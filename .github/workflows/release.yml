@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 name: build-ui-on-tag
 on:
   push:
@@ -34,3 +35,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: budget-dashboard-ui-dist.zip
           generate_release_notes: true
+=======
+git add .github\workflows\release.yml
+git commit -m "ci(ui): add build-on-tag release workflow"
+git push
+git tag v0.1.0
+git push --tags
+>>>>>>> d923605 (backup: 2025-09-20 17:48)

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:local": "powershell -ExecutionPolicy Bypass -File ./tools/build-and-deploy.ps1"
   },
   "dependencies": {
     "lucide-react": "^0.462.0",
@@ -18,7 +19,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.1.13",
     "@vitejs/plugin-react": "^5.0.2",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.24.2",
