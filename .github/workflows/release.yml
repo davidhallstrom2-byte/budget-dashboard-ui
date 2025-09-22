@@ -3,15 +3,13 @@ name: ci
 on:
   push:
     branches:
-      - main
-    branches-ignore:
-      - 'snap/**'
+      - main            # only build main; snap/** won't run
     tags:
-      - 'v*.*.*'
+      - 'v*.*.*'        # also build when pushing a tag like v1.2.3
   pull_request:
     branches:
       - main
-  workflow_dispatch: {}
+  workflow_dispatch: {}  # still allow manual runs if you ever want
 
 permissions:
   contents: write
@@ -105,7 +103,9 @@ jobs:
     name: Publish to npm (optional)
     needs: release_tag
     runs-on: ubuntu-latest
-    if: ${{ secrets.NPM_TOKEN != '' && startsWith(github.ref, 'refs/tags/v') }}
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}   # expose once as env
+    if: ${{ env.NPM_TOKEN != '' && startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -115,4 +115,4 @@ jobs:
       - run: npm ci
       - run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
