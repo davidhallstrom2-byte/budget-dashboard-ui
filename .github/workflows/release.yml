@@ -1,21 +1,16 @@
 name: ci
 
 on:
-  # Build automatically on pushes to main; ignore snapshot branches
   push:
     branches:
       - main
     branches-ignore:
       - 'snap/**'
-  # Optional: build PRs too
+    tags:
+      - 'v*.*.*'
   pull_request:
     branches:
       - main
-  # Cut a proper release when you push a semver tag like v1.2.3
-  push:
-    tags:
-      - 'v*.*.*'
-  # You can still run it manually if you ever want
   workflow_dispatch: {}
 
 permissions:
@@ -40,7 +35,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
+          cache: 'npm'
 
       - name: Use public npm registry
         run: npm config set registry https://registry.npmjs.org/
@@ -58,7 +53,6 @@ jobs:
           name: dist
           path: dist/**
 
-  # Automatic prerelease for main pushes (no tags, no secrets).
   prerelease_main:
     name: Prerelease (main push)
     needs: build
@@ -72,7 +66,7 @@ jobs:
           path: dist
         continue-on-error: true
 
-      - name: Create draft prerelease with artifact
+      - name: Create draft prerelease
         uses: softprops/action-gh-release@v2
         with:
           name: "build-main-${{ github.sha }}"
@@ -85,7 +79,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Proper release when you push a tag vX.Y.Z
   release_tag:
     name: Release (tag)
     needs: build
@@ -99,7 +92,7 @@ jobs:
           path: dist
         continue-on-error: true
 
-      - name: Create GitHub Release (attach dist if present)
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -108,7 +101,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Optional npm publish — runs only if NPM_TOKEN exists
   npm_publish:
     name: Publish to npm (optional)
     needs: release_tag
