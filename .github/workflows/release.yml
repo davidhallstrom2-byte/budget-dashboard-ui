@@ -1,1 +1,155 @@
-﻿# (paste the YAML above here exactly)
+name: ci
+
+on:
+  push:
+    branches: [main]        # build main only
+    tags: ['v*.*.*']        # also when pushing a release tag like v1.2.3
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backup_name:
+        description: 'Backup name (e.g., "pre-OCR-refactor")'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (Vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Use public npm registry
+        run: npm config set registry https://registry.npmjs.org/
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build --if-present
+
+      - name: Upload dist artifact (if present)
+        if: ${{ hashFiles('dist/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/**
+
+  # Draft prerelease ONLY for backups:
+  # - push to main with commit message starting with "backup:"
+  # - OR manual run with workflow_dispatch input "backup_name"
+  prerelease_main:
+    name: Prerelease (named backups)
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+        continue-on-error: true
+
+      - name: Derive backup intent & name
+        id: detect
+        shell: bash
+        run: |
+          # inputs (may be empty)
+          INPUT_NAME="${{ github.event.inputs.backup_name }}"
+          EVENT="${{ github.event_name }}"
+          MSG=""
+          if [ "$EVENT" = "push" ]; then
+            MSG="${{ github.event.head_commit.message }}"
+          fi
+
+          # Is this a backup? Either manual name provided OR push msg starts with "backup:"
+          SHOULD=false
+          NAME=""
+          if [ -n "$INPUT_NAME" ]; then
+            SHOULD=true
+            NAME="$INPUT_NAME"
+          else
+            # case-insensitive check for prefix "backup:"
+            LOWER="$(printf '%s' "$MSG" | tr '[:upper:]' '[:lower:]')"
+            if printf '%s' "$LOWER" | grep -qE '^backup:'; then
+              SHOULD=true
+              NAME="${MSG#backup:}"
+            fi
+          fi
+
+          if [ "$SHOULD" = true ]; then
+            # trim and sanitize name
+            NAME="$(echo "$NAME" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            [ -z "$NAME" ] && NAME="backup"
+            SAFE="$(echo "$NAME" | tr -cd 'A-Za-z0-9._- ' | sed -E 's/[[:space:]]+/-/g' | cut -c1-50)"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "backup_name=$SAFE" >> "$GITHUB_OUTPUT"
+            echo "tag=backup-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA:0-7}" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create draft prerelease (only when requested)
+        if: ${{ steps.detect.outputs.should_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ steps.detect.outputs.backup_name }}"
+          tag_name: "${{ steps.detect.outputs.tag }}"
+          draft: true
+          prerelease: true
+          generate_release_notes: false
+          files: |
+            dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release_tag:
+    name: Release (tag)
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+        continue-on-error: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm_publish:
+    name: Publish to npm (optional)
+    needs: release_tag
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - name: npm publish (skips if no token)
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: ${{ env.NPM_TOKEN != '' }}
+        run: npm publish --access public
