@@ -1,114 +1,121 @@
-import React, { useEffect, useState } from "react";
-import Toolbar from "./ui/Toolbar.jsx";
-import AnalysisTab from "./tabs/AnalysisTab.jsx";
-import CalculatorTab from "./tabs/CalculatorTab.jsx";
-import EditorTab from "./tabs/EditorTab.jsx";
+// src/components/BudgetDashboard.jsx
+// Tab router with Dashboard, Analysis, Calculator, and Editor.
+// CLS-safe tabs; Analysis content is provided by tabs/AnalysisTab.jsx.
+// Global scrollbar space should be reserved in index.css.
 
-// Store
-import { subscribe, hydrate } from "/src/utils/state.js";
+import React, { useState } from "react";
+import LoadingGate from "./common/LoadingGate";
+import ModernBudgetPanel from "./modern/ModernBudgetPanel";
+import EditorTab from "./tabs/EditorTab";
+import AnalysisTab from "./tabs/AnalysisTab";
+import { useBudgetState } from "../utils/state";
 
-// 🔹 Modern “bridge” that adapts canonical state to your ModernBudgetPanel
-import ModernBridge from "/src/components/modern/ModernBridge.jsx";
+import { DollarSign, TrendingUp, Calculator as CalcIcon, Plus } from "lucide-react";
 
-const TABS = ["Dashboard", "Analysis", "Calculator", "Editor"];
-
-export default function BudgetDashboard() {
-  const [appState, setAppState] = useState(null);
-  const [activeTab, setActiveTab] = useState("Dashboard");
-  const [showBackups, setShowBackups] = useState(false);
-
-  useEffect(() => {
-    const un = subscribe(setAppState);
-    hydrate();
-    return () => un();
-  }, []);
-
-  useEffect(() => {
-    const open = () => setShowBackups(true);
-    window.addEventListener("bd:open-backups", open);
-    return () => window.removeEventListener("bd:open-backups", open);
-  }, []);
-
+function TabButton({ id, label, active, onClick }) {
+  const base =
+    "inline-flex items-center justify-center rounded-2xl h-9 min-w-[92px] px-4 text-sm font-medium leading-[1.125rem] tracking-normal border border-solid box-border whitespace-nowrap select-none outline-none ring-0 focus:outline-none focus:ring-0 transition-colors";
+  const activeCls = "bg-gray-900 text-white border-gray-900";
+  const inactiveCls = "bg-white text-gray-800 border-gray-300 hover:bg-gray-50";
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Toolbar
-        tabs={TABS}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onOpenBackups={() => setShowBackups(true)}
-        onAddItem={() => {
-          setActiveTab("Editor");
-          window.dispatchEvent(new Event("bd:add-item"));
-        }}
-      />
-
-      <div className="mx-auto w-full max-w-6xl p-4">
-        {activeTab === "Dashboard" && <DashboardTab state={appState} />}
-
-        {activeTab === "Analysis" && <AnalysisTab state={appState} />}
-        {activeTab === "Calculator" && <CalculatorTab state={appState} />}
-        {activeTab === "Editor" && <EditorTab state={appState} />}
-      </div>
-
-      {showBackups && <div className="hidden" />}{/* placeholder for your Backups modal */}
-    </div>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-controls={`panel-${id}`}
+      onClick={onClick}
+      className={`${base} ${active ? activeCls : inactiveCls}`}
+    >
+      {label}
+    </button>
   );
 }
 
-function DashboardTab({ state }) {
-  if (!state) return <div className="text-sm text-gray-500">Loading…</div>;
+export default function BudgetDashboard() {
+  const [tab, setTab] = useState("modern"); // modern | analysis | calculator | editor
+  const [asOfDate, setAsOfDate] = useState("2025-09-01");
 
-  const bd = state.budgetData || {};
-  const order = Array.isArray(state?.ui?.sections) ? state.ui.sections : Object.keys(bd);
+  const reloadData = useBudgetState((s) => s.reloadData);
+  const loading = useBudgetState((s) => s.meta.loading);
+  const hydrated = useBudgetState((s) => s.meta.hydrated);
+
+  const tabs = [
+    { id: "modern", label: "Dashboard", icon: DollarSign },
+    { id: "analysis", label: "Analysis", icon: TrendingUp },
+    { id: "calculator", label: "Calculator", icon: CalcIcon },
+    { id: "editor", label: "Editor", icon: Plus },
+  ];
 
   return (
-    <>
-      {/* 🔹 Modern panel (bridged) */}
-      <div className="mb-6">
-        <ModernBridge state={state} setState={() => { /* bridge commits itself */ }} />
+    <div className="mx-auto max-w-7xl p-4">
+      {/* Toolbar */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div role="tablist" aria-label="Budget tabs" className="flex items-center gap-2">
+          {tabs.map((t) => (
+            <TabButton key={t.id} id={t.id} label={t.label} active={tab === t.id} onClick={() => setTab(t.id)} />
+          ))}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium">As of</label>
+            <input
+              type="date"
+              value={asOfDate}
+              onChange={(e) => setAsOfDate(e.target.value)}
+              className="p-2 border rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={reloadData}
+            disabled={loading}
+            className={`rounded-2xl border px-4 py-2 text-sm font-medium ${
+              loading
+                ? "cursor-not-allowed border-gray-300 bg-gray-100 text-gray-400"
+                : "border-gray-300 bg-white text-gray-800 hover:bg-gray-50"
+            }`}
+            title="Reload budget data from DB or restore file"
+          >
+            {loading ? "Reloading…" : hydrated ? "Reload data" : "Load data"}
+          </button>
+        </div>
       </div>
 
-      {/* Optional divider; keep classic tables below */}
-      <div className="my-4 h-px bg-gray-200" />
+      {/* Panels */}
+      <LoadingGate>
+        <div id="panels" className="rounded-xl">
+          {/* Dashboard */}
+<section id="panel-modern" role="tabpanel" hidden={tab !== "modern"} aria-labelledby="modern">
+  {tab === "modern" ? <ModernBudgetPanel asOfDate={asOfDate} /> : null}
+</section>
 
-      {/* Classic tables */}
-      {order.map((key) => {
-        const arr = Array.isArray(bd[key]) ? bd[key] : [];
-        const title = (state?.ui?.labels?.[key]) || key.replace(/^[a-z]/, c => c.toUpperCase());
-        const total = arr.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-        return (
-          <div key={key} className="mb-6 rounded-xl border bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold">{title}</h3>
-              <div className="text-sm font-medium">${total.toFixed(2)}</div>
-            </div>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full border-separate border-spacing-0 text-sm">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border p-2 text-left">Name</th>
-                    <th className="border p-2 text-left">Amount</th>
-                    <th className="border p-2 text-left">Due</th>
-                    <th className="border p-2 text-left">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {arr.length === 0 ? (
-                    <tr><td colSpan={4} className="border p-2 text-gray-500">No items</td></tr>
-                  ) : arr.map((r, i) => (
-                    <tr key={r?.id ?? `${key}-${i}`}>
-                      <td className="border p-2">{r?.name ?? ""}</td>
-                      <td className="border p-2">${Number(r?.amount || 0).toFixed(2)}</td>
-                      <td className="border p-2">{r?.dueDate || r?.date || ""}</td>
-                      <td className="border p-2">{r?.notes || ""}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })}
-    </>
+          {/* Analysis */}
+          <section id="panel-analysis" role="tabpanel" hidden={tab !== "analysis"} aria-labelledby="analysis">
+            {tab === "analysis" ? <AnalysisTab asOfDate={asOfDate} /> : null}
+          </section>
+
+          {/* Calculator */}
+          <section id="panel-calculator" role="tabpanel" hidden={tab !== "calculator"} aria-labelledby="calculator">
+            {tab === "calculator" ? (
+              <div className="space-y-6">
+                <div className="bg-white p-6 rounded-lg border shadow-sm">
+                  <h3 className="text-lg font-semibold mb-4">Income Calculator</h3>
+                  <p className="text-sm text-gray-600">
+                    Use the Analysis tab for detailed charts and suggestions. Calculator features coming soon.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          {/* Editor */}
+          <section id="panel-editor" role="tabpanel" hidden={tab !== "editor"} aria-labelledby="editor">
+            {tab === "editor" ? <EditorTab /> : null}
+          </section>
+        </div>
+      </LoadingGate>
+    </div>
   );
 }
