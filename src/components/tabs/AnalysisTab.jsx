@@ -1,6 +1,9 @@
+// src/components/tabs/AnalysisTab.jsx
 import { useBudgetState } from '../../utils/state';
-import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Target, Activity, DollarSign, Percent } from 'lucide-react';
+import FinancialHealthCard from '../modern/FinancialHealthCard';
+import HealthRecommendations from '../modern/HealthRecommendations';
 
 export default function AnalysisTab() {
   const rows = useBudgetState((state) => state.rows || []);
@@ -42,33 +45,9 @@ export default function AnalysisTab() {
     })
     .filter(item => item.budgeted > 0 || item.actual > 0);
 
-  // Calculate overall budget health score (0-100)
-  const calculateHealthScore = () => {
-    let score = 100;
-    
-    // Deduct for negative net income
-    if (totals.netIncome < 0) {
-      score -= 30;
-    }
-    
-    // Deduct for categories over budget
-    const overBudgetCategories = categoryVariance.filter(cat => cat.status === 'over').length;
-    score -= (overBudgetCategories * 10);
-    
-    // Deduct if no income
-    if (totals.totalIncome === 0) {
-      score -= 40;
-    }
-    
-    return Math.max(0, Math.min(100, score));
-  };
-
-  const healthScore = calculateHealthScore();
-
   // Spending velocity (burn rate per day)
   const daysInMonth = 30;
   const dailyBurnRate = totals.totalExpenses / daysInMonth;
-  const daysUntilBroke = totals.netIncome > 0 ? Infinity : Math.abs(totals.netIncome / dailyBurnRate);
 
   // Budget utilization rate
   const budgetUtilization = totals.totalExpenses > 0 && totals.totalIncome > 0 
@@ -140,39 +119,10 @@ export default function AnalysisTab() {
 
   return (
     <div className="space-y-6">
-      {/* Financial Health Score */}
-      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">Financial Health Score</h3>
-            <p className="text-sm text-slate-600">Overall budget performance assessment</p>
-          </div>
-          <div className="text-center">
-            <div className={`text-5xl font-bold ${
-              healthScore >= 80 ? 'text-green-600' :
-              healthScore >= 60 ? 'text-yellow-600' :
-              healthScore >= 40 ? 'text-orange-600' :
-              'text-red-600'
-            }`}>
-              {healthScore}
-            </div>
-            <p className="text-sm text-slate-600">out of 100</p>
-          </div>
-        </div>
-        
-        <div className="relative pt-1">
-          <div className="overflow-hidden h-4 text-xs flex rounded-full bg-slate-200">
-            <div
-              style={{ width: `${healthScore}%` }}
-              className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-500 ${
-                healthScore >= 80 ? 'bg-green-500' :
-                healthScore >= 60 ? 'bg-yellow-500' :
-                healthScore >= 40 ? 'bg-orange-500' :
-                'bg-red-500'
-              }`}
-            />
-          </div>
-        </div>
+      {/* NEW: Enhanced Financial Health Score - Replaces basic score */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <FinancialHealthCard totals={totals} buckets={buckets} />
+        <HealthRecommendations totals={totals} buckets={buckets} />
       </div>
 
       {/* Key Metrics Grid */}
@@ -337,7 +287,7 @@ export default function AnalysisTab() {
 
       {/* Insights & Recommendations */}
       <div className="bg-white rounded-lg border border-slate-200 p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">Key Insights & Recommendations</h3>
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Key Insights</h3>
         <div className="space-y-3">
           {insights.length > 0 ? (
             insights.map((insight, index) => {
