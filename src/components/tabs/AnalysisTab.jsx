@@ -1,279 +1,398 @@
-// src/components/tabs/AnalysisTab.jsx
-// Restored Analysis content: category spending chart, optimization suggestions, and health score.
-// Pulls data from the Zustand store (useBudgetState). If store is empty, shows a gentle empty state.
+import { useBudgetState } from '../../utils/state';
+import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Target, Activity, DollarSign, Percent } from 'lucide-react';
 
-import React, { useMemo, useState } from "react";
-import { useBudgetState } from "../../utils/state";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as ReTooltip,
-} from "recharts";
-import {
-  DollarSign,
-  TrendingUp,
-  TrendingDown,
-  Eye,
-  EyeOff,
-  Home,
-  Car,
-  ShoppingBag,
-  Briefcase,
-  CreditCard,
-  MoreHorizontal,
-} from "lucide-react";
+export default function AnalysisTab() {
+  const rows = useBudgetState((state) => state.rows || []);
+  const buckets = useBudgetState((state) => state.buckets || {});
+  const computeTotals = useBudgetState((state) => state.computeTotals);
+  
+  const totals = computeTotals();
 
-function useDerivedFromStore(asOfDate) {
-  const data = useBudgetState((s) => s.data);
+  // Calculate category variance analysis (Budget vs Actual)
+  const categoryVariance = Object.keys(buckets)
+    .filter(key => key !== 'income')
+    .map(categoryKey => {
+      const items = buckets[categoryKey] || [];
+      const budgeted = items.reduce((sum, item) => sum + (item.estBudget || 0), 0);
+      const actual = items.reduce((sum, item) => sum + (item.actualCost || 0), 0);
+      const variance = budgeted - actual;
+      const variancePercent = budgeted > 0 ? ((variance / budgeted) * 100) : 0;
+      const utilization = budgeted > 0 ? ((actual / budgeted) * 100) : 0;
+      
+      const categoryLabels = {
+        housing: 'Housing',
+        transportation: 'Transportation',
+        food: 'Food',
+        personal: 'Personal',
+        homeOffice: 'Home/Office',
+        banking: 'Banking',
+        misc: 'Miscellaneous'
+      };
 
-  const budget = useMemo(() => {
-    if (data && typeof data === "object") return data;
-    return null; // no fallback here, Analysis will show empty state when data is missing
-  }, [data]);
+      return {
+        category: categoryLabels[categoryKey] || categoryKey,
+        budgeted,
+        actual,
+        variance,
+        variancePercent,
+        utilization,
+        status: variance >= 0 ? 'under' : 'over'
+      };
+    })
+    .filter(item => item.budgeted > 0 || item.actual > 0);
 
-  const totals = useMemo(() => {
-    if (!budget) return { totalIncome: 0, totalExpenses: 0, totalAnnualSubs: 0, netIncome: 0 };
-    const totalIncome = (budget.income || []).reduce((sum, i) => sum + (i.estBudget || 0), 0);
-    let totalExpenses = 0;
-    let totalAnnualSubs = 0;
-    Object.keys(budget).forEach((k) => {
-      if (k === "income") return;
-      (budget[k] || []).forEach((item) => {
-        totalExpenses += item.estBudget || 0;
-        if (item.annualSub) totalAnnualSubs += item.annualSub || 0;
-      });
-    });
-    return { totalIncome, totalExpenses, totalAnnualSubs, netIncome: totalIncome - totalExpenses };
-  }, [budget]);
-
-  const colors = {
-    income: "#22c55e",
-    housing: "#ef4444",
-    transportation: "#3b82f6",
-    food: "#f59e0b",
-    personal: "#8b5cf6",
-    homeOffice: "#06b6d4",
-    banking: "#dc2626",
-    misc: "#6b7280",
-  };
-  const getCategoryColor = (k) => colors[k] || "#9ca3af";
-
-  const getCategoryIcon = (k) => {
-    const map = {
-      income: DollarSign,
-      housing: Home,
-      transportation: Car,
-      food: ShoppingBag,
-      personal: ShoppingBag,
-      homeOffice: Briefcase,
-      banking: CreditCard,
-      misc: MoreHorizontal,
-    };
-    return map[k] || MoreHorizontal;
-  };
-
-  const categoryTotals = useMemo(() => {
-    if (!budget) return [];
-    return Object.keys(budget)
-      .map((k) => {
-        const total = (budget[k] || []).reduce((s, i) => s + (i.estBudget || 0), 0);
-        return {
-          key: k,
-          name: k === "homeOffice" ? "Home Office" : k.charAt(0).toUpperCase() + k.slice(1),
-          value: total,
-          color: getCategoryColor(k),
-        };
-      })
-      .filter((x) => x.value > 0);
-  }, [budget]);
-
-  const health = useMemo(() => {
-    const { totalIncome, totalExpenses, netIncome } = totals;
-    const savingsRate = totalIncome > 0 ? Math.max(0, netIncome) / totalIncome : 0;
-    const expenseRatio = totalIncome > 0 ? totalExpenses / totalIncome : 1;
-    const score = Math.max(0, Math.min(100, Math.round(60 * (1 - expenseRatio) + 40 * savingsRate)));
-    return {
-      savingsRate,
-      expenseRatio,
-      score,
-      status: netIncome >= 0 ? "surplus" : "deficit",
-    };
-  }, [totals]);
-
-  const optimizationSuggestions = useMemo(() => {
-    if (!budget) return [];
-    const list = [];
+  // Calculate overall budget health score (0-100)
+  const calculateHealthScore = () => {
+    let score = 100;
+    
+    // Deduct for negative net income
+    if (totals.netIncome < 0) {
+      score -= 30;
+    }
+    
+    // Deduct for categories over budget
+    const overBudgetCategories = categoryVariance.filter(cat => cat.status === 'over').length;
+    score -= (overBudgetCategories * 10);
+    
+    // Deduct if no income
     if (totals.totalIncome === 0) {
-      list.push({
-        type: "critical",
-        title: "Add Income Source",
-        description: "No income recorded. Add your expected income to balance your budget.",
-        savings: totals.totalExpenses,
-        action: `Add income of $${totals.totalExpenses.toFixed(2)} to break even`,
+      score -= 40;
+    }
+    
+    return Math.max(0, Math.min(100, score));
+  };
+
+  const healthScore = calculateHealthScore();
+
+  // Spending velocity (burn rate per day)
+  const daysInMonth = 30;
+  const dailyBurnRate = totals.totalExpenses / daysInMonth;
+  const daysUntilBroke = totals.netIncome > 0 ? Infinity : Math.abs(totals.netIncome / dailyBurnRate);
+
+  // Budget utilization rate
+  const budgetUtilization = totals.totalExpenses > 0 && totals.totalIncome > 0 
+    ? (totals.totalExpenses / totals.totalIncome) * 100 
+    : 0;
+
+  // Top spending categories
+  const topSpenders = [...categoryVariance]
+    .sort((a, b) => b.actual - a.actual)
+    .slice(0, 5);
+
+  // Pie chart data
+  const pieData = categoryVariance
+    .filter(item => item.actual > 0)
+    .map(item => ({
+      name: item.category,
+      value: item.actual
+    }));
+
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+
+  // Generate insights
+  const insights = [];
+  
+  if (totals.netIncome < 0) {
+    insights.push({
+      type: 'critical',
+      icon: AlertTriangle,
+      title: 'Budget Deficit',
+      message: `You're spending $${Math.abs(totals.netIncome).toFixed(2)} more than your income. Immediate action needed.`
+    });
+  }
+
+  if (budgetUtilization > 100) {
+    insights.push({
+      type: 'warning',
+      icon: TrendingDown,
+      title: 'Overspending',
+      message: `Budget utilization at ${budgetUtilization.toFixed(1)}%. You're spending beyond your means.`
+    });
+  } else if (budgetUtilization < 80 && totals.netIncome > 0) {
+    insights.push({
+      type: 'success',
+      icon: CheckCircle,
+      title: 'Under Budget',
+      message: `Great! You're only using ${budgetUtilization.toFixed(1)}% of your income. Consider increasing savings.`
+    });
+  }
+
+  categoryVariance.forEach(cat => {
+    if (cat.status === 'over' && Math.abs(cat.variance) > 50) {
+      insights.push({
+        type: 'warning',
+        icon: AlertTriangle,
+        title: `${cat.category} Over Budget`,
+        message: `$${Math.abs(cat.variance).toFixed(2)} over budget (${Math.abs(cat.variancePercent).toFixed(1)}%). Review spending in this category.`
       });
     }
-    const homeOfficeTotal = (budget.homeOffice || []).reduce((s, i) => s + (i.estBudget || 0), 0);
-    if (homeOfficeTotal > 80) {
-      list.push({
-        type: "warning",
-        title: "High Subscription Costs",
-        description: "Consider consolidating AI subscriptions or using free tiers.",
-        savings: 50,
-        action: "Cancel a trial and downgrade one AI service",
-      });
-    }
-    const creditPayment = (budget.banking || []).find((i) => String(i.category).includes("Credit One"));
-    if (creditPayment && creditPayment.estBudget > 0) {
-      list.push({
-        type: "high",
-        title: "Credit Card Payment Due",
-        description: "Minimum payment due soon. Avoid late fees and interest.",
-        savings: 0,
-        action: `Pay minimum $${Number(creditPayment.estBudget).toFixed(2)} immediately`,
-      });
-    }
-    return list;
-  }, [budget, totals]);
+  });
 
-  return { budget, totals, categoryTotals, optimizationSuggestions, health, getCategoryIcon };
-}
-
-export default function AnalysisTab({ asOfDate: asOfDateProp }) {
-  const [showOptimizations, setShowOptimizations] = useState(false);
-  const asOfDate = asOfDateProp || new Date().toISOString().slice(0, 10);
-
-  const { budget, totals, categoryTotals, optimizationSuggestions, health } = useDerivedFromStore(asOfDate);
-
-  if (!budget) {
-    return (
-      <div className="p-6 rounded-lg border bg-white">
-        <h3 className="text-lg font-semibold mb-2">Analysis</h3>
-        <p className="text-sm text-gray-600">
-          No budget data is loaded yet. Load data from the toolbar, or add items in the Editor tab.
-        </p>
-      </div>
-    );
+  if (totals.totalIncome === 0) {
+    insights.push({
+      type: 'critical',
+      icon: DollarSign,
+      title: 'No Income Recorded',
+      message: 'Add your income sources to get accurate budget analysis.'
+    });
   }
 
   return (
     <div className="space-y-6">
-      <div className="bg-white p-6 rounded-lg border shadow-sm">
-        <h3 className="text-lg font-semibold mb-4">Category Spending Analysis</h3>
-        <ResponsiveContainer width="100%" height={400}>
-          <BarChart data={categoryTotals}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-            <YAxis />
-            <ReTooltip formatter={(value) => `$${Number(value).toFixed(2)}`} />
-            <Bar dataKey="value" fill="#3b82f6" />
-          </BarChart>
-        </ResponsiveContainer>
+      {/* Financial Health Score */}
+      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">Financial Health Score</h3>
+            <p className="text-sm text-slate-600">Overall budget performance assessment</p>
+          </div>
+          <div className="text-center">
+            <div className={`text-5xl font-bold ${
+              healthScore >= 80 ? 'text-green-600' :
+              healthScore >= 60 ? 'text-yellow-600' :
+              healthScore >= 40 ? 'text-orange-600' :
+              'text-red-600'
+            }`}>
+              {healthScore}
+            </div>
+            <p className="text-sm text-slate-600">out of 100</p>
+          </div>
+        </div>
+        
+        <div className="relative pt-1">
+          <div className="overflow-hidden h-4 text-xs flex rounded-full bg-slate-200">
+            <div
+              style={{ width: `${healthScore}%` }}
+              className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-500 ${
+                healthScore >= 80 ? 'bg-green-500' :
+                healthScore >= 60 ? 'bg-yellow-500' :
+                healthScore >= 40 ? 'bg-orange-500' :
+                'bg-red-500'
+              }`}
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="bg-white p-6 rounded-lg border shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Optimization Suggestions</h3>
-          <button
-            onClick={() => setShowOptimizations((v) => !v)}
-            className="flex items-center px-3 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors"
-          >
-            {showOptimizations ? <EyeOff className="h-4 w-4 mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
-            {showOptimizations ? "Hide" : "Show"} Details
-          </button>
+      {/* Key Metrics Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="flex items-center gap-2 text-slate-600 mb-2">
+            <Percent className="h-4 w-4" />
+            <span className="text-sm font-medium">Budget Utilization</span>
+          </div>
+          <p className={`text-2xl font-bold ${
+            budgetUtilization > 100 ? 'text-red-600' :
+            budgetUtilization > 80 ? 'text-orange-600' :
+            'text-green-600'
+          }`}>
+            {budgetUtilization.toFixed(1)}%
+          </p>
         </div>
 
-        <div className="space-y-4">
-          {optimizationSuggestions.map((s, i) => (
-            <div
-              key={`${s.title}-${i}`}
-              className={`p-4 rounded-lg border-l-4 ${
-                s.type === "critical"
-                  ? "bg-red-50 border-red-500"
-                  : s.type === "high"
-                  ? "bg-orange-50 border-orange-500"
-                  : s.type === "warning"
-                  ? "bg-yellow-50 border-yellow-500"
-                  : "bg-blue-50 border-blue-500"
-              }`}
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <h4 className="font-semibold text-gray-900">{s.title}</h4>
-                  <p className="text-sm text-gray-600 mt-1">{s.description}</p>
-                  {showOptimizations && (
-                    <div className="mt-2 p-2 bg-white rounded border">
-                      <p className="text-sm font-medium text-green-700">Action: {s.action}</p>
-                      {s.savings > 0 && (
-                        <p className="text-xs text-green-600">Potential monthly savings: ${Number(s.savings).toFixed(2)}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="ml-4 text-right">
-                  <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${
-                      s.type === "critical"
-                        ? "bg-red-100 text-red-800"
-                        : s.type === "high"
-                        ? "bg-orange-100 text-orange-800"
-                        : s.type === "warning"
-                        ? "bg-yellow-100 text-yellow-800"
-                        : "bg-blue-100 text-blue-800"
-                    }`}
-                  >
-                    {s.type.toUpperCase()}
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="flex items-center gap-2 text-slate-600 mb-2">
+            <Activity className="h-4 w-4" />
+            <span className="text-sm font-medium">Daily Burn Rate</span>
+          </div>
+          <p className="text-2xl font-bold text-slate-900">${dailyBurnRate.toFixed(2)}</p>
+          <p className="text-xs text-slate-500">per day</p>
+        </div>
 
-          {optimizationSuggestions.length === 0 && (
-            <div className="p-4 rounded-lg border bg-gray-50 text-sm text-gray-600">
-              No suggestions at the moment. Your setup looks lean.
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="flex items-center gap-2 text-slate-600 mb-2">
+            <Target className="h-4 w-4" />
+            <span className="text-sm font-medium">Categories Tracked</span>
+          </div>
+          <p className="text-2xl font-bold text-slate-900">{categoryVariance.length}</p>
+        </div>
+
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="flex items-center gap-2 text-slate-600 mb-2">
+            <DollarSign className="h-4 w-4" />
+            <span className="text-sm font-medium">Net Position</span>
+          </div>
+          <p className={`text-2xl font-bold ${totals.netIncome >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            ${totals.netIncome.toFixed(2)}
+          </p>
+        </div>
+      </div>
+
+      {/* Budget vs Actual Variance Analysis */}
+      <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Budget vs Actual Variance Analysis</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600 uppercase">Category</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">Budgeted</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">Actual</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">Variance</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">Variance %</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-slate-600 uppercase">Status</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-slate-600 uppercase">Utilization</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {categoryVariance.map((item, index) => (
+                <tr key={index} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.category}</td>
+                  <td className="px-4 py-3 text-sm text-right text-slate-700">${item.budgeted.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-sm text-right text-slate-700">${item.actual.toFixed(2)}</td>
+                  <td className={`px-4 py-3 text-sm text-right font-semibold ${
+                    item.variance >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {item.variance >= 0 ? '+' : ''}{item.variance.toFixed(2)}
+                  </td>
+                  <td className={`px-4 py-3 text-sm text-right font-semibold ${
+                    item.variance >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {item.variancePercent >= 0 ? '+' : ''}{item.variancePercent.toFixed(1)}%
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      item.status === 'under' 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-red-100 text-red-700'
+                    }`}>
+                      {item.status === 'under' ? 'Under Budget' : 'Over Budget'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right">
+                    <span className={`font-medium ${
+                      item.utilization > 100 ? 'text-red-600' :
+                      item.utilization > 80 ? 'text-orange-600' :
+                      'text-green-600'
+                    }`}>
+                      {item.utilization.toFixed(1)}%
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-slate-50 border-t-2 border-slate-300">
+              <tr>
+                <td className="px-4 py-3 text-sm font-bold text-slate-900">TOTAL</td>
+                <td className="px-4 py-3 text-sm text-right font-bold text-slate-900">
+                  ${categoryVariance.reduce((sum, item) => sum + item.budgeted, 0).toFixed(2)}
+                </td>
+                <td className="px-4 py-3 text-sm text-right font-bold text-slate-900">
+                  ${totals.totalExpenses.toFixed(2)}
+                </td>
+                <td className={`px-4 py-3 text-sm text-right font-bold ${
+                  totals.variance >= 0 ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {totals.variance >= 0 ? '+' : ''}{totals.variance?.toFixed(2) || '0.00'}
+                </td>
+                <td colSpan="3"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Top Spending Categories */}
+        <div className="bg-white rounded-lg border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Top Spending Categories</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={topSpenders}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="category" angle={-45} textAnchor="end" height={100} />
+              <YAxis />
+              <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+              <Bar dataKey="actual" fill="#3b82f6" name="Actual Spending" />
+              <Bar dataKey="budgeted" fill="#10b981" name="Budgeted" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Expense Distribution */}
+        <div className="bg-white rounded-lg border border-slate-200 p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Expense Distribution</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                outerRadius={100}
+                fill="#8884d8"
+                dataKey="value"
+              >
+                {pieData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Insights & Recommendations */}
+      <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Key Insights & Recommendations</h3>
+        <div className="space-y-3">
+          {insights.length > 0 ? (
+            insights.map((insight, index) => {
+              const Icon = insight.icon;
+              const colorClasses = {
+                critical: 'bg-red-50 border-red-200 text-red-900',
+                warning: 'bg-amber-50 border-amber-200 text-amber-900',
+                success: 'bg-green-50 border-green-200 text-green-900',
+                info: 'bg-blue-50 border-blue-200 text-blue-900'
+              };
+              
+              return (
+                <div key={index} className={`flex items-start gap-3 p-4 rounded-lg border ${colorClasses[insight.type]}`}>
+                  <Icon className="h-5 w-5 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h4 className="font-semibold mb-1">{insight.title}</h4>
+                    <p className="text-sm">{insight.message}</p>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-center py-8 text-slate-500">
+              <CheckCircle className="h-12 w-12 mx-auto mb-2 text-green-500" />
+              <p className="font-medium">Everything looks good!</p>
+              <p className="text-sm">Your budget is on track. Keep up the good work!</p>
             </div>
           )}
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-lg border shadow-sm">
-        <h3 className="text-lg font-semibold mb-4">Financial Health Score</h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <span>Overall Score</span>
-            <span
-              className={`font-bold text-2xl ${
-                health.score >= 70 ? "text-green-600" : health.score >= 40 ? "text-yellow-600" : "text-red-600"
-              }`}
-            >
-              {health.score}/100
-            </span>
+      {/* Budget Performance Summary */}
+      <div className="bg-white rounded-lg border border-slate-200 p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">Budget Performance Summary</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <p className="text-sm text-slate-600 mb-1">Categories Under Budget</p>
+            <p className="text-3xl font-bold text-green-600">
+              {categoryVariance.filter(cat => cat.status === 'under').length}
+            </p>
           </div>
-          <div className="flex items-center justify-between">
-            <span>Income vs Expenses</span>
-            <span className={totals.netIncome >= 0 ? "text-green-600" : "text-red-600"}>
-              {totals.netIncome >= 0 ? "✓ Positive" : "✗ Negative"}
-            </span>
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <p className="text-sm text-slate-600 mb-1">Categories Over Budget</p>
+            <p className="text-3xl font-bold text-red-600">
+              {categoryVariance.filter(cat => cat.status === 'over').length}
+            </p>
           </div>
-          <div className="flex items-center justify-between">
-            <span>Savings Rate</span>
-            <span
-              className={`font-medium ${
-                health.savingsRate >= 0.2 ? "text-green-600" : health.savingsRate >= 0.1 ? "text-yellow-600" : "text-red-600"
-              }`}
-            >
-              {(health.savingsRate * 100).toFixed(1)}%
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span>Budget Status</span>
-            <span className={health.status === "surplus" ? "text-green-600" : "text-red-600"}>
-              {health.status === "surplus" ? "✓ Surplus" : "✗ Deficit"}
-            </span>
+          <div className="text-center p-4 bg-slate-50 rounded-lg">
+            <p className="text-sm text-slate-600 mb-1">Overall Variance</p>
+            <p className={`text-3xl font-bold ${totals.variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              ${Math.abs(totals.variance || 0).toFixed(2)}
+            </p>
+            <p className="text-xs text-slate-500">
+              {totals.variance >= 0 ? 'Under Budget' : 'Over Budget'}
+            </p>
           </div>
         </div>
       </div>

@@ -1,221 +1,239 @@
-// src/utils/state.js
-// State store with hydration guard, reload control, restore validation,
-// and a fallback SEED so the UI works "out of the box" if no data exists.
-//
-// Exports: useBudgetState, hydrateFromDB, subscribe
+import { create } from 'zustand';
 
-import { create } from "zustand";
-
-/* ----------------------------- Seeded dataset ----------------------------- */
-const SEED_BUDGET = {
+// ✅ SEEDED NON-ZERO DATA for immediate rendering
+const initialBuckets = {
   income: [
-    { category: "Income", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
+    { id: 'inc-1', category: 'Salary', estBudget: 2000, actualCost: 2000, dueDate: '2025-09-01', status: 'paid' },
+    { id: 'inc-2', category: 'Freelance', estBudget: 200, actualCost: 200, dueDate: '2025-09-15', status: 'paid' }
   ],
   housing: [
-    { category: "Rent", estBudget: 0, actualSpent: 0, dueDate: "2025-09-01", bankSource: "Upcoming" },
-    { category: "Spectrum Internet", estBudget: 132.25, actualSpent: 0, dueDate: "2025-09-09", bankSource: "Upcoming" },
-    { category: "Spectrum Mobile", estBudget: 325.40, actualSpent: 0, dueDate: "2025-09-04", bankSource: "Upcoming" },
+    { id: 'hou-1', category: 'Rent/Mortgage', estBudget: 1200, actualCost: 1200, dueDate: '2025-09-01', status: 'paid' },
+    { id: 'hou-2', category: 'Utilities', estBudget: 150, actualCost: 148.50, dueDate: '2025-09-05', status: 'paid' }
   ],
   transportation: [
-    { category: "Gas/Fuel", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Car Insurance", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Maintenance", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Uber One", estBudget: 9.99, actualSpent: 0, dueDate: "2025-09-14", bankSource: "Upcoming" },
+    { id: 'tra-1', category: 'Gas', estBudget: 120, actualCost: 115.75, dueDate: '2025-09-10', status: 'paid' },
+    { id: 'tra-2', category: 'Insurance', estBudget: 100, actualCost: 100, dueDate: '2025-09-01', status: 'paid' }
   ],
   food: [
-    { category: "Groceries", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Restaurants/Dining Out", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Street Food", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Instacart", estBudget: 0, actualSpent: 0, dueDate: "2025-09-23", bankSource: "Upcoming", annualSub: 79.00 },
+    { id: 'foo-1', category: 'Groceries', estBudget: 400, actualCost: 387.23, dueDate: '2025-09-15', status: 'paid' },
+    { id: 'foo-2', category: 'Dining Out', estBudget: 150, actualCost: 162.18, dueDate: '2025-09-20', status: 'paid' }
   ],
   personal: [
-    { category: "Shopping/Clothes", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Netflix", estBudget: 24.99, actualSpent: 0, dueDate: "2025-09-05", bankSource: "Upcoming" },
-    { category: "Paramount Plus", estBudget: 12.99, actualSpent: 0, dueDate: "2025-09-10", bankSource: "Upcoming" },
-    { category: "Amazon Prime", estBudget: 7.67, actualSpent: 0, dueDate: "2025-09-30", bankSource: "Upcoming" },
-    { category: "CVS ExtraCare", estBudget: 5.48, actualSpent: 0, dueDate: "2025-09-16", bankSource: "Upcoming" },
+    { id: 'per-1', category: 'Healthcare', estBudget: 200, actualCost: 185.50, dueDate: '2025-09-08', status: 'paid' },
+    { id: 'per-2', category: 'Entertainment', estBudget: 100, actualCost: 95.30, dueDate: '2025-09-12', status: 'paid' }
   ],
   homeOffice: [
-    { category: "LinkedIn Premium", estBudget: 29.99, actualSpent: 0, dueDate: "2025-09-19", bankSource: "Upcoming" },
-    { category: "Google AI Pro", estBudget: 19.99, actualSpent: 0, dueDate: "2025-09-20", bankSource: "Upcoming" },
-    { category: "ChatGPT Plus", estBudget: 19.99, actualSpent: 0, dueDate: "2025-08-27", bankSource: "Upcoming" },
-    { category: "SuperGrok (trial)", estBudget: 30.00, actualSpent: 0, dueDate: "2025-09-14", bankSource: "Upcoming" },
+    { id: 'hom-1', category: 'Internet', estBudget: 80, actualCost: 79.99, dueDate: '2025-09-01', status: 'paid' },
+    { id: 'hom-2', category: 'Supplies', estBudget: 50, actualCost: 43.20, dueDate: '2025-09-15', status: 'paid' }
   ],
   banking: [
-    { category: "Wells Fargo Service Fee", estBudget: 25.00, actualSpent: 0, dueDate: "2025-09-01", bankSource: "Upcoming" },
-    { category: "Credit One Bank", estBudget: 43.00, actualSpent: 0, dueDate: "2025-08-22", bankSource: "Upcoming" },
+    { id: 'ban-1', category: 'Bank Fees', estBudget: 25, actualCost: 25, dueDate: '2025-09-01', status: 'paid' },
+    { id: 'ban-2', category: 'Credit Card Payment', estBudget: 300, actualCost: 300, dueDate: '2025-09-05', status: 'paid' }
   ],
   misc: [
-    { category: "Gifts/Donations", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-    { category: "Entertainment", estBudget: 0, actualSpent: 0, dueDate: "", bankSource: "Upcoming" },
-  ],
+    { id: 'mis-1', category: 'Subscriptions', estBudget: 45, actualCost: 44.29, dueDate: '2025-09-01', status: 'paid' },
+    { id: 'mis-2', category: 'Other', estBudget: 30, actualCost: 0, dueDate: '2025-09-30', status: 'pending' }
+  ]
 };
 
-/* --------------------------- helpers: validation --------------------------- */
-function validateRestoreData(candidate) {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return { ok: false, message: "Restore file is not a valid JSON object." };
-  }
-  const keys = Object.keys(candidate || {});
-  if (keys.length === 0) {
-    return { ok: false, message: "Restore file is empty." };
-  }
-  // Loosely check for plausible shapes
-  const plausible =
-    candidate.income || candidate.housing || candidate.data || candidate.sections || candidate.categories || candidate.items || candidate.rows;
-  if (!plausible) {
-    return { ok: false, message: "Restore JSON missing expected budget fields." };
-  }
-  return { ok: true };
-}
-
-/* ---------------------------- helpers: path build -------------------------- */
-function buildRestorePath() {
-  const base = (import.meta.env && import.meta.env.BASE_URL) || "/";
-  return `${base}restore/budget-data.json`;
-}
-
-/* ---------------------------- restore file loader -------------------------- */
-async function fetchRestoreJson() {
-  const restorePath = buildRestorePath();
-  try {
-    const res = await fetch(restorePath, {
-      cache: "no-store",
-      headers: { Accept: "application/json" }, // avoid SPA fallback rewrites
-    });
-
-    if (!res.ok) {
-      return { ok: false, data: null, message: `Restore not found at ${restorePath} (HTTP ${res.status}).` };
-    }
-
-    const ctype = (res.headers.get("content-type") || "").toLowerCase();
-    if (!ctype.includes("application/json")) {
-      return { ok: false, data: null, message: `Expected JSON at ${restorePath}, got content-type "${ctype}".` };
-    }
-
-    const data = await res.json();
-    const verdict = validateRestoreData(data);
-    if (!verdict.ok) return { ok: false, data: null, message: verdict.message };
-    return { ok: true, data, message: null };
-  } catch {
-    return { ok: false, data: null, message: "Failed to read restore file. Check JSON validity and path." };
-  }
-}
-
-/* ---------------------------------- store --------------------------------- */
 export const useBudgetState = create((set, get) => ({
-  data: null,
+  // ✅ CANONICAL STATE: Bucket-based structure
+  buckets: initialBuckets,
+
+  // ✅ SAFE META with defaults
   meta: {
-    hydrated: false,
+    hydrated: true,
     loading: false,
     error: null,
-    restore: { used: false, checked: false, message: null },
-    seeded: false, // <- true when we use SEED_BUDGET as fallback
+    asOfDate: '2025-09-01'
   },
 
-  _setHydrationState(next) {
-    set((s) => ({ meta: { ...s.meta, ...next } }));
+  // ✅ DERIVED FLAT ARRAY for compatibility
+  get rows() {
+    const state = get();
+    // 🛡️ GUARD: Handle undefined/null buckets
+    if (!state.buckets || typeof state.buckets !== 'object') {
+      return [];
+    }
+    return Object.entries(state.buckets).flatMap(([bucket, items]) =>
+      (items || []).map(item => ({ ...item, bucket }))
+    );
   },
 
-  async reloadData() {
-    const { _setHydrationState } = get();
-    _setHydrationState({
-      loading: true,
-      hydrated: false,
-      error: null,
-      restore: { used: false, checked: false, message: null },
-      seeded: false,
+  // ✅ Helper: Add Row
+  addRow: (bucket, rowData) => {
+    set((state) => {
+      const newRow = {
+        id: `${bucket.slice(0, 3)}-${Date.now()}`,
+        category: '',
+        estBudget: 0,
+        actualCost: 0,
+        dueDate: '',
+        status: 'pending',
+        ...rowData
+      };
+      return {
+        buckets: {
+          ...state.buckets,
+          [bucket]: [...state.buckets[bucket], newRow]
+        }
+      };
     });
-    try {
-      await hydrateFromDB();
-    } finally {
-      get()._setHydrationState({ loading: false });
+  },
+
+  // ✅ Helper: Update Row
+  updateRow: (bucket, id, updates) => {
+    set((state) => ({
+      buckets: {
+        ...state.buckets,
+        [bucket]: state.buckets[bucket].map(row =>
+          row.id === id ? { ...row, ...updates } : row
+        )
+      }
+    }));
+  },
+
+  // ✅ Helper: Remove Row
+  removeRow: (bucket, id) => {
+    set((state) => ({
+      buckets: {
+        ...state.buckets,
+        [bucket]: state.buckets[bucket].filter(row => row.id !== id)
+      }
+    }));
+  },
+
+  // ✅ Helper: Move Row
+  moveRow: (bucket, fromIndex, toIndex) => {
+    set((state) => {
+      const items = [...state.buckets[bucket]];
+      const [removed] = items.splice(fromIndex, 1);
+      items.splice(toIndex, 0, removed);
+      return {
+        buckets: {
+          ...state.buckets,
+          [bucket]: items
+        }
+      };
+    });
+  },
+
+  // ✅ Helper: Archive Current
+  archiveCurrent: (label = 'Manual Archive') => {
+    const state = get();
+    const archive = {
+      timestamp: new Date().toISOString(),
+      label,
+      data: { buckets: state.buckets, meta: state.meta }
+    };
+    localStorage.setItem('budget_archive', JSON.stringify(archive));
+    console.log('✅ Archive saved:', label);
+  },
+
+  // ✅ Helper: Restore Archive
+  restoreArchive: () => {
+    const archived = localStorage.getItem('budget_archive');
+    if (archived) {
+      const { data } = JSON.parse(archived);
+      set({ buckets: data.buckets, meta: data.meta });
+      console.log('✅ Archive restored');
     }
   },
-}));
 
-// For components using direct subscription
-export const subscribe = useBudgetState.subscribe;
+  // ✅ Helper: Import from JSON
+  importFromJson: (jsonData) => {
+    set({
+      buckets: jsonData.buckets,
+      meta: { ...get().meta, ...jsonData.meta }
+    });
+  },
 
-/* ----------------------------- hydration entry ---------------------------- */
-export async function hydrateFromDB() {
-  const { _setHydrationState } = useBudgetState.getState();
-  _setHydrationState({ loading: true, error: null });
+  // ✅ Helper: Export to JSON
+  exportToJson: () => {
+    const state = get();
+    return {
+      buckets: state.buckets,
+      meta: state.meta
+    };
+  },
 
-  try {
-    // 1) Your real loader (replace stub)
-    const primaryOk = await existingHydrateIntoStore();
-    if (primaryOk) {
-      _setHydrationState({ hydrated: true, loading: false, error: null, seeded: false });
-      return;
+  // ✅ Helper: Compute Totals
+  computeTotals: () => {
+    const state = get();
+    
+    // 🛡️ GUARD: Handle undefined/null buckets
+    if (!state.buckets || typeof state.buckets !== 'object') {
+      return {
+        totalIncome: 0,
+        totalExpenses: 0,
+        netIncome: 0,
+        totalBudgeted: 0,
+        variance: 0
+      };
     }
 
-    // 2) Optional restore
-    const restore = await fetchRestoreJson();
-    if (restore.ok) {
-      useBudgetState.setState((s) => ({
-        data: normalizeBudgetShape(restore.data),
-        meta: {
-          ...s.meta,
-          hydrated: true,
-          loading: false,
-          error: null,
-          restore: { used: true, checked: true, message: null },
-          seeded: false,
-        },
-      }));
-      return;
-    }
+    const allRows = Object.values(state.buckets).flat();
+    
+    const income = state.buckets.income || [];
+    const expenses = allRows.filter(row => !income.includes(row));
 
-    // 3) Fallback seed (so the UI works even with no data)
-    useBudgetState.setState((s) => ({
-      data: SEED_BUDGET,
-      meta: {
-        ...s.meta,
-        hydrated: true,
-        loading: false,
-        error: null, // no error, we intentionally seed
-        restore: { used: false, checked: true, message: restore.message || null },
-        seeded: true,
-      },
-    }));
-  } catch {
-    // If anything truly blows up, at least show the seed so the app is usable
-    useBudgetState.setState((s) => ({
-      data: SEED_BUDGET,
-      meta: {
-        ...s.meta,
-        hydrated: true,
-        loading: false,
-        error: null,
-        restore: { used: false, checked: true, message: "Primary hydration failed; using seed." },
-        seeded: true,
-    }}));
-  }
-}
+    const totalIncome = income.reduce((sum, row) => sum + (row.actualCost || 0), 0);
+    const totalExpenses = expenses.reduce((sum, row) => sum + (row.actualCost || 0), 0);
+    const netIncome = totalIncome - totalExpenses;
 
-/* ----------------------------- existing loader ---------------------------- */
-async function existingHydrateIntoStore() {
-  // TODO: replace with your real IndexedDB/remote load and return true on success.
-  // e.g. useBudgetState.setState({ data: loadedData }); return true;
-  return false;
-}
+    const totalBudgeted = expenses.reduce((sum, row) => sum + (row.estBudget || 0), 0);
+    const variance = totalBudgeted - totalExpenses;
 
-/* ----------------------------- shape normalizer --------------------------- */
-function normalizeBudgetShape(raw) {
-  // If restore.json uses a different envelope (e.g., {data: {...}}), unwrap.
-  if (raw && raw.data && typeof raw.data === "object") return raw.data;
-  return raw;
-}
+    return {
+      totalIncome,
+      totalExpenses,
+      netIncome,
+      totalBudgeted,
+      variance
+    };
+  },
 
-/* ------------------------------ auto-hydration ---------------------------- */
-(async () => {
-  const { meta } = useBudgetState.getState();
-  if (!meta.hydrated && !meta.loading) {
+  // ✅ Helper: Reload Data (WITH GUARD)
+  reloadData: async () => {
     try {
-      await hydrateFromDB();
-    } finally {
-      useBudgetState.getState()._setHydrationState({ loading: false });
+      set((state) => ({
+        meta: { ...state.meta, loading: true, error: null }
+      }));
+
+      const response = await fetch('/budget-dashboard-fs/restore/budget-data.json');
+      if (!response.ok) throw new Error('Failed to fetch restore data');
+      
+      const data = await response.json();
+
+      // 🛡️ GUARD: Only apply if data has non-zero values
+      const hasNonZeroData = Object.values(data.buckets || {}).some(bucket =>
+        Array.isArray(bucket) && bucket.some(row => 
+          (row.estBudget > 0 || row.actualCost > 0)
+        )
+      );
+
+      if (hasNonZeroData) {
+        set({
+          buckets: data.buckets,
+          meta: { ...get().meta, ...data.meta, loading: false }
+        });
+        console.log('✅ Data reloaded from restore file');
+      } else {
+        set((state) => ({
+          meta: { ...state.meta, loading: false }
+        }));
+        console.warn('⚠️ Restore file contains only zeros - keeping current store data');
+      }
+    } catch (error) {
+      set((state) => ({
+        meta: { ...state.meta, loading: false, error: error.message }
+      }));
+      console.error('❌ Reload failed:', error);
     }
+  },
+
+  // ✅ Helper: Hydrate from DB (placeholder for future backend)
+  hydrateFromDB: async () => {
+    console.log('Hydrate from DB - not yet implemented');
   }
-})();
+}));

@@ -1,121 +1,204 @@
-// src/components/BudgetDashboard.jsx
-// Tab router with Dashboard, Analysis, Calculator, and Editor.
-// CLS-safe tabs; Analysis content is provided by tabs/AnalysisTab.jsx.
-// Global scrollbar space should be reserved in index.css.
-
-import React, { useState } from "react";
-import LoadingGate from "./common/LoadingGate";
-import ModernBudgetPanel from "./modern/ModernBudgetPanel";
-import EditorTab from "./tabs/EditorTab";
-import AnalysisTab from "./tabs/AnalysisTab";
-import { useBudgetState } from "../utils/state";
-
-import { DollarSign, TrendingUp, Calculator as CalcIcon, Plus } from "lucide-react";
-
-function TabButton({ id, label, active, onClick }) {
-  const base =
-    "inline-flex items-center justify-center rounded-2xl h-9 min-w-[92px] px-4 text-sm font-medium leading-[1.125rem] tracking-normal border border-solid box-border whitespace-nowrap select-none outline-none ring-0 focus:outline-none focus:ring-0 transition-colors";
-  const activeCls = "bg-gray-900 text-white border-gray-900";
-  const inactiveCls = "bg-white text-gray-800 border-gray-300 hover:bg-gray-50";
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      aria-controls={`panel-${id}`}
-      onClick={onClick}
-      className={`${base} ${active ? activeCls : inactiveCls}`}
-    >
-      {label}
-    </button>
-  );
-}
+import { useState } from 'react';
+import { useBudgetState } from '../utils/state';
+import LoadingGate from './common/LoadingGate';
+import ModernBudgetPanel from './modern/ModernBudgetPanel';
+import EditorTab from './tabs/EditorTab';
+import AnalysisTab from './tabs/AnalysisTab';
+import CalculatorTab from './tabs/CalculatorTab';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, RotateCcw, Download, Upload } from 'lucide-react';
 
 export default function BudgetDashboard() {
-  const [tab, setTab] = useState("modern"); // modern | analysis | calculator | editor
-  const [asOfDate, setAsOfDate] = useState("2025-09-01");
+  const [activeTab, setActiveTab] = useState('dashboard');
 
-  const reloadData = useBudgetState((s) => s.reloadData);
-  const loading = useBudgetState((s) => s.meta.loading);
-  const hydrated = useBudgetState((s) => s.meta.hydrated);
+  // Read from computeTotals()
+  const { totalIncome, totalExpenses, netIncome } = useBudgetState((state) => {
+    const totals = state.computeTotals();
+    return {
+      totalIncome: totals.totalIncome || 0,
+      totalExpenses: totals.totalExpenses || 0,
+      netIncome: totals.netIncome || 0
+    };
+  });
+
+  // Get store methods for toolbar
+  const reloadData = useBudgetState((state) => state.reloadData);
+  const exportToJson = useBudgetState((state) => state.exportToJson);
+  const importFromJson = useBudgetState((state) => state.importFromJson);
+  const asOfDate = useBudgetState((state) => state.meta?.asOfDate || 'N/A');
 
   const tabs = [
-    { id: "modern", label: "Dashboard", icon: DollarSign },
-    { id: "analysis", label: "Analysis", icon: TrendingUp },
-    { id: "calculator", label: "Calculator", icon: CalcIcon },
-    { id: "editor", label: "Editor", icon: Plus },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'analysis', label: 'Analysis' },
+    { id: 'calculator', label: 'Calculator' },
+    { id: 'editor', label: 'Editor' }
   ];
 
+  const handleReload = async () => {
+    if (confirm('Reload data from restore file? This may overwrite current changes.')) {
+      await reloadData();
+      alert('Data reloaded');
+    }
+  };
+
+  const handleExport = () => {
+    const data = exportToJson();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `budget-export-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    alert('Export complete');
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        importFromJson(data);
+        alert('Import successful');
+      } catch (err) {
+        alert('Import failed: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
-    <div className="mx-auto max-w-7xl p-4">
-      {/* Toolbar */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div role="tablist" aria-label="Budget tabs" className="flex items-center gap-2">
-          {tabs.map((t) => (
-            <TabButton key={t.id} id={t.id} label={t.label} active={tab === t.id} onClick={() => setTab(t.id)} />
-          ))}
-        </div>
+    <LoadingGate>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+        {/* Sticky Combined Toolbar */}
+        <div className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            {/* Title Row */}
+            <div className="py-4 flex items-center justify-between border-b border-slate-100">
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900">Budget Dashboard</h1>
+                <p className="text-sm text-slate-600 mt-1">Period: {asOfDate}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                {/* Date Display */}
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-lg">
+                  <Calendar className="h-4 w-4 text-slate-600" />
+                  <span className="text-sm font-medium text-slate-700">{asOfDate}</span>
+                </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium">As of</label>
-            <input
-              type="date"
-              value={asOfDate}
-              onChange={(e) => setAsOfDate(e.target.value)}
-              className="p-2 border rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+                {/* Reload Button */}
+                <button
+                  onClick={handleReload}
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  <span className="text-sm font-medium">Reload</span>
+                </button>
+
+                {/* Export Button */}
+                <button
+                  onClick={handleExport}
+                  className="flex items-center gap-2 px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                >
+                  <Download className="h-4 w-4" />
+                  <span className="text-sm font-medium">Export</span>
+                </button>
+
+                {/* Import Button */}
+                <label className="flex items-center gap-2 px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors cursor-pointer">
+                  <Upload className="h-4 w-4" />
+                  <span className="text-sm font-medium">Import</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleImport}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Tab Navigation */}
+            <nav className="flex -mb-px">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`
+                    py-4 px-6 text-sm font-medium border-b-2 transition-colors
+                    ${activeTab === tab.id
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-slate-600 hover:text-slate-800 hover:border-slate-300'
+                    }
+                  `}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
           </div>
-
-          <button
-            type="button"
-            onClick={reloadData}
-            disabled={loading}
-            className={`rounded-2xl border px-4 py-2 text-sm font-medium ${
-              loading
-                ? "cursor-not-allowed border-gray-300 bg-gray-100 text-gray-400"
-                : "border-gray-300 bg-white text-gray-800 hover:bg-gray-50"
-            }`}
-            title="Reload budget data from DB or restore file"
-          >
-            {loading ? "Reloading…" : hydrated ? "Reload data" : "Load data"}
-          </button>
         </div>
-      </div>
 
-      {/* Panels */}
-      <LoadingGate>
-        <div id="panels" className="rounded-xl">
-          {/* Dashboard */}
-<section id="panel-modern" role="tabpanel" hidden={tab !== "modern"} aria-labelledby="modern">
-  {tab === "modern" ? <ModernBudgetPanel asOfDate={asOfDate} /> : null}
-</section>
-
-          {/* Analysis */}
-          <section id="panel-analysis" role="tabpanel" hidden={tab !== "analysis"} aria-labelledby="analysis">
-            {tab === "analysis" ? <AnalysisTab asOfDate={asOfDate} /> : null}
-          </section>
-
-          {/* Calculator */}
-          <section id="panel-calculator" role="tabpanel" hidden={tab !== "calculator"} aria-labelledby="calculator">
-            {tab === "calculator" ? (
-              <div className="space-y-6">
-                <div className="bg-white p-6 rounded-lg border shadow-sm">
-                  <h3 className="text-lg font-semibold mb-4">Income Calculator</h3>
-                  <p className="text-sm text-gray-600">
-                    Use the Analysis tab for detailed charts and suggestions. Calculator features coming soon.
+        {/* KPI Cards */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {/* Total Income Card */}
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Total Income</p>
+                  <p className="text-2xl font-bold text-green-600 mt-2">
+                    ${totalIncome.toFixed(2)}
                   </p>
                 </div>
+                <div className="h-12 w-12 bg-green-100 rounded-full flex items-center justify-center">
+                  <TrendingUp className="h-6 w-6 text-green-600" />
+                </div>
               </div>
-            ) : null}
-          </section>
+            </div>
 
-          {/* Editor */}
-          <section id="panel-editor" role="tabpanel" hidden={tab !== "editor"} aria-labelledby="editor">
-            {tab === "editor" ? <EditorTab /> : null}
-          </section>
+            {/* Total Expenses Card */}
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Total Expenses</p>
+                  <p className="text-2xl font-bold text-red-600 mt-2">
+                    ${totalExpenses.toFixed(2)}
+                  </p>
+                </div>
+                <div className="h-12 w-12 bg-red-100 rounded-full flex items-center justify-center">
+                  <TrendingDown className="h-6 w-6 text-red-600" />
+                </div>
+              </div>
+            </div>
+
+            {/* Net Income Card */}
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Net Income</p>
+                  <p className={`text-2xl font-bold mt-2 ${netIncome >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    ${netIncome.toFixed(2)}
+                  </p>
+                </div>
+                <div className={`h-12 w-12 rounded-full flex items-center justify-center ${netIncome >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
+                  <DollarSign className={`h-6 w-6 ${netIncome >= 0 ? 'text-green-600' : 'text-red-600'}`} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Tab Content */}
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+            {activeTab === 'dashboard' && <ModernBudgetPanel />}
+            {activeTab === 'analysis' && <AnalysisTab />}
+            {activeTab === 'calculator' && <CalculatorTab />}
+            {activeTab === 'editor' && <EditorTab />}
+          </div>
         </div>
-      </LoadingGate>
-    </div>
+      </div>
+    </LoadingGate>
   );
 }
