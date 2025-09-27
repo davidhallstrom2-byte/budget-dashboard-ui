@@ -90,7 +90,7 @@ jobs:
           if [ "$SHOULD" = true ]; then
             NAME="$(echo "$NAME" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
             [ -z "$NAME" ] && NAME="backup"
-            SAFE="$(echo "$NAME" | tr -cd 'A-Za-z0-9._- ' | sed -E 's/[[:space:]]+/-/g' | cut -c1-50)"
+            SAFE="$(echo "$NAME" | tr -cd 'A-Za-z0-9. _-' | sed -E 's/[[:space:]]+/-/g' | cut -c1-50)"
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             echo "backup_name=$SAFE" >> "$GITHUB_OUTPUT"
             echo "tag=backup-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
