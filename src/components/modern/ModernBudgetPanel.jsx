@@ -45,7 +45,34 @@ export default function ModernBudgetPanel() {
     personal: 'Personal',
     homeOffice: 'Home/Office',
     banking: 'Banking',
-    misc: 'Miscellaneous'
+    misc: 'Miscellaneous',
+    // Add more mappings as needed
+    utilities: 'Utilities',
+    insurance: 'Insurance',
+    healthcare: 'Healthcare',
+    entertainment: 'Entertainment',
+    debt: 'Debt Payments',
+    savings: 'Savings',
+    education: 'Education',
+    gifts: 'Gifts & Donations',
+    travel: 'Travel',
+    pets: 'Pet Care',
+    clothing: 'Clothing',
+    subscriptions: 'Subscriptions'
+  };
+
+  // Helper function to get proper category display name
+  const getCategoryDisplayName = (row) => {
+    // First try the category field if it's not "Other" or empty
+    if (row.category && row.category !== 'Other' && row.category !== '') {
+      return row.category;
+    }
+    // Then try the bucket field with label mapping
+    if (row.bucket) {
+      return categoryLabels[row.bucket] || row.bucket;
+    }
+    // Finally fall back to category or a default
+    return row.category || 'Uncategorized';
   };
 
   return (
@@ -141,13 +168,13 @@ export default function ModernBudgetPanel() {
                   <div className="flex items-center gap-3">
                     <AlertCircle className={`h-5 w-5 ${daysUntil <= 2 ? 'text-red-500' : 'text-amber-500'}`} />
                     <div>
-                      <p className="font-medium text-slate-900">{payment.category}</p>
+                      <p className="font-medium text-slate-900">{getCategoryDisplayName(payment)}</p>
                       <p className="text-xs text-slate-600">
                         Due in {daysUntil} {daysUntil === 1 ? 'day' : 'days'}
                       </p>
                     </div>
                   </div>
-                  <p className="font-bold text-slate-900">${payment.estBudget?.toFixed(2) || '0.00'}</p>
+                  <p className="font-bold text-slate-900">${payment.estBudget?.toFixed(2) || payment.actualCost?.toFixed(2) || '0.00'}</p>
                 </div>
               );
             })}
@@ -180,7 +207,7 @@ export default function ModernBudgetPanel() {
               {rows.length > 0 ? (
                 rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-sm text-slate-900">{row.category}</td>
+                    <td className="px-4 py-3 text-sm text-slate-900">{getCategoryDisplayName(row)}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">${row.estBudget?.toFixed(2) || '0.00'}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">${row.actualCost?.toFixed(2) || '0.00'}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{row.dueDate || 'N/A'}</td>

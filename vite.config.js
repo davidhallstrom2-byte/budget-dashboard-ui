@@ -8,5 +8,17 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 4174,
     strictPort: true,
+    proxy: {
+      '/wp-json': {
+        target: 'http://main-dashboard.local',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/budget-dashboard-fs/save.php': {
+        target: 'http://main-dashboard.local',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
   },
 });

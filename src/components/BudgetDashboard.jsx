@@ -1,265 +1,245 @@
-import { useState } from 'react';
-import { useBudgetState } from '../utils/state';
+// src/components/BudgetDashboard.jsx
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeState, saveToServer } from '../utils/state.js';
 import LoadingGate from './common/LoadingGate';
-import ModernBudgetPanel from './modern/ModernBudgetPanel';
-import EditorTab from './tabs/EditorTab';
+import DashboardTab from './tabs/DashboardTab';
 import AnalysisTab from './tabs/AnalysisTab';
 import CalculatorTab from './tabs/CalculatorTab';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, RotateCcw, Download, Upload, Save, X } from 'lucide-react';
+import EditorTab from './tabs/EditorTab';
+import ArchivedDrawer from './ui/ArchivedDrawer';
+import StickyToolbar from './common/StickyToolbar.jsx';
+import StatementScanner from './statements/StatementScanner';
 
-export default function BudgetDashboard() {
+const BudgetDashboard = () => {
+  const [state, setState] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [showSaveInstructions, setShowSaveInstructions] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null);
+  const [isArchiveDrawerOpen, setIsArchiveDrawerOpen] = useState(false);
+  const [isStatementScannerOpen, setIsStatementScannerOpen] = useState(false);
 
-  // Read from computeTotals()
-  const { totalIncome, totalExpenses, netIncome } = useBudgetState((state) => {
-    const totals = state.computeTotals();
-    return {
-      totalIncome: totals.totalIncome || 0,
-      totalExpenses: totals.totalExpenses || 0,
-      netIncome: totals.netIncome || 0
-    };
-  });
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const initialState = await initializeState();
+        if (mounted) setState(initialState);
+      } catch (err) {
+        console.error('Error initializing app:', err);
+        if (mounted) {
+          setState({
+            buckets: {
+              income: [], housing: [], transportation: [], food: [],
+              personal: [], homeOffice: [], banking: [], subscriptions: [], misc: []
+            },
+            archived: []
+          });
+        }
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
-  // Get store methods for toolbar
-  const reloadData = useBudgetState((state) => state.reloadData);
-  const exportToJson = useBudgetState((state) => state.exportToJson);
-  const importFromJson = useBudgetState((state) => state.importFromJson);
-  const asOfDate = useBudgetState((state) => state.meta?.asOfDate || 'N/A');
+  const tabs = useMemo(() => ([
+    { id: 'dashboard', label: 'Dashboard', bgColor: 'bg-blue-100' },
+    { id: 'analysis',  label: 'Analysis',  bgColor: 'bg-purple-100' },
+    { id: 'calculator',label: 'Calculator',bgColor: 'bg-green-100' },
+    { id: 'editor',    label: 'Editor',    bgColor: 'bg-orange-100' }
+  ]), []);
 
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'analysis', label: 'Analysis' },
-    { id: 'calculator', label: 'Calculator' },
-    { id: 'editor', label: 'Editor' }
-  ];
+  const activeTabConfig = useMemo(
+    () => tabs.find(t => t.id === activeTab),
+    [tabs, activeTab]
+  );
 
-  const handleSave = () => {
-    const data = exportToJson();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'budget-data.json';
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowSaveInstructions(true);
-  };
-
-  const handleReload = async () => {
-    if (confirm('Reload data from restore file? This may overwrite current changes.')) {
-      await reloadData();
-      alert('Data reloaded');
+  const saveBudget = async (customState = null, customMessage = null) => {
+    setIsSaving(true);
+    setSaveStatus(null);
+    try {
+      const result = await saveToServer(customState || state);
+      if (customMessage !== false) {
+        setSaveStatus(
+          result?.success
+            ? { type: 'success', message: customMessage || 'Budget saved successfully!' }
+            : { type: 'error', message: result?.error || 'Save failed' }
+        );
+      }
+    } catch {
+      setSaveStatus({ type: 'error', message: 'Failed to save budget' });
+    } finally {
+      setIsSaving(false);
+      if (customMessage !== false) {
+        setTimeout(() => setSaveStatus(null), 3000);
+      }
     }
   };
 
-  const handleExport = () => {
-    const data = exportToJson();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `budget-export-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    alert('Export complete');
-  };
-
-  const handleImport = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target.result);
-        importFromJson(data);
-        alert('Import successful');
-      } catch (err) {
-        alert('Import failed: ' + err.message);
+  const handleStatementImport = (budgetItems) => {
+    const updatedBuckets = { ...state.buckets };
+    
+    budgetItems.forEach(({ categoryKey, item }) => {
+      if (updatedBuckets[categoryKey]) {
+        updatedBuckets[categoryKey] = [...updatedBuckets[categoryKey], item];
+      } else {
+        updatedBuckets.misc = [...(updatedBuckets.misc || []), item];
       }
-    };
-    reader.readAsText(file);
+    });
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    saveBudget(updatedState, `Successfully imported ${budgetItems.length} transactions!`);
   };
+
+  const handleRestoreArchived = (id) => {
+    const idx = state?.archived?.findIndex(i => i.id === id);
+    if (idx === -1 || idx === undefined) return;
+    const archivedItem = state.archived[idx];
+    const { originalBucket, archivedAt, ...restoredItem } = archivedItem;
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [originalBucket]: [...(state.buckets[originalBucket] || []), restoredItem]
+    };
+    const updatedArchived = state.archived.filter((_, i) => i !== idx);
+    const updatedState = { ...state, buckets: updatedBuckets, archived: updatedArchived };
+    setState(updatedState);
+    saveBudget(updatedState, 'Item restored successfully!');
+  };
+
+  const handleDeleteArchived = (id) => {
+    if (!confirm('Permanently delete this archived item?')) return;
+    const updatedArchived = state?.archived?.filter(i => i.id !== id) || [];
+    const updatedState = { ...state, archived: updatedArchived };
+    setState(updatedState);
+    saveBudget(updatedState, 'Archived item deleted permanently!');
+  };
+
+  if (isLoading) return <LoadingGate />;
 
   return (
-    <LoadingGate>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-        {/* Sticky Combined Toolbar */}
-        <div className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {/* Title Row */}
-            <div className="py-4 flex items-center justify-between border-b border-slate-100">
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900">Budget Dashboard</h1>
-                <p className="text-sm text-slate-600 mt-1">Period: {asOfDate}</p>
-              </div>
-              <div className="flex items-center gap-3 relative">
-                {/* Date Display */}
-                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-lg">
-                  <Calendar className="h-4 w-4 text-slate-600" />
-                  <span className="text-sm font-medium text-slate-700">{asOfDate}</span>
-                </div>
+    <div className="min-h-screen bg-gray-50">
+      <StickyToolbar bgTint={activeTabConfig?.bgColor || ''}>
+        <div className="flex justify-between items-center h-14">
+          <div className="flex space-x-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-black text-white'
+                    : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                }`}
+                aria-pressed={activeTab === tab.id}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-                {/* Save Button */}
-                <button
-                  onClick={handleSave}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                  title="Save changes permanently"
-                >
-                  <Save className="h-4 w-4" />
-                  <span className="text-sm font-medium">Save Budget</span>
-                </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsStatementScannerOpen(true)}
+              className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors flex items-center gap-2"
+              title="Scan Credit Card or Bank Statement"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span>Scan Statement</span>
+            </button>
 
-                {/* Reload Button */}
-                <button
-                  onClick={handleReload}
-                  className="flex items-center gap-2 px-3 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  <span className="text-sm font-medium">Reload</span>
-                </button>
+            <button
+              onClick={() => setIsArchiveDrawerOpen(true)}
+              className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-2"
+              title="Open Archives"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+              <span>Archives ({state.archived?.length || 0})</span>
+            </button>
 
-                {/* Export Button */}
-                <button
-                  onClick={handleExport}
-                  className="flex items-center gap-2 px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-                >
-                  <Download className="h-4 w-4" />
-                  <span className="text-sm font-medium">Export</span>
-                </button>
-
-                {/* Import Button */}
-                <label className="flex items-center gap-2 px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors cursor-pointer">
-                  <Upload className="h-4 w-4" />
-                  <span className="text-sm font-medium">Import</span>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleImport}
-                    className="hidden"
-                  />
-                </label>
-
-                {/* Save Instructions Modal */}
-                {showSaveInstructions && (
-                  <div className="absolute top-full right-0 mt-2 w-[500px] bg-white border border-blue-200 rounded-lg shadow-xl z-50 p-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <h4 className="font-semibold text-gray-900">File Downloaded: budget-data.json</h4>
-                      <button
-                        onClick={() => setShowSaveInstructions(false)}
-                        className="text-gray-400 hover:text-gray-600"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-                    
-                    <div className="space-y-3 text-sm">
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <p className="font-medium text-blue-900 mb-2">To make changes permanent:</p>
-                        <ol className="list-decimal list-inside space-y-1.5 text-blue-800">
-                          <li>Find <code className="bg-blue-100 px-1 rounded font-mono text-xs">budget-data.json</code> in Downloads</li>
-                          <li>Copy to: <code className="bg-blue-100 px-1 rounded font-mono text-xs break-all">C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\public\restore\</code></li>
-                          <li>Replace existing file</li>
-                          <li>Refresh this page</li>
-                        </ol>
-                      </div>
-
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                        <p className="text-yellow-800 text-xs">
-                          <strong>Quick PowerShell command:</strong>
-                          <code className="block bg-yellow-100 px-2 py-1 rounded mt-1 font-mono text-xs break-all">
-                            Copy-Item "$env:USERPROFILE\Downloads\budget-data.json" "C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\public\restore\budget-data.json" -Force
-                          </code>
-                        </p>
-                      </div>
-
-                      <button
-                        onClick={() => setShowSaveInstructions(false)}
-                        className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium"
-                      >
-                        Got it!
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Tabs Row */}
-            <div className="flex items-center gap-1 pt-2 pb-1">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-6 py-2 rounded-t-lg font-medium transition-colors ${
-                    activeTab === tab.id
-                      ? 'bg-white text-blue-600 border-t border-x border-slate-200'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={() => saveBudget()}
+              disabled={isSaving}
+              className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                isSaving ? 'bg-gray-400 text-white cursor-not-allowed'
+                         : 'bg-blue-500 text-white hover:bg-blue-600'
+              }`}
+              title="Save Budget"
+            >
+              {isSaving ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle className="opacity-25" cx="12" cy="12" r="10"
+                            stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  </svg>
+                  <span>Save Budget</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
+      </StickyToolbar>
 
-        {/* Main Content Area */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* KPI Cards */}
-          {activeTab !== 'editor' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              {/* Total Income */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-slate-600 mb-1">Total Income</p>
-                    <p className="text-3xl font-bold text-green-600">${totalIncome.toFixed(2)}</p>
-                  </div>
-                  <div className="p-3 bg-green-100 rounded-lg">
-                    <TrendingUp className="h-6 w-6 text-green-600" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Total Expenses */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-slate-600 mb-1">Total Expenses</p>
-                    <p className="text-3xl font-bold text-red-600">${totalExpenses.toFixed(2)}</p>
-                  </div>
-                  <div className="p-3 bg-red-100 rounded-lg">
-                    <TrendingDown className="h-6 w-6 text-red-600" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Net Income */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-slate-600 mb-1">Net Income</p>
-                    <p className={`text-3xl font-bold ${netIncome >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      ${netIncome >= 0 ? '' : '-'}${Math.abs(netIncome).toFixed(2)}
-                    </p>
-                  </div>
-                  <div className={`p-3 rounded-lg ${netIncome >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
-                    <DollarSign className={`h-6 w-6 ${netIncome >= 0 ? 'text-green-600' : 'text-red-600'}`} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Tab Content */}
-          {activeTab === 'dashboard' && <ModernBudgetPanel />}
-          {activeTab === 'analysis' && <AnalysisTab />}
-          {activeTab === 'calculator' && <CalculatorTab />}
-          {activeTab === 'editor' && <EditorTab />}
+      {saveStatus && (
+        <div
+          className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg ${
+            saveStatus.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          {saveStatus.message}
         </div>
+      )}
+
+      <div className={`${activeTabConfig?.bgColor || 'bg-white'} min-h-screen`}>
+        {activeTab === 'dashboard' && (
+          <DashboardTab state={state} setState={setState} saveBudget={saveBudget} />
+        )}
+        {activeTab === 'analysis' && (
+          <AnalysisTab state={state} setState={setState} saveBudget={saveBudget} />
+        )}
+        {activeTab === 'calculator' && (
+          <CalculatorTab state={state} setState={setState} saveBudget={saveBudget} />
+        )}
+        {activeTab === 'editor' && (
+          <EditorTab state={state} setState={setState} saveBudget={saveBudget} />
+        )}
       </div>
-    </LoadingGate>
+
+      <ArchivedDrawer
+        isOpen={isArchiveDrawerOpen}
+        onClose={() => setIsArchiveDrawerOpen(false)}
+        archivedItems={state.archived || []}
+        onRestore={handleRestoreArchived}
+        onDelete={handleDeleteArchived}
+      />
+
+      <StatementScanner
+        isOpen={isStatementScannerOpen}
+        onClose={() => setIsStatementScannerOpen(false)}
+        onImport={handleStatementImport}
+      />
+    </div>
   );
-}
+};
+
+export default BudgetDashboard;

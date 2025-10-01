@@ -1,239 +1,493 @@
-import { create } from 'zustand';
+// Budget Dashboard State Manager
+// - React store with useBudgetState (selector support)
+// - Cached snapshot to satisfy useSyncExternalStore stability
+// - Stable selector outputs to prevent infinite loops (normalizes empty [] / {})
+// - computeTotals exported (named) and on the snapshot
+// - saveToServer compatibility for existing components
+// - DUAL-SAVE: Saves to both standalone file AND WordPress database
+// Data model per handoff brief (2025-09-29)
 
-// ✅ SEEDED NON-ZERO DATA for immediate rendering
-const initialBuckets = {
-  income: [
-    { id: 'inc-1', category: 'Salary', estBudget: 2000, actualCost: 2000, dueDate: '2025-09-01', status: 'paid' },
-    { id: 'inc-2', category: 'Freelance', estBudget: 200, actualCost: 200, dueDate: '2025-09-15', status: 'paid' }
-  ],
-  housing: [
-    { id: 'hou-1', category: 'Rent/Mortgage', estBudget: 1200, actualCost: 1200, dueDate: '2025-09-01', status: 'paid' },
-    { id: 'hou-2', category: 'Utilities', estBudget: 150, actualCost: 148.50, dueDate: '2025-09-05', status: 'paid' }
-  ],
-  transportation: [
-    { id: 'tra-1', category: 'Gas', estBudget: 120, actualCost: 115.75, dueDate: '2025-09-10', status: 'paid' },
-    { id: 'tra-2', category: 'Insurance', estBudget: 100, actualCost: 100, dueDate: '2025-09-01', status: 'paid' }
-  ],
-  food: [
-    { id: 'foo-1', category: 'Groceries', estBudget: 400, actualCost: 387.23, dueDate: '2025-09-15', status: 'paid' },
-    { id: 'foo-2', category: 'Dining Out', estBudget: 150, actualCost: 162.18, dueDate: '2025-09-20', status: 'paid' }
-  ],
-  personal: [
-    { id: 'per-1', category: 'Healthcare', estBudget: 200, actualCost: 185.50, dueDate: '2025-09-08', status: 'paid' },
-    { id: 'per-2', category: 'Entertainment', estBudget: 100, actualCost: 95.30, dueDate: '2025-09-12', status: 'paid' }
-  ],
-  homeOffice: [
-    { id: 'hom-1', category: 'Internet', estBudget: 80, actualCost: 79.99, dueDate: '2025-09-01', status: 'paid' },
-    { id: 'hom-2', category: 'Supplies', estBudget: 50, actualCost: 43.20, dueDate: '2025-09-15', status: 'paid' }
-  ],
-  banking: [
-    { id: 'ban-1', category: 'Bank Fees', estBudget: 25, actualCost: 25, dueDate: '2025-09-01', status: 'paid' },
-    { id: 'ban-2', category: 'Credit Card Payment', estBudget: 300, actualCost: 300, dueDate: '2025-09-05', status: 'paid' }
-  ],
-  misc: [
-    { id: 'mis-1', category: 'Subscriptions', estBudget: 45, actualCost: 44.29, dueDate: '2025-09-01', status: 'paid' },
-    { id: 'mis-2', category: 'Other', estBudget: 30, actualCost: 0, dueDate: '2025-09-30', status: 'pending' }
-  ]
-};
+import { useSyncExternalStore } from "react";
 
-export const useBudgetState = create((set, get) => ({
-  // ✅ CANONICAL STATE: Bucket-based structure
-  buckets: initialBuckets,
+const STATE_STORAGE_KEY = "budget-dashboard-state-v2";
+let _bootLogged = false;
 
-  // ✅ SAFE META with defaults
-  meta: {
-    hydrated: true,
-    loading: false,
-    error: null,
-    asOfDate: '2025-09-01'
-  },
+// Stable empty sentinels to avoid returning fresh [] / {} every render
+const EMPTY_ARRAY = Object.freeze([]);
+const EMPTY_OBJECT = Object.freeze({});
 
-  // ✅ DERIVED FLAT ARRAY for compatibility
-  get rows() {
-    const state = get();
-    // 🛡️ GUARD: Handle undefined/null buckets
-    if (!state.buckets || typeof state.buckets !== 'object') {
-      return [];
-    }
-    return Object.entries(state.buckets).flatMap(([bucket, items]) =>
-      (items || []).map(item => ({ ...item, bucket }))
-    );
-  },
+// ---------------- Environment detection ----------------
+function isViteDev() {
+  return (
+    typeof window !== "undefined" &&
+    /(^127\.0\.0\.1:4174$|:4174$|localhost:4174$)/.test(window.location.host)
+  );
+}
 
-  // ✅ Helper: Add Row
-  addRow: (bucket, rowData) => {
-    set((state) => {
-      const newRow = {
-        id: `${bucket.slice(0, 3)}-${Date.now()}`,
-        category: '',
-        estBudget: 0,
-        actualCost: 0,
-        dueDate: '',
-        status: 'pending',
-        ...rowData
-      };
-      return {
-        buckets: {
-          ...state.buckets,
-          [bucket]: [...state.buckets[bucket], newRow]
-        }
-      };
-    });
-  },
+function isWordPressHost() {
+  return (
+    typeof window !== "undefined" &&
+    /(^|\.)main-dashboard\.local$/.test(window.location.hostname)
+  );
+}
 
-  // ✅ Helper: Update Row
-  updateRow: (bucket, id, updates) => {
-    set((state) => ({
-      buckets: {
-        ...state.buckets,
-        [bucket]: state.buckets[bucket].map(row =>
-          row.id === id ? { ...row, ...updates } : row
-        )
-      }
-    }));
-  },
-
-  // ✅ Helper: Remove Row
-  removeRow: (bucket, id) => {
-    set((state) => ({
-      buckets: {
-        ...state.buckets,
-        [bucket]: state.buckets[bucket].filter(row => row.id !== id)
-      }
-    }));
-  },
-
-  // ✅ Helper: Move Row
-  moveRow: (bucket, fromIndex, toIndex) => {
-    set((state) => {
-      const items = [...state.buckets[bucket]];
-      const [removed] = items.splice(fromIndex, 1);
-      items.splice(toIndex, 0, removed);
-      return {
-        buckets: {
-          ...state.buckets,
-          [bucket]: items
-        }
-      };
-    });
-  },
-
-  // ✅ Helper: Archive Current
-  archiveCurrent: (label = 'Manual Archive') => {
-    const state = get();
-    const archive = {
-      timestamp: new Date().toISOString(),
-      label,
-      data: { buckets: state.buckets, meta: state.meta }
-    };
-    localStorage.setItem('budget_archive', JSON.stringify(archive));
-    console.log('✅ Archive saved:', label);
-  },
-
-  // ✅ Helper: Restore Archive
-  restoreArchive: () => {
-    const archived = localStorage.getItem('budget_archive');
-    if (archived) {
-      const { data } = JSON.parse(archived);
-      set({ buckets: data.buckets, meta: data.meta });
-      console.log('✅ Archive restored');
-    }
-  },
-
-  // ✅ Helper: Import from JSON
-  importFromJson: (jsonData) => {
-    set({
-      buckets: jsonData.buckets,
-      meta: { ...get().meta, ...jsonData.meta }
-    });
-  },
-
-  // ✅ Helper: Export to JSON
-  exportToJson: () => {
-    const state = get();
-    return {
-      buckets: state.buckets,
-      meta: state.meta
-    };
-  },
-
-  // ✅ Helper: Compute Totals
-  computeTotals: () => {
-    const state = get();
-    
-    // 🛡️ GUARD: Handle undefined/null buckets
-    if (!state.buckets || typeof state.buckets !== 'object') {
-      return {
-        totalIncome: 0,
-        totalExpenses: 0,
-        netIncome: 0,
-        totalBudgeted: 0,
-        variance: 0
-      };
-    }
-
-    const allRows = Object.values(state.buckets).flat();
-    
-    const income = state.buckets.income || [];
-    const expenses = allRows.filter(row => !income.includes(row));
-
-    const totalIncome = income.reduce((sum, row) => sum + (row.actualCost || 0), 0);
-    const totalExpenses = expenses.reduce((sum, row) => sum + (row.actualCost || 0), 0);
-    const netIncome = totalIncome - totalExpenses;
-
-    const totalBudgeted = expenses.reduce((sum, row) => sum + (row.estBudget || 0), 0);
-    const variance = totalBudgeted - totalExpenses;
-
-    return {
-      totalIncome,
-      totalExpenses,
-      netIncome,
-      totalBudgeted,
-      variance
-    };
-  },
-
-  // ✅ Helper: Reload Data (WITH GUARD)
-  reloadData: async () => {
-    try {
-      set((state) => ({
-        meta: { ...state.meta, loading: true, error: null }
-      }));
-
-      const response = await fetch('/budget-dashboard-fs/restore/budget-data.json');
-      if (!response.ok) throw new Error('Failed to fetch restore data');
-      
-      const data = await response.json();
-
-      // 🛡️ GUARD: Only apply if data has non-zero values
-      const hasNonZeroData = Object.values(data.buckets || {}).some(bucket =>
-        Array.isArray(bucket) && bucket.some(row => 
-          (row.estBudget > 0 || row.actualCost > 0)
-        )
-      );
-
-      if (hasNonZeroData) {
-        set({
-          buckets: data.buckets,
-          meta: { ...get().meta, ...data.meta, loading: false }
-        });
-        console.log('✅ Data reloaded from restore file');
-      } else {
-        set((state) => ({
-          meta: { ...state.meta, loading: false }
-        }));
-        console.warn('⚠️ Restore file contains only zeros - keeping current store data');
-      }
-    } catch (error) {
-      set((state) => ({
-        meta: { ...state.meta, loading: false, error: error.message }
-      }));
-      console.error('❌ Reload failed:', error);
-    }
-  },
-
-  // ✅ Helper: Hydrate from DB (placeholder for future backend)
-  hydrateFromDB: async () => {
-    console.log('Hydrate from DB - not yet implemented');
+// ---------------- Data URL resolution ----------------
+function getDataUrlCandidates() {
+  if (isViteDev()) {
+    return ["/budget-dashboard-fs/restore/budget-data.json"];
   }
-}));
+  return [
+    "/budget-dashboard-fs/ui/public/restore/budget-data.json",
+    "/budget-dashboard-fs/restore/budget-data.json",
+  ];
+}
+
+async function fetchFirst(urls) {
+  for (const url of urls) {
+    try {
+      const bust = url.includes("?") ? `${url}&t=${Date.now()}` : `${url}?t=${Date.now()}`;
+      const res = await fetch(bust, { cache: "no-store" });
+      if (res.ok) return await res.json();
+    } catch {
+      // try next
+    }
+  }
+  throw new Error("All data URLs failed");
+}
+
+// ---------------- Defaults and normalization ----------------
+function defaultState() {
+  return {
+    buckets: {
+      income: [],
+      housing: [],
+      transportation: [],
+      food: [],
+      personal: [],
+      homeOffice: [],
+      banking: [],
+      subscriptions: [],
+      misc: [],
+    },
+    archived: [],
+  };
+}
+
+function normalizeRow(row) {
+  if (!row) return null;
+  const out = { ...row };
+  if (typeof out.actualSpent !== "undefined" && typeof out.actualCost === "undefined") {
+    out.actualCost = out.actualSpent;
+    delete out.actualSpent;
+  }
+  if (!out.status) out.status = "pending";
+  return out;
+}
+
+function normalizeState(input) {
+  const base = defaultState();
+  const s = { ...base, ...input };
+
+  const bucketKeys = Object.keys(base.buckets);
+  const outBuckets = {};
+  for (const key of bucketKeys) {
+    const arr = Array.isArray(s.buckets?.[key]) ? s.buckets[key] : [];
+    outBuckets[key] = arr.map(normalizeRow).filter(Boolean);
+  }
+
+  // Auto-migrate obvious subscriptions
+  const migrated = outBuckets.subscriptions.slice();
+  for (const key of Object.keys(outBuckets)) {
+    if (key === "subscriptions") continue;
+    const keep = [];
+    for (const row of outBuckets[key]) {
+      if (typeof row.category === "string" && /subscription/i.test(row.category)) {
+        migrated.push(row);
+      } else {
+        keep.push(row);
+      }
+    }
+    outBuckets[key] = keep;
+  }
+  outBuckets.subscriptions = migrated;
+
+  const archived = Array.isArray(s.archived) ? s.archived.slice() : [];
+  return { buckets: outBuckets, archived };
+}
+
+// ---------------- Totals helpers ----------------
+function computeTotalsFromBuckets(buckets) {
+  const b = buckets || {};
+  const income = Array.isArray(b.income) ? b.income : [];
+
+  const totalIncome = income.reduce((s, r) => s + (Number(r.estBudget) || 0), 0);
+
+  const expenseKeys = Object.keys(b).filter((k) => k !== "income");
+  const totalExpenses = expenseKeys.reduce((sum, key) => {
+    const rows = Array.isArray(b[key]) ? b[key] : [];
+    return sum + rows.reduce((s, r) => s + (Number(r.estBudget) || 0), 0);
+  }, 0);
+
+  const netIncome = totalIncome - totalExpenses;
+
+  const totalsByBucket = {};
+  let grandEst = 0;
+  let grandActual = 0;
+  let grandPending = 0;
+  let grandPaid = 0;
+
+  for (const key of Object.keys(b)) {
+    const rows = Array.isArray(b[key]) ? b[key] : [];
+    const est = rows.reduce((s, r) => s + (Number(r.estBudget) || 0), 0);
+    const actual = rows.reduce((s, r) => s + (Number(r.actualCost) || 0), 0);
+    const pending = rows.reduce((s, r) => s + (r.status === "pending" ? 1 : 0), 0);
+    const paid = rows.reduce((s, r) => s + (r.status === "paid" ? 1 : 0), 0);
+    totalsByBucket[key] = { est, actual, diff: actual - est, pending, paid };
+    grandEst += est;
+    grandActual += actual;
+    grandPending += pending;
+    grandPaid += paid;
+  }
+
+  const grand = {
+    est: grandEst,
+    actual: grandActual,
+    diff: grandActual - grandEst,
+    pending: grandPending,
+    paid: grandPaid,
+  };
+
+  return { totalIncome, totalExpenses, netIncome, totalsByBucket, grand };
+}
+
+// Public named export for legacy imports
+export function computeTotals(buckets) {
+  return computeTotalsFromBuckets(buckets || state.buckets);
+}
+
+// ---------------- Store and subscription ----------------
+let state = defaultState();
+
+// Cached snapshot for stability
+let _snapshot = makeSnapshot(state);
+
+function makeSnapshot(s) {
+  const computeTotalsSnap = () => computeTotalsFromBuckets(s.buckets);
+  return Object.freeze({ ...s, computeTotals: computeTotalsSnap });
+}
+
+const listeners = new Set();
+
+function getSnapshot() {
+  return _snapshot; // cached, stable reference
+}
+
+function getServerSnapshot() {
+  return _snapshot;
+}
+
+function subscribe(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function emit() {
+  for (const fn of listeners) {
+    try {
+      fn();
+    } catch {
+      // ignore listener errors
+    }
+  }
+}
+
+function replaceState(next) {
+  state = next;
+  _snapshot = makeSnapshot(state); // rebuild snapshot once per change
+  saveToLocalStorage(state);
+  emit();
+}
+
+// Selector-aware hook with stable fallbacks for empty values.
+// Prevents infinite loops when selectors return [] or {} literals.
+export function useBudgetState(selector) {
+  const sel = typeof selector === "function" ? selector : (s) => s;
+
+  // Wrap selection to normalize empty collections to stable sentinels
+  const selectStable = (snap) => {
+    const v = sel(snap);
+    if (v === null || v === undefined) return v;
+    if (Array.isArray(v)) return v.length === 0 ? EMPTY_ARRAY : v;
+    if (typeof v === "object") {
+      // treat plain empty objects as stable sentinel
+      if (Object.getPrototypeOf(v) === Object.prototype && Object.keys(v).length === 0) {
+        return EMPTY_OBJECT;
+      }
+    }
+    return v;
+  };
+
+  const getSel = () => selectStable(getSnapshot());
+  const getServerSel = () => selectStable(getServerSnapshot());
+  return useSyncExternalStore(subscribe, getSel, getServerSel);
+}
+
+// ---------------- Local storage helpers ----------------
+function loadFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem(STATE_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.buckets && parsed.archived) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveToLocalStorage(s) {
+  try {
+    localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(s));
+  } catch {
+    // ignore
+  }
+}
+
+// ---------------- Public API ----------------
+export function getState() {
+  return state;
+}
+
+export async function initializeState() {
+  try {
+    const json = await fetchFirst(getDataUrlCandidates());
+    const normalized = normalizeState(json);
+    replaceState(normalized);
+    if (!_bootLogged) {
+      console.info("Loaded budget data from server or public file.");
+      _bootLogged = true;
+    }
+    return state;
+  } catch {
+    const local = loadFromLocalStorage();
+    if (local) {
+      replaceState(normalizeState(local));
+      if (!_bootLogged) {
+        console.warn("Could not load from server, using local storage.");
+        _bootLogged = true;
+      }
+      return state;
+    }
+    const fresh = defaultState();
+    replaceState(fresh);
+    if (!_bootLogged) {
+      console.warn("Could not load from server, using defaults.");
+      _bootLogged = true;
+    }
+    return state;
+  }
+}
+
+// Keep existing export for other imports
+export async function saveState() {
+  return _saveInternal();
+}
+
+// Backward compatible alias used by BudgetDashboard.jsx
+export async function saveToServer(stateOverride) {
+  if (stateOverride && typeof stateOverride === "object") {
+    replaceState(normalizeState(stateOverride));
+  }
+  const result = await _saveInternal();
+  if (result.ok) return { success: true };
+  return { success: false, error: result.error || "Save failed" };
+}
+
+// ---------------- DUAL-SAVE IMPLEMENTATION ----------------
+async function _saveInternal() {
+  const saveResults = {
+    file: { attempted: false, success: false, error: null },
+    database: { attempted: false, success: false, error: null, version: null },
+    localStorage: { attempted: false, success: false }
+  };
+
+  // Always save to localStorage (instant, no network)
+  try {
+    saveToLocalStorage(state);
+    saveResults.localStorage.attempted = true;
+    saveResults.localStorage.success = true;
+  } catch (err) {
+    console.error('localStorage save failed:', err);
+  }
+
+  // Save to standalone file (primary, fast)
+  saveResults.file.attempted = true;
+  try {
+    const res = await fetch("/budget-dashboard-fs/save.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state),
+      credentials: "same-origin",
+    });
+    
+    if (res.ok) {
+      const result = await res.json().catch(() => ({}));
+      saveResults.file.success = true;
+      console.log('✅ File save successful:', result.timestamp || 'saved');
+    } else {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    saveResults.file.error = String(err);
+    console.error('❌ File save failed:', err);
+  }
+
+  // Save to WordPress database (secondary, backup)
+  if (isWordPressHost()) {
+    saveResults.database.attempted = true;
+    try {
+      const res = await fetch("/wp-json/budget/v1/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: state }),
+        credentials: "same-origin",
+      });
+      
+      if (res.ok) {
+        const result = await res.json();
+        saveResults.database.success = true;
+        saveResults.database.version = result.version;
+        console.log('✅ Database save successful, version:', result.version);
+      } else {
+        throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (err) {
+      saveResults.database.error = String(err);
+      console.error('❌ Database save failed:', err);
+    }
+  }
+
+  // Determine overall success
+  const fileOk = saveResults.file.success;
+  const dbOk = saveResults.database.success;
+  const localOk = saveResults.localStorage.success;
+
+  // Success if at least one persistence method worked
+  const overallSuccess = fileOk || dbOk || localOk;
+
+  // Build status message
+  let statusMsg = [];
+  if (fileOk) statusMsg.push('File');
+  if (dbOk) statusMsg.push(`Database (v${saveResults.database.version})`);
+  if (localOk) statusMsg.push('Browser');
+  
+  let failMsg = [];
+  if (!fileOk && saveResults.file.attempted) failMsg.push('File failed');
+  if (!dbOk && saveResults.database.attempted) failMsg.push('Database failed');
+
+  const finalMsg = statusMsg.length > 0 
+    ? `Saved to: ${statusMsg.join(', ')}${failMsg.length > 0 ? ' | ' + failMsg.join(', ') : ''}`
+    : 'All save methods failed';
+
+  console.log(`💾 Save complete: ${finalMsg}`);
+
+  return { 
+    ok: overallSuccess, 
+    results: saveResults,
+    message: finalMsg,
+    error: !overallSuccess ? 'All save methods failed' : null
+  };
+}
+
+// ---------------- Mutators ----------------
+function assertBucket(bucket) {
+  if (!state.buckets[bucket]) throw new Error(`Unknown bucket: ${bucket}`);
+}
+
+function cryptoId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "id-" + Math.random().toString(36).slice(2, 10);
+}
+
+function todayISO() {
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+}
+
+export function addRow(bucket, rowData) {
+  assertBucket(bucket);
+  const row = normalizeRow({
+    id: rowData?.id || cryptoId(),
+    category: rowData?.category || "New Item",
+    estBudget: Number.isFinite(rowData?.estBudget) ? rowData.estBudget : 0,
+    actualCost: Number.isFinite(rowData?.actualCost) ? rowData.actualCost : 0,
+    dueDate: rowData?.dueDate || todayISO(),
+    status: rowData?.status || "pending",
+  });
+  const next = { ...state, buckets: { ...state.buckets, [bucket]: [...state.buckets[bucket], row] } };
+  replaceState(next);
+  return row;
+}
+
+export function updateRow(bucket, id, updates) {
+  assertBucket(bucket);
+  const idx = state.buckets[bucket].findIndex((r) => r.id === id);
+  if (idx === -1) throw new Error(`Row not found: ${id}`);
+  const merged = normalizeRow({ ...state.buckets[bucket][idx], ...updates });
+  const nextBucket = state.buckets[bucket].slice();
+  nextBucket[idx] = merged;
+  const next = { ...state, buckets: { ...state.buckets, [bucket]: nextBucket } };
+  replaceState(next);
+  return merged;
+}
+
+export function removeRow(bucket, id) {
+  assertBucket(bucket);
+  const nextBucket = state.buckets[bucket].filter((r) => r.id !== id);
+  const next = { ...state, buckets: { ...state.buckets, [bucket]: nextBucket } };
+  replaceState(next);
+  return true;
+}
+
+export function archiveRow(bucket, id) {
+  assertBucket(bucket);
+  const idx = state.buckets[bucket].findIndex((r) => r.id === id);
+  if (idx === -1) throw new Error(`Row not found: ${id}`);
+  const row = state.buckets[bucket][idx];
+  const archivedItem = {
+    ...row,
+    originalBucket: bucket,
+    archivedAt: new Date().toISOString(),
+  };
+  const nextBucket = state.buckets[bucket].slice();
+  nextBucket.splice(idx, 1);
+  const next = {
+    ...state,
+    buckets: { ...state.buckets, [bucket]: nextBucket },
+    archived: [...state.archived, archivedItem],
+  };
+  replaceState(next);
+  return archivedItem;
+}
+
+export function restoreArchivedRow(id) {
+  const idx = state.archived.findIndex((r) => r.id === id);
+  if (idx === -1) throw new Error(`Archived row not found: ${id}`);
+  const item = state.archived[idx];
+  const targetBucket =
+    item.originalBucket && state.buckets[item.originalBucket]
+      ? item.originalBucket
+      : "misc";
+  const { originalBucket, archivedAt, ...rowData } = item;
+  const next = {
+    ...state,
+    archived: state.archived.filter((_, i) => i !== idx),
+    buckets: {
+      ...state.buckets,
+      [targetBucket]: [...state.buckets[targetBucket], rowData],
+    },
+  };
+  replaceState(next);
+  return rowData;
+}
