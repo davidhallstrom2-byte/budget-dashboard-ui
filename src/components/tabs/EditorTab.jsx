@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package
@@ -38,6 +38,20 @@ const DEFAULT_TITLES = {
   misc: 'Miscellaneous'
 };
 
+const ITEM_TEMPLATES = [
+  { name: 'Rent/Mortgage', category: 'housing', estBudget: 1500, recurrence: 'monthly' },
+  { name: 'Electric Bill', category: 'housing', estBudget: 150, recurrence: 'monthly' },
+  { name: 'Water Bill', category: 'housing', estBudget: 50, recurrence: 'monthly' },
+  { name: 'Internet', category: 'housing', estBudget: 80, recurrence: 'monthly' },
+  { name: 'Car Payment', category: 'transportation', estBudget: 400, recurrence: 'monthly' },
+  { name: 'Car Insurance', category: 'transportation', estBudget: 150, recurrence: 'monthly' },
+  { name: 'Gas', category: 'transportation', estBudget: 200, recurrence: 'monthly' },
+  { name: 'Groceries', category: 'food', estBudget: 600, recurrence: 'monthly' },
+  { name: 'Phone Bill', category: 'personal', estBudget: 70, recurrence: 'monthly' },
+  { name: 'Netflix', category: 'subscriptions', estBudget: 15.49, recurrence: 'monthly' },
+  { name: 'Spotify', category: 'subscriptions', estBudget: 10.99, recurrence: 'monthly' },
+];
+
 const EditorTab = ({ state, setState, saveBudget }) => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [draggedFromBucket, setDraggedFromBucket] = useState(null);
@@ -47,16 +61,33 @@ const EditorTab = ({ state, setState, saveBudget }) => {
   const [recentlyCleared, setRecentlyCleared] = useState(false);
   const [clearTimerId, setClearTimerId] = useState(null);
   
-  // New Tier 1 features
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [statusFilter, setStatusFilter] = useState('all');
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  
+  // Tier 3 features
+  const [categoryOrder, setCategoryOrder] = useState([]);
+  const [draggedCategory, setDraggedCategory] = useState(null);
+  const [batchAddMode, setBatchAddMode] = useState(false);
+  const [batchAddCategory, setBatchAddCategory] = useState('');
+  const batchItemNameRef = useRef(null);
 
   useEffect(() => {
     if (state?.meta?.categoryNames) {
       setCategoryNames(state.meta.categoryNames);
     }
-  }, [state?.meta?.categoryNames]);
+    if (state?.meta?.categoryOrder) {
+      setCategoryOrder(state.meta.categoryOrder);
+    } else {
+      // Initialize with default order plus custom categories
+      const customBuckets = Object.keys(state?.buckets || {}).filter(k => !DEFAULT_ORDER.includes(k));
+      setCategoryOrder([...DEFAULT_ORDER, ...customBuckets]);
+    }
+  }, [state?.meta?.categoryNames, state?.meta?.categoryOrder, state?.buckets]);
 
   useEffect(() => {
     if (!state?.buckets) return;
@@ -86,10 +117,23 @@ const EditorTab = ({ state, setState, saveBudget }) => {
       };
       const updatedState = { ...state, buckets: updatedBuckets };
       setState(updatedState);
-      setTimeout(() => saveBudget(updatedState, false), 100);
+      setTimeout(() => saveBudgetWithIndicator(updatedState, false), 100);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Focus on batch add input when mode is enabled
+  useEffect(() => {
+    if (batchAddMode && batchItemNameRef.current) {
+      batchItemNameRef.current.focus();
+    }
+  }, [batchAddMode, batchAddCategory]);
+
+  const saveBudgetWithIndicator = async (customState = null, customMessage = null) => {
+    setIsSaving(true);
+    await saveBudget(customState, customMessage);
+    setTimeout(() => setIsSaving(false), 1000);
+  };
 
   const getRowBackgroundColor = (item) => {
     if (item.status === 'paid') return 'bg-green-100 border-green-200';
@@ -112,10 +156,16 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const item = state.buckets[bucket].find(item => item.id === id);
     if (!item) return;
 
-    const currentDate = new Date(item.dueDate);
-    const newDate = bucket === 'subscriptions'
-      ? new Date(currentDate.setFullYear(currentDate.getFullYear() + 1))
-      : new Date(currentDate.setMonth(currentDate.getMonth() + 1));
+    const currentDate = new Date(item.dueDate + 'T00:00:00');
+    let newDate;
+    
+    if (bucket === 'subscriptions') {
+      newDate = new Date(currentDate);
+      newDate.setFullYear(newDate.getFullYear() + 1);
+    } else {
+      newDate = new Date(currentDate);
+      newDate.setMonth(newDate.getMonth() + 1);
+    }
 
     const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
 
@@ -127,7 +177,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, 'Item marked as paid!'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item marked as paid!'), 100);
   };
 
   const handleUndoPaid = (bucket, id) => {
@@ -142,7 +192,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, 'Payment undone!'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Payment undone!'), 100);
   };
 
   const handleArchiveClick = (bucket, id) => {
@@ -156,7 +206,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     };
     const updatedState = { ...state, buckets: updatedBuckets, archived: [...(state.archived || []), archivedItem] };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, 'Item archived successfully!'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item archived successfully!'), 100);
   };
 
   const handleDeleteClick = (bucket, id) => {
@@ -172,7 +222,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const tid = setTimeout(() => setRecentlyDeleted(null), 10000);
     setUndoTimerId(tid);
     
-    setTimeout(() => saveBudget(updatedState, 'Item deleted successfully!'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item deleted successfully!'), 100);
   };
 
   const handleClearStatus = (bucket, id) => {
@@ -196,7 +246,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const tid = setTimeout(() => setRecentlyCleared(false), 3000);
     setClearTimerId(tid);
     
-    setTimeout(() => saveBudget(updatedState, 'Row bgcolor reset'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Row bgcolor reset'), 100);
   };
 
   const undoDelete = () => {
@@ -205,7 +255,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const updatedBuckets = { ...state.buckets, [bucket]: [...(state.buckets[bucket] || []), item] };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, 'Delete undone successfully!'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Delete undone successfully!'), 100);
     if (undoTimerId) clearTimeout(undoTimerId);
     setUndoTimerId(null);
     setRecentlyDeleted(null);
@@ -220,7 +270,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const updatedBuckets = { ...state.buckets, [bucket]: items };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, false), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, false), 100);
   };
 
   const handleMoveDown = (bucket, index) => {
@@ -233,7 +283,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const updatedBuckets = { ...state.buckets, [bucket]: newItems };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, false), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, false), 100);
   };
 
   const handleDragStart = (e, bucket, item) => {
@@ -270,9 +320,78 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, `Item moved to ${targetBucket}`), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `Item moved to ${targetBucket}`), 100);
     setDraggedItem(null);
     setDraggedFromBucket(null);
+  };
+
+  // Tier 3: Category drag and drop
+  const handleCategoryDragStart = (e, categoryKey) => {
+    setDraggedCategory(categoryKey);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleCategoryDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleCategoryDrop = (e, targetCategoryKey) => {
+    e.preventDefault();
+    
+    if (!draggedCategory || draggedCategory === targetCategoryKey) {
+      setDraggedCategory(null);
+      return;
+    }
+
+    const newOrder = [...categoryOrder];
+    const draggedIndex = newOrder.indexOf(draggedCategory);
+    const targetIndex = newOrder.indexOf(targetCategoryKey);
+
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(targetIndex, 0, draggedCategory);
+
+    setCategoryOrder(newOrder);
+    
+    const updatedState = {
+      ...state,
+      meta: {
+        ...state.meta,
+        categoryOrder: newOrder
+      }
+    };
+    setState(updatedState);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Categories reordered!'), 100);
+    setDraggedCategory(null);
+  };
+
+  // Tier 3: Export category to CSV
+  const exportCategoryToCSV = (bucketName, items) => {
+    const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
+    
+    const headers = ['Item', 'Est. Budget', 'Actual Cost', 'Due Date', 'Status'];
+    const rows = items.map(item => [
+      item.category || '',
+      item.estBudget || 0,
+      item.actualCost || 0,
+      item.dueDate || '',
+      item.status || 'pending'
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${displayTitle}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const renameCategory = (bucketName) => {
@@ -292,7 +411,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
       }
     };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, 'Category renamed successfully!'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Category renamed successfully!'), 100);
   };
 
   const addCategory = () => {
@@ -301,9 +420,18 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(key)) { alert('Invalid key format.'); return; }
     if (state.buckets[key]) { alert('Category already exists.'); return; }
 
-    const updatedState = { ...state, buckets: { ...state.buckets, [key]: [] } };
+    const newOrder = [...categoryOrder, key];
+    const updatedState = { 
+      ...state, 
+      buckets: { ...state.buckets, [key]: [] },
+      meta: {
+        ...state.meta,
+        categoryOrder: newOrder
+      }
+    };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, 'Category added successfully!'), 100);
+    setCategoryOrder(newOrder);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Category added successfully!'), 100);
   };
 
   const deleteCategory = () => {
@@ -344,9 +472,18 @@ const EditorTab = ({ state, setState, saveBudget }) => {
       const selectedKey = dialog.querySelector('#categorySelect').value;
       if (selectedKey) {
         const { [selectedKey]: _, ...rest } = state.buckets;
-        const updatedState = { ...state, buckets: rest };
+        const newOrder = categoryOrder.filter(k => k !== selectedKey);
+        const updatedState = { 
+          ...state, 
+          buckets: rest,
+          meta: {
+            ...state.meta,
+            categoryOrder: newOrder
+          }
+        };
         setState(updatedState);
-        setTimeout(() => saveBudget(updatedState, 'Category deleted successfully!'), 100);
+        setCategoryOrder(newOrder);
+        setTimeout(() => saveBudgetWithIndicator(updatedState, 'Category deleted successfully!'), 100);
       }
       closeDialog();
     };
@@ -366,6 +503,35 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setState(updatedState);
   };
 
+  // Tier 3: Batch add mode
+  const addBatchItem = (e) => {
+    e.preventDefault();
+    if (!batchAddCategory || !batchItemNameRef.current) return;
+
+    const itemName = batchItemNameRef.current.value.trim();
+    if (!itemName) return;
+
+    const newRow = {
+      id: `${batchAddCategory}-${Date.now()}`,
+      category: itemName,
+      estBudget: 0,
+      actualCost: 0,
+      dueDate: new Date().toISOString().split('T')[0],
+      status: 'pending'
+    };
+
+    const updatedBuckets = { 
+      ...state.buckets, 
+      [batchAddCategory]: [...(state.buckets[batchAddCategory] || []), newRow] 
+    };
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+
+    // Clear input and refocus
+    batchItemNameRef.current.value = '';
+    batchItemNameRef.current.focus();
+  };
+
   const updateRow = (bucket, id, field, value) => {
     const updatedBuckets = {
       ...state.buckets,
@@ -375,7 +541,18 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setState(updatedState);
   };
 
-  // Tier 1: Duplicate item
+  // Tier 3: Auto-fill actual from budget
+  const handleActualCostBlur = (bucket, id, value) => {
+    const item = state.buckets[bucket].find(x => x.id === id);
+    if (!item) return;
+
+    // If actual cost is 0 or empty, auto-fill from estimated budget
+    const actualValue = parseFloat(value) || 0;
+    const finalValue = actualValue === 0 && item.estBudget > 0 ? item.estBudget : actualValue;
+
+    updateRow(bucket, id, 'actualCost', finalValue);
+  };
+
   const duplicateItem = (bucket, id) => {
     const item = state.buckets[bucket].find(x => x.id === id);
     if (!item) return;
@@ -390,13 +567,12 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const updatedBuckets = { ...state.buckets, [bucket]: [...state.buckets[bucket], newItem] };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudget(updatedState, 'Item duplicated!'), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item duplicated!'), 100);
   };
 
-  // Tier 1: Collapse/Expand all
   const collapseAll = () => {
     const allCategories = {};
-    [...DEFAULT_ORDER, ...Object.keys(state.buckets || {}).filter(k => !DEFAULT_ORDER.includes(k))].forEach(key => {
+    categoryOrder.forEach(key => {
       allCategories[key] = true;
     });
     setCollapsedCategories(allCategories);
@@ -410,7 +586,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setCollapsedCategories(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Tier 1: Bulk operations
   const toggleSelectItem = (bucket, id) => {
     const key = `${bucket}:${id}`;
     setSelectedItems(prev => {
@@ -437,7 +612,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
     setSelectedItems(new Set());
-    setTimeout(() => saveBudget(updatedState, `${selectedItems.size} items deleted!`), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `${selectedItems.size} items deleted!`), 100);
   };
 
   const bulkArchive = () => {
@@ -458,7 +633,36 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const updatedState = { ...state, buckets: updatedBuckets, archived: newArchived };
     setState(updatedState);
     setSelectedItems(new Set());
-    setTimeout(() => saveBudget(updatedState, `${selectedItems.size} items archived!`), 100);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `${selectedItems.size} items archived!`), 100);
+  };
+
+  const addFromTemplate = (template) => {
+    const newItem = {
+      id: `${template.category}-${Date.now()}`,
+      category: template.name,
+      estBudget: template.estBudget,
+      actualCost: 0,
+      dueDate: new Date().toISOString().split('T')[0],
+      status: 'pending'
+    };
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [template.category]: [...(state.buckets[template.category] || []), newItem]
+    };
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setShowTemplates(false);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `Added "${template.name}" from template!`), 100);
+  };
+
+  const getCategoryStatusCounts = (items) => {
+    const counts = { overdue: 0, pending: 0, paid: 0 };
+    items.forEach(item => {
+      const status = getItemStatus(item);
+      counts[status]++;
+    });
+    return counts;
   };
 
   const BucketSection = ({ bucketName, items, title }) => {
@@ -467,21 +671,36 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const displayTitle = categoryNames[bucketName] || title;
     const isCollapsed = collapsedCategories[bucketName];
 
-    // Filter items by status
-    const filteredItems = items.filter(item => {
+    let filteredItems = items.filter(item => {
       if (statusFilter === 'all') return true;
       return getItemStatus(item) === statusFilter;
     });
 
-    // Calculate subtotals
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filteredItems = filteredItems.filter(item => 
+        item.category?.toLowerCase().includes(query) ||
+        item.estBudget?.toString().includes(query) ||
+        item.actualCost?.toString().includes(query)
+      );
+    }
+
     const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
     const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
     const variance = totalActual - totalBudgeted;
+    const statusCounts = getCategoryStatusCounts(items);
 
     return (
-      <div className="mb-8">
-        <div className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between">
+      <div 
+        className="mb-8"
+        draggable
+        onDragStart={(e) => handleCategoryDragStart(e, bucketName)}
+        onDragOver={handleCategoryDragOver}
+        onDrop={(e) => handleCategoryDrop(e, bucketName)}
+      >
+        <div className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2">
+            <GripVertical className="w-4 h-4 text-gray-400" />
             <button
               onClick={() => toggleCategory(bucketName)}
               className="p-1 hover:bg-gray-800 rounded transition-colors"
@@ -492,14 +711,38 @@ const EditorTab = ({ state, setState, saveBudget }) => {
             <IconComponent className={`w-5 h-5 ${iconColor}`} aria-hidden="true" />
             <h3 className="text-lg font-semibold">{displayTitle}</h3>
             <span className="text-sm opacity-75">({filteredItems.length} items)</span>
+            
+            <div className="flex gap-1 ml-2">
+              {statusCounts.overdue > 0 && (
+                <span className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  {statusCounts.overdue}
+                </span>
+              )}
+              {statusCounts.pending > 0 && (
+                <span className="px-2 py-0.5 bg-yellow-500 text-white text-xs rounded-full flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {statusCounts.pending}
+                </span>
+              )}
+            </div>
           </div>
-          <button
-            onClick={() => renameCategory(bucketName)}
-            className="p-1 hover:bg-gray-800 rounded transition-colors"
-            title="Rename Category"
-          >
-            <Edit2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportCategoryToCSV(bucketName, items)}
+              className="p-1 hover:bg-gray-800 rounded transition-colors"
+              title="Export to CSV"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => renameCategory(bucketName)}
+              className="p-1 hover:bg-gray-800 rounded transition-colors"
+              title="Rename Category"
+            >
+              <Edit2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {!isCollapsed && (
@@ -569,6 +812,11 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                           type="text"
                           defaultValue={item.category}
                           onBlur={(e) => updateRow(bucketName, item.id, 'category', e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.target.blur();
+                            }
+                          }}
                           className="w-full p-1 border rounded bg-white"
                           placeholder="Enter item name"
                         />
@@ -578,6 +826,11 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                           type="number"
                           defaultValue={item.estBudget}
                           onBlur={(e) => updateRow(bucketName, item.id, 'estBudget', parseFloat(e.target.value) || 0)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.target.blur();
+                            }
+                          }}
                           className="w-full p-1 border rounded bg-white text-right"
                           step="0.01"
                         />
@@ -586,9 +839,15 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                         <input
                           type="number"
                           defaultValue={item.actualCost}
-                          onBlur={(e) => updateRow(bucketName, item.id, 'actualCost', parseFloat(e.target.value) || 0)}
+                          onBlur={(e) => handleActualCostBlur(bucketName, item.id, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.target.blur();
+                            }
+                          }}
                           className="w-full p-1 border rounded bg-white text-right"
                           step="0.01"
+                          placeholder={item.estBudget > 0 ? `Auto: ${item.estBudget}` : '0'}
                         />
                       </td>
                       <td className="px-4 py-2 w-36">
@@ -596,6 +855,11 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                           type="date"
                           defaultValue={item.dueDate}
                           onBlur={(e) => updateRow(bucketName, item.id, 'dueDate', e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.target.blur();
+                            }
+                          }}
                           className="w-full p-1 border rounded bg-white"
                         />
                       </td>
@@ -686,7 +950,15 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         {isCollapsed && (
           <div className="border border-gray-300 rounded-b-lg bg-gray-50 px-4 py-3">
             <div className="flex items-center justify-between text-sm text-gray-600">
-              <span>{filteredItems.length} items</span>
+              <div className="flex items-center gap-3">
+                <span>{filteredItems.length} items</span>
+                {statusCounts.overdue > 0 && (
+                  <span className="text-red-600 font-medium">{statusCounts.overdue} overdue</span>
+                )}
+                {statusCounts.pending > 0 && (
+                  <span className="text-yellow-600 font-medium">{statusCounts.pending} pending</span>
+                )}
+              </div>
               <div className="flex gap-4">
                 <span>Budgeted: <strong>${totalBudgeted.toFixed(2)}</strong></span>
                 <span>Actual: <strong>${totalActual.toFixed(2)}</strong></span>
@@ -701,16 +973,39 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     );
   };
 
-  const customBuckets = useMemo(
-    () => Object.keys(state.buckets || {}).filter(k => !DEFAULT_ORDER.includes(k)),
-    [state.buckets]
-  );
-
   return (
     <PageContainer className="py-6">
       <div className="mb-4 bg-transparent">
-        <div className="rounded-b-xl border border-transparent bg-transparent px-4 py-3">
+        <div className="rounded-b-xl border border-transparent bg-transparent px-4 py-3 flex items-center justify-between">
           <h2 className="text-2xl font-bold text-slate-800">Budget Editor</h2>
+          {isSaving && (
+            <div className="flex items-center gap-2 text-blue-600 animate-pulse">
+              <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
+              <span className="text-sm font-medium">Saving...</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div className="mb-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search items by name, budget, or cost..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
 
@@ -747,7 +1042,30 @@ const EditorTab = ({ state, setState, saveBudget }) => {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowTemplates(!showTemplates)}
+            className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            title="Quick Templates"
+          >
+            <Zap className="w-4 h-4" />
+            Templates
+          </button>
+
+          {/* Tier 3: Batch Add Mode Toggle */}
+          <button
+            onClick={() => setBatchAddMode(!batchAddMode)}
+            className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${
+              batchAddMode 
+                ? 'bg-orange-600 text-white hover:bg-orange-700' 
+                : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+            }`}
+            title="Batch Add Mode"
+          >
+            <ListPlus className="w-4 h-4" />
+            Batch Add {batchAddMode && '(ON)'}
+          </button>
+          
           {selectedItems.size > 0 && (
             <>
               <button
@@ -803,6 +1121,89 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         </div>
       </div>
 
+      {/* Tier 3: Batch Add Panel */}
+      {batchAddMode && (
+        <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-orange-900">Batch Add Mode - Quick Item Entry</h3>
+            <button
+              onClick={() => setBatchAddMode(false)}
+              className="text-orange-600 hover:text-orange-800"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Select Category</label>
+              <select
+                value={batchAddCategory}
+                onChange={(e) => setBatchAddCategory(e.target.value)}
+                className="w-full p-2 border border-orange-200 rounded focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="">-- Choose Category --</option>
+                {categoryOrder.map(key => (
+                  <option key={key} value={key}>
+                    {categoryNames[key] || DEFAULT_TITLES[key] || key}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Item Name</label>
+              <input
+                ref={batchItemNameRef}
+                type="text"
+                placeholder="Enter item name and press Enter"
+                disabled={!batchAddCategory}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    addBatchItem(e);
+                  }
+                }}
+                className="w-full p-2 border border-orange-200 rounded focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
+              />
+            </div>
+            <button
+              onClick={addBatchItem}
+              disabled={!batchAddCategory}
+              className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+          </div>
+          <p className="text-xs text-gray-600 mt-2">💡 Tip: Press Enter after typing item name to quickly add multiple items</p>
+        </div>
+      )}
+
+      {/* Templates Panel */}
+      {showTemplates && (
+        <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-indigo-900">Quick Templates</h3>
+            <button
+              onClick={() => setShowTemplates(false)}
+              className="text-indigo-600 hover:text-indigo-800"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+            {ITEM_TEMPLATES.map((template, idx) => (
+              <button
+                key={idx}
+                onClick={() => addFromTemplate(template)}
+                className="p-3 bg-white border border-indigo-200 rounded hover:bg-indigo-100 text-left transition-colors"
+              >
+                <div className="font-medium text-sm text-gray-900">{template.name}</div>
+                <div className="text-xs text-gray-600 mt-1">${template.estBudget.toFixed(2)}</div>
+                <div className="text-xs text-indigo-600 mt-1 capitalize">{template.category}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {recentlyDeleted && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded flex items-center justify-between">
           <span className="text-sm text-red-800">
@@ -844,24 +1245,19 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         </div>
       </div>
 
-      <BucketSection bucketName="income"         items={state.buckets?.income || []}         title="Income" />
-      <BucketSection bucketName="housing"        items={state.buckets?.housing || []}        title="Housing" />
-      <BucketSection bucketName="transportation" items={state.buckets?.transportation || []} title="Transportation" />
-      <BucketSection bucketName="food"           items={state.buckets?.food || []}           title="Food & Dining" />
-      <BucketSection bucketName="personal"       items={state.buckets?.personal || []}       title="Personal" />
-      <BucketSection bucketName="homeOffice"     items={state.buckets?.homeOffice || []}     title="Home & Office" />
-      <BucketSection bucketName="banking"        items={state.buckets?.banking || []}        title="Banking & Finance" />
-      <BucketSection bucketName="subscriptions"  items={state.buckets?.subscriptions || []}  title="Subscriptions" />
-      <BucketSection bucketName="misc"           items={state.buckets?.misc || []}           title="Miscellaneous" />
-
-      {customBuckets.map(key => (
-        <BucketSection
-          key={key}
-          bucketName={key}
-          items={state.buckets?.[key] || []}
-          title={key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1')}
-        />
-      ))}
+      {/* Render categories in custom order */}
+      {categoryOrder.map(key => {
+        if (!state.buckets[key]) return null;
+        const title = DEFAULT_TITLES[key] || key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
+        return (
+          <BucketSection
+            key={key}
+            bucketName={key}
+            items={state.buckets[key]}
+            title={title}
+          />
+        );
+      })}
     </PageContainer>
   );
 };

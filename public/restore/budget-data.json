@@ -16,6 +16,46 @@
                 "actualCost": 0,
                 "dueDate": "2025-10-14",
                 "status": "pending"
+            },
+            {
+                "id": "income-1759379184190",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
+            },
+            {
+                "id": "income-1759379185792",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
+            },
+            {
+                "id": "income-1759379186967",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
+            },
+            {
+                "id": "income-1759379189081",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
+            },
+            {
+                "id": "income-1759379189670",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
             }
         ],
         "housing": [
@@ -24,7 +64,7 @@
                 "category": "Rent\/Mortgage",
                 "estBudget": 2575,
                 "actualCost": 0,
-                "dueDate": "2025-10-01",
+                "dueDate": "2025-10-31",
                 "status": "pending"
             },
             {
@@ -32,15 +72,41 @@
                 "category": "Spectrum Mobile",
                 "estBudget": 325.39999999999998,
                 "actualCost": 0,
-                "dueDate": "2025-09-04",
-                "status": "pending"
+                "dueDate": "2025-10-04",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-09-04",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "hou-3",
                 "category": "Spectrum Internet",
                 "estBudget": 132.25,
                 "actualCost": 0,
-                "dueDate": "2025-09-09",
+                "dueDate": "2025-10-09",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-09-09",
+                    "status": "pending",
+                    "actualCost": 0
+                }
+            },
+            {
+                "id": "housing-1759342448556",
+                "category": "Spectrum Mobile",
+                "estBudget": 325.39999999999998,
+                "actualCost": 0,
+                "dueDate": "2025-09-04",
+                "status": "pending"
+            },
+            {
+                "id": "housing-1759379188027",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
                 "status": "pending"
             }
         ],
@@ -300,28 +366,36 @@
                 "actualCost": 0,
                 "dueDate": "2025-09-16",
                 "status": "pending"
+            },
+            {
+                "id": "subscriptions-1759379284296",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
+            },
+            {
+                "id": "subscriptions-1759379285046",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
+            },
+            {
+                "id": "subscriptions-1759379285535",
+                "category": "",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-02",
+                "status": "pending"
             }
         ],
         "misc": [
             {
                 "id": "misc-1759295661055",
                 "category": "wrg",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-10-31",
-                "status": "pending"
-            },
-            {
-                "id": "misc-1759339198939",
-                "category": "",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-10-31",
-                "status": "pending"
-            },
-            {
-                "id": "misc-1759339557717",
-                "category": "",
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",

@@ -19,6 +19,7 @@ const BudgetDashboard = () => {
   const [isArchiveDrawerOpen, setIsArchiveDrawerOpen] = useState(false);
   const [isStatementScannerOpen, setIsStatementScannerOpen] = useState(false);
 
+  // Init once
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -60,6 +61,7 @@ const BudgetDashboard = () => {
     setSaveStatus(null);
     try {
       const result = await saveToServer(customState || state);
+      // Allow false to suppress notification entirely
       if (customMessage !== false) {
         setSaveStatus(
           result?.success
@@ -120,7 +122,25 @@ const BudgetDashboard = () => {
   if (isLoading) return <LoadingGate />;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50" style={{ overflowY: 'scroll' }}>
+      {/* Notification Portal - Completely isolated from layout */}
+      {saveStatus && (
+        <div
+          className="fixed inset-0 pointer-events-none z-[9999]"
+          style={{ isolation: 'isolate' }}
+        >
+          <div
+            className={`absolute top-20 right-4 px-4 py-2 rounded-lg shadow-lg pointer-events-auto ${
+              saveStatus.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {saveStatus.message}
+          </div>
+        </div>
+      )}
+
       <StickyToolbar bgTint={activeTabConfig?.bgColor || ''}>
         <div className="flex justify-between items-center h-14">
           <div className="flex space-x-1">
@@ -197,18 +217,6 @@ const BudgetDashboard = () => {
           </div>
         </div>
       </StickyToolbar>
-
-      {saveStatus && (
-        <div
-          className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg shadow-lg ${
-            saveStatus.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
-          }`}
-          role="status"
-          aria-live="polite"
-        >
-          {saveStatus.message}
-        </div>
-      )}
 
       <div className={`${activeTabConfig?.bgColor || 'bg-white'} min-h-screen`}>
         {activeTab === 'dashboard' && (
