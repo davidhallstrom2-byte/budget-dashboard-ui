@@ -122,7 +122,7 @@ const BudgetDashboard = () => {
   if (isLoading) return <LoadingGate />;
 
   return (
-    <div className="min-h-screen bg-gray-50" style={{ overflowY: 'scroll' }}>
+    <div className="min-h-screen bg-gray-50">
       {/* Notification Portal - Completely isolated from layout */}
       {saveStatus && (
         <div

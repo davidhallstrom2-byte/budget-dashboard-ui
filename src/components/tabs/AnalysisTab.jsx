@@ -40,10 +40,10 @@ export default function AnalysisTab({ state }) {
   const getSpendingInsights = () => {
     const insights = [];
     categoryData.forEach(cat => {
-      if (cat.actual > cat.budgeted) insights.push({ type: 'warning', message: `${cat.name} is over budget by $${(cat.actual - cat.budgeted).toFixed(2)}` });
+      if (cat.actual > cat.budgeted) insights.push({ type: 'warning', message: `${cat.name} is over budget by ${(cat.actual - cat.budgeted).toFixed(2)}` });
     });
     if (savingsRate < 10) insights.push({ type: 'alert', message: 'Low savings rate, consider reducing discretionary spending' });
-    else if (savingsRate > 20) insights.push({ type: 'success', message: 'Great savings rate! You’re on track for goals' });
+    else if (savingsRate > 20) insights.push({ type: 'success', message: 'Great savings rate! You are on track for goals' });
     if (expenseRatio > 90) insights.push({ type: 'alert', message: 'High expense ratio, limited buffer' });
     return insights;
   };
@@ -52,11 +52,8 @@ export default function AnalysisTab({ state }) {
 
   return (
     <PageContainer className="py-6 space-y-6">
-      {/* Header Bar — inherits page bg */}
-      <div className="mb-2 bg-transparent">
-        <div className="rounded-b-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <h2 className="text-2xl font-bold text-slate-800">Budget Analysis</h2>
-        </div>
+      <div className="bg-gradient-to-r from-purple-50 to-purple-100 border-2 border-purple-200 rounded-xl px-6 py-4 mb-6">
+        <h2 className="text-2xl font-bold text-slate-800">Budget Analysis</h2>
       </div>
 
       <div className="grid grid-cols-1 gap-4">

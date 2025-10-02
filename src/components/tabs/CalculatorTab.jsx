@@ -106,13 +106,10 @@ export default function CalculatorTab({ state }) {
   const anchorStyle = { scrollMarginTop: `${STICKY_OFFSET}px` };
 
   return (
-    <PageContainer className="py-6 space-y-6">
-      {/* Header Bar — inherits page bg */}
-      <div className="mb-2 bg-transparent">
-        <div className="rounded-b-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <h2 className="text-2xl font-bold text-slate-800">Budget Calculator</h2>
-        </div>
-      </div>
+<PageContainer className="py-6">
+  <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-200 rounded-xl px-6 py-4 mb-6">
+    <h2 className="text-2xl font-bold text-slate-800">Budget Calculator</h2>
+  </div>
 
       {/* Top selector pills */}
       <div className="flex flex-wrap gap-2">

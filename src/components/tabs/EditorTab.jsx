@@ -729,15 +729,23 @@ const EditorTab = ({ state, setState, saveBudget }) => {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => addRow(bucketName)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm font-medium"
+              title="Add Item"
+            >
+              <Plus className="w-4 h-4" />
+              Add Item
+            </button>
+            <button
               onClick={() => exportCategoryToCSV(bucketName, items)}
-              className="p-1 hover:bg-gray-800 rounded transition-colors"
+              className="p-1.5 hover:bg-gray-800 rounded transition-colors"
               title="Export to CSV"
             >
               <Download className="w-4 h-4" />
             </button>
             <button
               onClick={() => renameCategory(bucketName)}
-              className="p-1 hover:bg-gray-800 rounded transition-colors"
+              className="p-1.5 hover:bg-gray-800 rounded transition-colors"
               title="Rename Category"
             >
               <Edit2 className="w-4 h-4" />
@@ -927,23 +935,17 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                   <td className="px-4 py-2 text-right font-bold text-gray-900">${totalBudgeted.toFixed(2)}</td>
                   <td className="px-4 py-2 text-right font-bold text-gray-900">${totalActual.toFixed(2)}</td>
                   <td className="px-4 py-2 text-right font-semibold" colSpan="2">
-                    <span className={variance > 0 ? 'text-red-600' : 'text-green-600'}>
-                      Variance: {variance > 0 ? '+' : ''}${variance.toFixed(2)}
-                    </span>
+                    {variance === 0 ? (
+                      <span className="text-gray-600">On Budget</span>
+                    ) : variance > 0 ? (
+                      <span className="text-red-600">Over: +${variance.toFixed(2)}</span>
+                    ) : (
+                      <span className="text-green-600">Under: ${Math.abs(variance).toFixed(2)}</span>
+                    )}
                   </td>
                 </tr>
               </tfoot>
             </table>
-
-            <div className="p-4 bg-gray-50 rounded-b-lg flex items-center justify-between">
-              <button
-                onClick={() => addRow(bucketName)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                <Plus className="w-4 h-4" />
-                Add Item
-              </button>
-            </div>
           </div>
         )}
 
@@ -975,17 +977,17 @@ const EditorTab = ({ state, setState, saveBudget }) => {
 
   return (
     <PageContainer className="py-6">
-      <div className="mb-4 bg-transparent">
-        <div className="rounded-b-xl border border-transparent bg-transparent px-4 py-3 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-slate-800">Budget Editor</h2>
-          {isSaving && (
-            <div className="flex items-center gap-2 text-blue-600 animate-pulse">
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-              <span className="text-sm font-medium">Saving...</span>
-            </div>
-          )}
-        </div>
+      <div className="bg-gradient-to-r from-orange-50 to-orange-100 border-2 border-orange-200 rounded-xl px-6 py-4 mb-6">
+  <div className="flex items-center justify-between">
+    <h2 className="text-2xl font-bold text-slate-800">Budget Editor</h2>
+    {isSaving && (
+      <div className="flex items-center gap-2 text-orange-600 animate-pulse">
+        <div className="w-2 h-2 bg-orange-600 rounded-full animate-bounce"></div>
+        <span className="text-sm font-medium">Saving...</span>
       </div>
+    )}
+  </div>
+</div>
 
       {/* Search bar */}
       <div className="mb-4">

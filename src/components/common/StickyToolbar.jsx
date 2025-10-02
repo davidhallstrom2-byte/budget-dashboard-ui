@@ -18,7 +18,7 @@ export default function StickyToolbar({ children, bgTint = "" }) {
       role="navigation"
       aria-label="Budget Dashboard toolbar"
     >
-      {/* Match PageContainer width (adjust if you changed PageContainer’s max width) */}
+      {/* Match PageContainer width (adjust if you changed PageContainer's max width) */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {children}
       </div>
