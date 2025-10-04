@@ -34,6 +34,22 @@
                 "actualCost": 0,
                 "dueDate": "2025-10-09",
                 "status": "pending"
+            },
+            {
+                "id": "housing-1759387279984",
+                "category": "Gas",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-01",
+                "status": "pending"
+            },
+            {
+                "id": "housing-1759387288925",
+                "category": "Electric",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-02",
+                "status": "pending"
             }
         ],
         "transportation": [
@@ -50,20 +66,25 @@
                 "category": "AAA",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-10-01",
-                "status": "pending"
+                "dueDate": "2025-07-24",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-06-24",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "tra-1",
                 "category": "Gas",
                 "estBudget": 120,
                 "actualCost": 115.75,
-                "dueDate": "2025-10-31",
+                "dueDate": "2025-10-07",
                 "status": "pending"
             },
             {
                 "id": "tra-2",
-                "category": "Insurance",
+                "category": "Intergon Auto Ins",
                 "estBudget": 100,
                 "actualCost": 100,
                 "dueDate": "2025-09-01",
@@ -102,15 +123,6 @@
                 "actualCost": 0,
                 "dueDate": "",
                 "status": "pending"
-            },
-            {
-                "id": "foo-4",
-                "category": "Instacart",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-09-23",
-                "status": "pending",
-                "annualSub": 79
             }
         ],
         "personal": [
@@ -127,9 +139,9 @@
             {
                 "id": "hom-1",
                 "category": "Spectrum Internet",
-                "estBudget": 135,
+                "estBudget": 132.25,
                 "actualCost": 0,
-                "dueDate": "2025-10-01",
+                "dueDate": "2025-10-20",
                 "status": "pending"
             },
             {
@@ -137,7 +149,7 @@
                 "category": "ChatGPT Plus",
                 "estBudget": 19.989999999999998,
                 "actualCost": 0,
-                "dueDate": "2025-10-26",
+                "dueDate": "2025-10-27",
                 "status": "pending"
             },
             {
@@ -184,15 +196,41 @@
                 "category": "Wells Fargo Service Fee",
                 "estBudget": 25,
                 "actualCost": 0,
-                "dueDate": "2025-10-01",
-                "status": "pending"
+                "dueDate": "2025-11-02",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-02",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-4",
                 "category": "U.S. Bank Service Fee",
-                "estBudget": 5.9900000000000002,
+                "estBudget": 14.949999999999999,
                 "actualCost": 0,
-                "dueDate": "2025-10-21",
+                "dueDate": "2025-11-18",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-18",
+                    "status": "pending",
+                    "actualCost": 0
+                }
+            },
+            {
+                "id": "ban-1759153289207",
+                "category": "Credit One",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-22",
+                "status": "pending"
+            },
+            {
+                "id": "ban-1759153289481",
+                "category": "Credit One X5",
+                "estBudget": 30,
+                "actualCost": 30,
+                "dueDate": "2025-10-03",
                 "status": "pending"
             },
             {
@@ -204,43 +242,27 @@
                 "status": "pending"
             },
             {
-                "id": "ban-1759153289207",
-                "category": "Credit One",
-                "estBudget": -0.01,
-                "actualCost": 0,
-                "dueDate": "",
-                "status": "pending"
-            },
-            {
-                "id": "ban-1759153289481",
-                "category": "Credit One X5",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
-                "status": "pending"
-            },
-            {
                 "id": "ban-1759153289735",
                 "category": "Capital One",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
-                "status": "pending"
-            },
-            {
-                "id": "ban-1759153289933",
-                "category": "Milestone (Concora)",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
+                "estBudget": 69,
+                "actualCost": 69,
+                "dueDate": "2025-10-09",
                 "status": "pending"
             },
             {
                 "id": "ban-1759153387192",
                 "category": "Avant",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
+                "estBudget": 25.25,
+                "actualCost": 30,
+                "dueDate": "2025-10-07",
+                "status": "pending"
+            },
+            {
+                "id": "ban-1759153289933",
+                "category": "Milestone (Concora)",
+                "estBudget": 40,
+                "actualCost": 40,
+                "dueDate": "2025-10-13",
                 "status": "pending"
             },
             {
@@ -248,8 +270,21 @@
                 "category": "Petal",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "",
+                "dueDate": "2025-11-26",
                 "status": "pending"
+            },
+            {
+                "id": "banking-1759514314994",
+                "category": "Cash App",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-03",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-03",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             }
         ],
         "subscriptions": [
@@ -315,6 +350,17 @@
             "status": "pending",
             "originalBucket": "homeOffice",
             "archivedAt": "2025-09-29T13:33:59.349Z"
+        },
+        {
+            "id": "foo-4",
+            "category": "Instacart",
+            "estBudget": 0,
+            "actualCost": 0,
+            "dueDate": "2025-11-02",
+            "status": "pending",
+            "annualSub": 79,
+            "originalBucket": "food",
+            "archivedAt": "2025-10-03T18:27:47.556Z"
         }
     ]
 }
