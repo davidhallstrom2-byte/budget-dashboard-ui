@@ -3,6 +3,7 @@ import React from "react";
 import PageContainer from "../common/PageContainer";
 import FinancialHealthCard from "../modern/FinancialHealthCard";
 import HealthRecommendations from "../modern/HealthRecommendations";
+import SpendingTrendsChart from "../modern/SpendingTrendsChart";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -137,6 +138,8 @@ export default function AnalysisTab({ state }) {
             </div>
           </div>
         </div>
+
+        <SpendingTrendsChart state={state} />
 
         <div className="bg-white rounded-lg border border-slate-200 p-6">
           <h3 className="font-semibold text-slate-900 mb-4">Income vs Expenses Trend</h3>

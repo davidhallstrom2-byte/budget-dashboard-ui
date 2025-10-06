@@ -1,3 +1,4 @@
+// src/components/tabs/DashboardTab.jsx
 import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download } from 'lucide-react';
 import {
@@ -5,6 +6,7 @@ import {
   CreditCard, Repeat, Package
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
+import EmergencyFundWidget from '../modern/EmergencyFundWidget';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -34,9 +36,13 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [showUrgentAlert, setShowUrgentAlert] = useState(true);
 
   const categoryNames = state?.meta?.categoryNames || {};
-  const categoryOrder = state?.meta?.categoryOrder || Object.keys(state?.buckets || {});
+  const categoryOrder =
+    (state?.meta?.categoryOrder && state.meta.categoryOrder.length > 0)
+      ? state.meta.categoryOrder
+      : Object.keys(state?.buckets || {});
 
   const toggleCategory = (category) => {
     setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
@@ -115,6 +121,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
   const alerts = useMemo(() => {
     const allItems = [];
     Object.entries(state?.buckets || {}).forEach(([bucket, items]) => {
+      if (bucket === 'income') return;
       items.forEach(item => {
         allItems.push({ ...item, bucket });
       });
@@ -279,8 +286,68 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
         <h2 className="text-2xl font-bold text-slate-800">Budget Dashboard</h2>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      {/* Urgent Payment Alert Modal */}
+      {(() => {
+        const urgentItems = [];
+        Object.entries(state?.buckets || {}).forEach(([bucket, items]) => {
+          items.forEach(item => {
+            if (item.status !== 'paid') {
+              const today = new Date();
+              const dueDate = new Date(item.dueDate);
+              const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+              if (diffDays >= 0 && diffDays <= 3) {
+                urgentItems.push({ ...item, bucket, daysUntil: diffDays });
+              }
+            }
+          });
+        });
+
+        if (urgentItems.length === 0 || !showUrgentAlert) return null;
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-2xl max-w-md w-full">
+              <div className="bg-red-600 px-6 py-4 rounded-t-lg">
+                <div className="flex items-center gap-3 text-white">
+                  <AlertCircle className="w-8 h-8 flex-shrink-0" />
+                  <h3 className="text-xl font-bold">URGENT PAYMENT ALERT</h3>
+                </div>
+              </div>
+              
+              <div className="p-6">
+                <p className="text-red-900 font-semibold mb-4">
+                  {urgentItems.length} payment{urgentItems.length !== 1 ? 's' : ''} due within 3 days:
+                </p>
+                
+                <div className="space-y-3 mb-6">
+                  {urgentItems.map(item => (
+                    <div key={`${item.bucket}-${item.id}`} className="bg-red-50 border border-red-200 rounded p-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-bold text-red-900">{item.category}</p>
+                          <p className="text-sm text-red-700">
+                            {item.daysUntil === 0 ? '🔴 DUE TODAY' : `Due in ${item.daysUntil} day${item.daysUntil !== 1 ? 's' : ''}`}
+                          </p>
+                        </div>
+                        <p className="text-lg font-bold text-red-900">${(item.actualCost || item.estBudget || 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <button
+                  onClick={() => setShowUrgentAlert(false)}
+                  className="w-full px-4 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  I Acknowledge
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -324,7 +391,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
         </div>
       </div>
 
-      {/* Search and Filters */}
       <div className="mb-4 flex flex-col gap-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -345,8 +411,8 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-gray-700">Filter:</span>
             {[
               { id: 'all', label: 'All Items', color: 'bg-gray-200 text-gray-800' },
@@ -369,26 +435,25 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
             ))}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={exportAllToCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
             >
               <Download className="w-4 h-4" />
-              Export CSV
+              <span className="hidden sm:inline">Export CSV</span>
             </button>
             <button
               onClick={printReport}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
             >
               <Printer className="w-4 h-4" />
-              Print Report
+              <span className="hidden sm:inline">Print Report</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Alert Sections - Side by Side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {alerts.overdue.length > 0 && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -399,8 +464,8 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
             <div className="space-y-2">
               {alerts.overdue.slice(0, 5).map(item => (
                 <div key={item.id} className="flex items-center justify-between text-sm">
-                  <span className="text-red-800">{item.category}</span>
-                  <span className="text-red-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                  <span className="text-red-800 truncate">{item.category}</span>
+                  <span className="text-red-600 ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
                 </div>
               ))}
               {alerts.overdue.length > 5 && (
@@ -419,8 +484,8 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
             <div className="space-y-2">
               {alerts.upcoming.slice(0, 5).map(item => (
                 <div key={item.id} className="flex items-center justify-between text-sm">
-                  <span className="text-yellow-800">{item.category}</span>
-                  <span className="text-yellow-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                  <span className="text-yellow-800 truncate">{item.category}</span>
+                  <span className="text-yellow-600 ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
                 </div>
               ))}
               {alerts.upcoming.length > 5 && (
@@ -431,7 +496,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
         )}
       </div>
 
-      {/* Category Breakdown */}
       <div className="bg-white rounded-lg border border-gray-200 mb-6">
         <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
           <h3 className="font-semibold text-gray-900">Category Breakdown</h3>
@@ -457,11 +521,11 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                 onClick={() => toggleCategory(bucketName)}
                 className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                   {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   <IconComponent className={`w-5 h-5 ${iconColor}`} />
-                  <span className="font-medium">{displayTitle}</span>
-                  <span className="text-sm text-gray-500">({filteredItems.length} items)</span>
+                  <span className="font-medium text-sm sm:text-base">{displayTitle}</span>
+                  <span className="text-xs sm:text-sm text-gray-500">({filteredItems.length})</span>
                   
                   <div className="flex gap-1">
                     {statusCounts.overdue > 0 && (
@@ -479,15 +543,15 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-gray-600">Budget: <strong>${totalBudgeted.toFixed(2)}</strong></span>
+                <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm">
+                  <span className="text-gray-600 hidden sm:inline">Budget: <strong>${totalBudgeted.toFixed(2)}</strong></span>
                   <span className="text-gray-600">Actual: <strong>${totalActual.toFixed(2)}</strong></span>
                 </div>
               </button>
 
               {isExpanded && (
-                <div className="px-4 pb-4">
-                  <table className="w-full">
+                <div className="px-4 pb-4 overflow-x-auto">
+                  <table className="w-full min-w-[600px]">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Item</th>
@@ -524,20 +588,19 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
         })}
       </div>
 
-      {/* Complete Budget List */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+      <div className="bg-white rounded-lg border border-gray-200 mb-6">
+        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <h3 className="font-semibold text-gray-900">Complete Budget List</h3>
           <button
             onClick={printReport}
-            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm self-start sm:self-auto"
           >
             <Printer className="w-4 h-4" />
             Print
           </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[700px]">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Category</th>
@@ -569,6 +632,8 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
           </table>
         </div>
       </div>
+
+      <EmergencyFundWidget state={state} setState={setState} saveBudget={saveBudget} />
     </PageContainer>
   );
 };

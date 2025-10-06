@@ -1,8 +1,9 @@
+// src/components/tabs/EditorTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
-  CreditCard, Repeat, Package
+  CreditCard, Repeat, Package, PiggyBank
 } from 'lucide-react';
 import PageContainer from "../common/PageContainer.jsx";
 
@@ -15,15 +16,16 @@ const categoryIcons = {
   homeOffice:     { icon: Monitor,     color: 'text-indigo-600' },
   banking:        { icon: CreditCard,  color: 'text-emerald-600' },
   subscriptions:  { icon: Repeat,      color: 'text-teal-600' },
+  emergencyFund:  { icon: PiggyBank,   color: 'text-blue-600' },
   misc:           { icon: Package,     color: 'text-gray-600' },
 };
 
 const PROTECTED_BUCKETS = new Set([
-  'income','housing','transportation','food','personal','homeOffice','banking','subscriptions','misc'
+  'income','housing','transportation','food','personal','homeOffice','banking','subscriptions','emergencyFund','misc'
 ]);
 
 const DEFAULT_ORDER = [
-  'income','housing','transportation','food','personal','homeOffice','banking','subscriptions','misc'
+  'income','housing','transportation','food','personal','homeOffice','banking','subscriptions','emergencyFund','misc'
 ];
 
 const DEFAULT_TITLES = {
@@ -35,6 +37,7 @@ const DEFAULT_TITLES = {
   homeOffice: 'Home & Office',
   banking: 'Banking & Finance',
   subscriptions: 'Subscriptions',
+  emergencyFund: 'Emergency Fund',
   misc: 'Miscellaneous'
 };
 
@@ -51,6 +54,22 @@ const ITEM_TEMPLATES = [
   { name: 'Netflix', category: 'subscriptions', estBudget: 15.49, recurrence: 'monthly' },
   { name: 'Spotify', category: 'subscriptions', estBudget: 10.99, recurrence: 'monthly' },
 ];
+
+const getFridaysInMonth = (year, month) => {
+  const fridays = [];
+  const date = new Date(year, month, 1);
+  
+  while (date.getDay() !== 5) {
+    date.setDate(date.getDate() + 1);
+  }
+  
+  while (date.getMonth() === month) {
+    fridays.push(new Date(date));
+    date.setDate(date.getDate() + 7);
+  }
+  
+  return fridays;
+};
 
 const EditorTab = ({ state, setState, saveBudget }) => {
   const [draggedItem, setDraggedItem] = useState(null);
@@ -69,7 +88,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   
-  // Tier 3 features
   const [categoryOrder, setCategoryOrder] = useState([]);
   const [draggedCategory, setDraggedCategory] = useState(null);
   const [batchAddMode, setBatchAddMode] = useState(false);
@@ -83,7 +101,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     if (state?.meta?.categoryOrder) {
       setCategoryOrder(state.meta.categoryOrder);
     } else {
-      // Initialize with default order plus custom categories
       const customBuckets = Object.keys(state?.buckets || {}).filter(k => !DEFAULT_ORDER.includes(k));
       setCategoryOrder([...DEFAULT_ORDER, ...customBuckets]);
     }
@@ -122,12 +139,45 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Focus on batch add input when mode is enabled
   useEffect(() => {
     if (batchAddMode && batchItemNameRef.current) {
       batchItemNameRef.current.focus();
     }
   }, [batchAddMode, batchAddCategory]);
+
+  useEffect(() => {
+    if (!state?.buckets?.income) return;
+    
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    
+    const thisMonthIncome = state.buckets.income.filter(item => {
+      const itemDate = new Date(item.dueDate);
+      return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear;
+    });
+    
+    if (thisMonthIncome.length >= 4) return;
+    
+    const fridays = getFridaysInMonth(currentYear, currentMonth);
+    const newEntries = fridays.slice(0, 4).map((friday, idx) => ({
+      id: `income-${Date.now()}-${idx}`,
+      category: `CSC - Week ${idx + 1}`,
+      estBudget: 200,
+      actualCost: 0,
+      dueDate: friday.toISOString().split('T')[0],
+      status: 'pending'
+    }));
+    
+    const updatedBuckets = {
+      ...state.buckets,
+      income: [...state.buckets.income, ...newEntries]
+    };
+    
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, false), 100);
+  }, [state?.buckets?.income?.length]);
 
   const saveBudgetWithIndicator = async (customState = null, customMessage = null) => {
     setIsSaving(true);
@@ -156,25 +206,41 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const item = state.buckets[bucket].find(item => item.id === id);
     if (!item) return;
 
-    const currentDate = new Date(item.dueDate + 'T00:00:00');
     let newDate;
+    let updatedBuckets = { ...state.buckets };
     
-    if (bucket === 'subscriptions') {
+    if (bucket === 'income') {
+      newDate = new Date(item.dueDate + 'T00:00:00');
+      
+      const nextFriday = new Date(item.dueDate + 'T00:00:00');
+      nextFriday.setDate(nextFriday.getDate() + 7);
+      
+      const newIncomeEntry = {
+        id: `income-${Date.now()}`,
+        category: item.category,
+        estBudget: item.estBudget,
+        actualCost: 0,
+        dueDate: nextFriday.toISOString().split('T')[0],
+        status: 'pending'
+      };
+      
+      updatedBuckets.income = [...updatedBuckets.income, newIncomeEntry];
+    } else if (bucket === 'subscriptions') {
+      const currentDate = new Date(item.dueDate + 'T00:00:00');
       newDate = new Date(currentDate);
       newDate.setFullYear(newDate.getFullYear() + 1);
     } else {
+      const currentDate = new Date(item.dueDate + 'T00:00:00');
       newDate = new Date(currentDate);
       newDate.setMonth(newDate.getMonth() + 1);
     }
 
     const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
 
-    const updatedBuckets = {
-      ...state.buckets,
-      [bucket]: state.buckets[bucket].map(it =>
-        it.id === id ? { ...it, status: 'paid', dueDate: newDate.toISOString().split('T')[0], previousState } : it
-      )
-    };
+    updatedBuckets[bucket] = updatedBuckets[bucket].map(it =>
+      it.id === id ? { ...it, status: 'paid', dueDate: newDate.toISOString().split('T')[0], previousState } : it
+    );
+    
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
     setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item marked as paid!'), 100);
@@ -325,7 +391,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setDraggedFromBucket(null);
   };
 
-  // Tier 3: Category drag and drop
   const handleCategoryDragStart = (e, categoryKey) => {
     setDraggedCategory(categoryKey);
     e.dataTransfer.effectAllowed = 'move';
@@ -365,7 +430,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setDraggedCategory(null);
   };
 
-  // Tier 3: Export category to CSV
   const exportCategoryToCSV = (bucketName, items) => {
     const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
     
@@ -503,7 +567,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setState(updatedState);
   };
 
-  // Tier 3: Batch add mode
   const addBatchItem = (e) => {
     e.preventDefault();
     if (!batchAddCategory || !batchItemNameRef.current) return;
@@ -527,7 +590,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
 
-    // Clear input and refocus
     batchItemNameRef.current.value = '';
     batchItemNameRef.current.focus();
   };
@@ -541,12 +603,10 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setState(updatedState);
   };
 
-  // Tier 3: Auto-fill actual from budget
   const handleActualCostBlur = (bucket, id, value) => {
     const item = state.buckets[bucket].find(x => x.id === id);
     if (!item) return;
 
-    // If actual cost is 0 or empty, auto-fill from estimated budget
     const actualValue = parseFloat(value) || 0;
     const finalValue = actualValue === 0 && item.estBudget > 0 ? item.estBudget : actualValue;
 
@@ -665,25 +725,35 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     return counts;
   };
 
+  const getFilteredItems = (items) => {
+    let filtered = items;
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(item => {
+        const status = getItemStatus(item);
+        return status === statusFilter;
+      });
+    }
+
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(item =>
+        item.category?.toLowerCase().includes(query) ||
+        item.estBudget?.toString().includes(query) ||
+        item.actualCost?.toString().includes(query)
+      );
+    }
+
+    return filtered;
+  };
+
   const BucketSection = ({ bucketName, items, title }) => {
     const IconComponent = categoryIcons[bucketName]?.icon || Package;
     const iconColor = categoryIcons[bucketName]?.color || 'text-gray-600';
     const displayTitle = categoryNames[bucketName] || title;
     const isCollapsed = collapsedCategories[bucketName];
 
-    let filteredItems = items.filter(item => {
-      if (statusFilter === 'all') return true;
-      return getItemStatus(item) === statusFilter;
-    });
-
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filteredItems = filteredItems.filter(item => 
-        item.category?.toLowerCase().includes(query) ||
-        item.estBudget?.toString().includes(query) ||
-        item.actualCost?.toString().includes(query)
-      );
-    }
+    const filteredItems = getFilteredItems(items);
 
     const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
     const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
@@ -699,8 +769,8 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         onDrop={(e) => handleCategoryDrop(e, bucketName)}
       >
         <div className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between cursor-move">
-          <div className="flex items-center gap-2">
-            <GripVertical className="w-4 h-4 text-gray-400" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <GripVertical className="w-4 h-4 text-gray-400 hidden sm:block" />
             <button
               onClick={() => toggleCategory(bucketName)}
               className="p-1 hover:bg-gray-800 rounded transition-colors"
@@ -709,10 +779,10 @@ const EditorTab = ({ state, setState, saveBudget }) => {
               {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
             </button>
             <IconComponent className={`w-5 h-5 ${iconColor}`} aria-hidden="true" />
-            <h3 className="text-lg font-semibold">{displayTitle}</h3>
-            <span className="text-sm opacity-75">({filteredItems.length} items)</span>
+            <h3 className="text-base sm:text-lg font-semibold">{displayTitle}</h3>
+            <span className="text-xs sm:text-sm opacity-75">({filteredItems.length})</span>
             
-            <div className="flex gap-1 ml-2">
+            <div className="flex gap-1">
               {statusCounts.overdue > 0 && (
                 <span className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full flex items-center gap-1">
                   <AlertCircle className="w-3 h-3" />
@@ -727,14 +797,14 @@ const EditorTab = ({ state, setState, saveBudget }) => {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => addRow(bucketName)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm font-medium"
+              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-xs sm:text-sm font-medium"
               title="Add Item"
             >
               <Plus className="w-4 h-4" />
-              Add Item
+              <span className="hidden sm:inline">Add Item</span>
             </button>
             <button
               onClick={() => exportCategoryToCSV(bucketName, items)}
@@ -745,7 +815,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
             </button>
             <button
               onClick={() => renameCategory(bucketName)}
-              className="p-1.5 hover:bg-gray-800 rounded transition-colors"
+              className="p-1.5 hover:bg-gray-800 rounded transition-colors hidden sm:block"
               title="Rename Category"
             >
               <Edit2 className="w-4 h-4" />
@@ -755,11 +825,11 @@ const EditorTab = ({ state, setState, saveBudget }) => {
 
         {!isCollapsed && (
           <div
-            className="border border-gray-300 rounded-b-lg"
+            className="border border-gray-300 rounded-b-lg overflow-x-auto"
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, bucketName)}
           >
-            <table className="w-full">
+            <table className="w-full min-w-[800px]">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
@@ -768,7 +838,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                   <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Item</th>
                   <th className="px-4 py-2 text-right text-sm font-medium text-gray-700 w-28">Est. Budget</th>
                   <th className="px-4 py-2 text-right text-sm font-medium text-gray-700 w-28">Actual Cost</th>
-                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700 w-36">Due Date</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700 w-36">{bucketName === 'income' ? 'Received Date' : 'Due Date'}</th>
                   <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Actions</th>
                 </tr>
               </thead>
@@ -876,7 +946,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                           {item.status === 'paid' && item.previousState ? (
                             <button
                               onClick={() => handleUndoPaid(bucketName, item.id)}
-                              className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1"
+                              className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1 text-xs"
                               title="Undo Payment"
                             >
                               <Undo2 className="w-4 h-4" />
@@ -885,7 +955,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                           ) : (
                             <button
                               onClick={() => handlePaidClick(bucketName, item.id)}
-                              className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                              className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
                               title="Mark as Paid"
                             >
                               Paid
@@ -917,7 +987,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                           {(item.status === 'paid' || getRowBackgroundColor(item) !== 'bg-white border-gray-200') && (
                             <button
                               onClick={() => handleClearStatus(bucketName, item.id)}
-                              className="px-3 py-1 bg-gray-400 text-white rounded hover:bg-gray-500"
+                              className="px-3 py-1 bg-gray-400 text-white rounded hover:bg-gray-500 text-xs"
                               title="Clear Status (Reset to White)"
                             >
                               Clr
@@ -951,8 +1021,8 @@ const EditorTab = ({ state, setState, saveBudget }) => {
 
         {isCollapsed && (
           <div className="border border-gray-300 rounded-b-lg bg-gray-50 px-4 py-3">
-            <div className="flex items-center justify-between text-sm text-gray-600">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-gray-600 gap-2">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span>{filteredItems.length} items</span>
                 {statusCounts.overdue > 0 && (
                   <span className="text-red-600 font-medium">{statusCounts.overdue} overdue</span>
@@ -961,7 +1031,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                   <span className="text-yellow-600 font-medium">{statusCounts.pending} pending</span>
                 )}
               </div>
-              <div className="flex gap-4">
+              <div className="flex gap-4 flex-wrap">
                 <span>Budgeted: <strong>${totalBudgeted.toFixed(2)}</strong></span>
                 <span>Actual: <strong>${totalActual.toFixed(2)}</strong></span>
                 <span className={variance > 0 ? 'text-red-600' : 'text-green-600'}>
@@ -978,18 +1048,17 @@ const EditorTab = ({ state, setState, saveBudget }) => {
   return (
     <PageContainer className="py-6">
       <div className="bg-gradient-to-r from-orange-50 to-orange-100 border-2 border-orange-200 rounded-xl px-6 py-4 mb-6">
-  <div className="flex items-center justify-between">
-    <h2 className="text-2xl font-bold text-slate-800">Budget Editor</h2>
-    {isSaving && (
-      <div className="flex items-center gap-2 text-orange-600 animate-pulse">
-        <div className="w-2 h-2 bg-orange-600 rounded-full animate-bounce"></div>
-        <span className="text-sm font-medium">Saving...</span>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <h2 className="text-2xl font-bold text-slate-800">Budget Editor</h2>
+          {isSaving && (
+            <div className="flex items-center gap-2 text-orange-600 animate-pulse">
+              <div className="w-2 h-2 bg-orange-600 rounded-full animate-bounce"></div>
+              <span className="text-sm font-medium">Saving...</span>
+            </div>
+          )}
+        </div>
       </div>
-    )}
-  </div>
-</div>
 
-      {/* Search bar */}
       <div className="mb-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -1011,7 +1080,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         </div>
       </div>
 
-      {/* Status Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <span className="text-sm font-medium text-gray-700">Filter by Status:</span>
         {[
@@ -1034,96 +1102,95 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         ))}
       </div>
 
-      {/* Bulk Actions & Category Management */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div className="flex items-center gap-2">
-          <h3 className="text-xl font-semibold text-gray-800">Manage Categories & Items</h3>
-          {selectedItems.size > 0 && (
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-              {selectedItems.size} selected
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowTemplates(!showTemplates)}
-            className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-            title="Quick Templates"
-          >
-            <Zap className="w-4 h-4" />
-            Templates
-          </button>
+      <div className="flex flex-col gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-xl font-semibold text-gray-800">Manage Categories & Items</h3>
+            {selectedItems.size > 0 && (
+              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                {selectedItems.size} selected
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowTemplates(!showTemplates)}
+              className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm"
+              title="Quick Templates"
+            >
+              <Zap className="w-4 h-4" />
+              <span className="hidden sm:inline">Templates</span>
+            </button>
 
-          {/* Tier 3: Batch Add Mode Toggle */}
-          <button
-            onClick={() => setBatchAddMode(!batchAddMode)}
-            className={`flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-              batchAddMode 
-                ? 'bg-orange-600 text-white hover:bg-orange-700' 
-                : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
-            }`}
-            title="Batch Add Mode"
-          >
-            <ListPlus className="w-4 h-4" />
-            Batch Add {batchAddMode && '(ON)'}
-          </button>
-          
-          {selectedItems.size > 0 && (
-            <>
-              <button
-                onClick={bulkArchive}
-                className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
-                title="Archive Selected"
-              >
-                <Archive className="w-4 h-4" />
-                Archive ({selectedItems.size})
-              </button>
-              <button
-                onClick={bulkDelete}
-                className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                title="Delete Selected"
-              >
-                <Trash2 className="w-4 h-4" />
-                Delete ({selectedItems.size})
-              </button>
-            </>
-          )}
-          <button
-            onClick={collapseAll}
-            className="flex items-center gap-2 px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-            title="Collapse All Categories"
-          >
-            <ChevronDown className="w-4 h-4" />
-            Collapse All
-          </button>
-          <button
-            onClick={expandAll}
-            className="flex items-center gap-2 px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-            title="Expand All Categories"
-          >
-            <ChevronUp className="w-4 h-4" />
-            Expand All
-          </button>
-          <button
-            onClick={addCategory}
-            className="flex items-center gap-2 px-3 py-2 bg-black text-white rounded hover:bg-gray-900"
-            title="Add Category"
-          >
-            <FolderPlus className="w-4 h-4" />
-            Add Category
-          </button>
-          <button
-            onClick={deleteCategory}
-            className="flex items-center gap-2 px-3 py-2 bg-gray-200 text-gray-900 rounded hover:bg-gray-300"
-            title="Delete Category (must be empty)"
-          >
-            <FolderMinus className="w-4 h-4" />
-            Delete Category
-          </button>
+            <button
+              onClick={() => setBatchAddMode(!batchAddMode)}
+              className={`flex items-center gap-2 px-3 py-2 rounded transition-colors text-sm ${
+                batchAddMode 
+                  ? 'bg-orange-600 text-white hover:bg-orange-700' 
+                  : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+              }`}
+              title="Batch Add Mode"
+            >
+              <ListPlus className="w-4 h-4" />
+              <span className="hidden sm:inline">Batch Add {batchAddMode && '(ON)'}</span>
+            </button>
+            
+            {selectedItems.size > 0 && (
+              <>
+                <button
+                  onClick={bulkArchive}
+                  className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
+                  title="Archive Selected"
+                >
+                  <Archive className="w-4 h-4" />
+                  <span className="hidden sm:inline">Archive ({selectedItems.size})</span>
+                </button>
+                <button
+                  onClick={bulkDelete}
+                  className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                  title="Delete Selected"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Delete ({selectedItems.size})</span>
+                </button>
+              </>
+            )}
+            <button
+              onClick={collapseAll}
+              className="flex items-center gap-2 px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
+              title="Collapse All Categories"
+            >
+              <ChevronDown className="w-4 h-4" />
+              <span className="hidden lg:inline">Collapse All</span>
+            </button>
+            <button
+              onClick={expandAll}
+              className="flex items-center gap-2 px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
+              title="Expand All Categories"
+            >
+              <ChevronUp className="w-4 h-4" />
+              <span className="hidden lg:inline">Expand All</span>
+            </button>
+            <button
+              onClick={addCategory}
+              className="flex items-center gap-2 px-3 py-2 bg-black text-white rounded hover:bg-gray-900 text-sm"
+              title="Add Category"
+            >
+              <FolderPlus className="w-4 h-4" />
+              <span className="hidden lg:inline">Add Category</span>
+            </button>
+            <button
+              onClick={deleteCategory}
+              className="flex items-center gap-2 px-3 py-2 bg-gray-200 text-gray-900 rounded hover:bg-gray-300 text-sm"
+              title="Delete Category (must be empty)"
+            >
+              <FolderMinus className="w-4 h-4" />
+              <span className="hidden lg:inline">Delete Category</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Tier 3: Batch Add Panel */}
       {batchAddMode && (
         <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
           <div className="flex items-center justify-between mb-3">
@@ -1135,8 +1202,8 @@ const EditorTab = ({ state, setState, saveBudget }) => {
               ✕
             </button>
           </div>
-          <div className="flex gap-3 items-end">
-            <div className="flex-1">
+          <div className="flex flex-col sm:flex-row gap-3 items-end">
+            <div className="flex-1 w-full">
               <label className="block text-sm font-medium text-gray-700 mb-1">Select Category</label>
               <select
                 value={batchAddCategory}
@@ -1151,7 +1218,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                 ))}
               </select>
             </div>
-            <div className="flex-1">
+            <div className="flex-1 w-full">
               <label className="block text-sm font-medium text-gray-700 mb-1">Item Name</label>
               <input
                 ref={batchItemNameRef}
@@ -1178,7 +1245,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         </div>
       )}
 
-      {/* Templates Panel */}
       {showTemplates && (
         <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
           <div className="flex items-center justify-between mb-3">
@@ -1207,13 +1273,13 @@ const EditorTab = ({ state, setState, saveBudget }) => {
       )}
 
       {recentlyDeleted && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded flex items-center justify-between">
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
           <span className="text-sm text-red-800">
             Item deleted successfully!
           </span>
           <button
             onClick={undoDelete}
-            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 flex items-center gap-1"
+            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 flex items-center gap-1 text-sm"
           >
             <Undo2 className="w-4 h-4" />
             Undelete
@@ -1231,7 +1297,7 @@ const EditorTab = ({ state, setState, saveBudget }) => {
 
       <div className="mb-6 p-4 bg-gray-50 rounded-lg">
         <h3 className="font-semibold mb-2">Row Color Legend:</h3>
-        <div className="flex gap-4 text-sm">
+        <div className="flex flex-wrap gap-4 text-sm">
           <span className="flex items-center gap-2">
             <div className="w-4 h-4 bg-green-100 border border-green-200 rounded"></div>
             Paid
@@ -1247,7 +1313,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
         </div>
       </div>
 
-      {/* Render categories in custom order */}
       {categoryOrder.map(key => {
         if (!state.buckets[key]) return null;
         const title = DEFAULT_TITLES[key] || key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');

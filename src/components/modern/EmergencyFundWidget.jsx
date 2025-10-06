@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PiggyBank, TrendingUp, AlertCircle, Edit2, Check, X } from 'lucide-react';
 
 export default function EmergencyFundWidget({ state, setState, saveBudget }) {
   const [isEditing, setIsEditing] = useState(false);
   const [targetMonths, setTargetMonths] = useState(state?.meta?.emergencyFund?.targetMonths || 6);
-  const [currentAmount, setCurrentAmount] = useState(state?.meta?.emergencyFund?.currentAmount || 0);
 
   const buckets = state?.buckets || {};
   const sum = (arr, key) => (arr || []).reduce((s, x) => s + (Number(x?.[key]) || 0), 0);
   
+  // Auto-calculate current amount from emergencyFund bucket deposits
+  const currentAmount = sum(buckets.emergencyFund, 'actualCost');
+
   const monthlyExpenses = 
     sum(buckets.housing, 'estBudget') +
     sum(buckets.transportation, 'estBudget') +
@@ -24,6 +26,11 @@ export default function EmergencyFundWidget({ state, setState, saveBudget }) {
   const remainingAmount = Math.max(targetAmount - currentAmount, 0);
   const monthsCovered = monthlyExpenses > 0 ? currentAmount / monthlyExpenses : 0;
 
+  // Update local state when global state changes
+  useEffect(() => {
+    setTargetMonths(state?.meta?.emergencyFund?.targetMonths || 6);
+  }, [state?.meta?.emergencyFund?.targetMonths]);
+
   const handleSave = () => {
     const updatedState = {
       ...state,
@@ -31,18 +38,17 @@ export default function EmergencyFundWidget({ state, setState, saveBudget }) {
         ...state.meta,
         emergencyFund: {
           targetMonths: Number(targetMonths),
-          currentAmount: Number(currentAmount)
+          currentAmount: currentAmount // Store for backward compatibility, but auto-calculated
         }
       }
     };
     setState(updatedState);
-    saveBudget(updatedState, 'Emergency fund updated!');
+    saveBudget(updatedState, 'Emergency fund target updated!');
     setIsEditing(false);
   };
 
   const handleCancel = () => {
     setTargetMonths(state?.meta?.emergencyFund?.targetMonths || 6);
-    setCurrentAmount(state?.meta?.emergencyFund?.currentAmount || 0);
     setIsEditing(false);
   };
 
@@ -66,7 +72,7 @@ export default function EmergencyFundWidget({ state, setState, saveBudget }) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+    <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200 mb-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-100 rounded-lg">
@@ -81,7 +87,7 @@ export default function EmergencyFundWidget({ state, setState, saveBudget }) {
           <button
             onClick={() => setIsEditing(true)}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            title="Edit Emergency Fund"
+            title="Edit Target Months"
           >
             <Edit2 className="w-4 h-4 text-gray-600" />
           </button>
@@ -107,21 +113,13 @@ export default function EmergencyFundWidget({ state, setState, saveBudget }) {
 
       {isEditing ? (
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Current Amount Saved
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-              <input
-                type="number"
-                value={currentAmount}
-                onChange={(e) => setCurrentAmount(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                step="0.01"
-                min="0"
-              />
-            </div>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-900 mb-2">
+              <strong>Current Amount:</strong> ${currentAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className="text-xs text-blue-700">
+              Auto-calculated from Emergency Fund category in Editor. Add deposits there to update this amount.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -197,13 +195,17 @@ export default function EmergencyFundWidget({ state, setState, saveBudget }) {
 
           <div className="mt-4 p-3 bg-gray-50 rounded-lg">
             <p className="text-xs text-gray-600 mb-2">
-              <span className="font-semibold">Monthly Expenses:</span> ${monthlyExpenses.toFixed(2)}
+              <strong>Monthly Expenses:</strong> ${monthlyExpenses.toFixed(2)}
             </p>
-            {progressPercentage < 100 && remainingAmount > 0 && (
-              <p className="text-xs text-gray-600">
-                <span className="font-semibold">Tip:</span> Save ${(remainingAmount / 12).toFixed(2)}/month to reach your goal in 1 year
+            {currentAmount === 0 ? (
+              <p className="text-xs text-blue-600 font-medium">
+                Go to Editor tab → Emergency Fund category to add deposits
               </p>
-            )}
+            ) : progressPercentage < 100 && remainingAmount > 0 ? (
+              <p className="text-xs text-gray-600">
+                <strong>Tip:</strong> Save ${(remainingAmount / 12).toFixed(2)}/month to reach your goal in 1 year
+              </p>
+            ) : null}
           </div>
         </>
       )}

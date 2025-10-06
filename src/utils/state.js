@@ -67,9 +67,18 @@ function defaultState() {
       homeOffice: [],
       banking: [],
       subscriptions: [],
+      emergencyFund: [],  // ADD THIS LINE
       misc: [],
     },
     archived: [],
+    meta: {
+      categoryNames: {},
+      categoryOrder: [],
+      emergencyFund: {
+        targetMonths: 6,
+        currentAmount: 0
+      }
+    }
   };
 }
 

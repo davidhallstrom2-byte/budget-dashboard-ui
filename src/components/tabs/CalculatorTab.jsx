@@ -14,7 +14,7 @@ export default function CalculatorTab({ state }) {
   const [emergencyMonths, setEmergencyMonths] = useState('6');
   const sectionRefs = useRef({});
 
-  const STICKY_OFFSET = 96; // px
+  const STICKY_OFFSET = 96;
 
   const buckets = state?.buckets || {};
   const sum = (arr, key) => (arr || []).reduce((s, x) => s + (Number(x?.[key]) || 0), 0);
@@ -106,13 +106,12 @@ export default function CalculatorTab({ state }) {
   const anchorStyle = { scrollMarginTop: `${STICKY_OFFSET}px` };
 
   return (
-<PageContainer className="py-6">
-  <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-200 rounded-xl px-6 py-4 mb-6">
-    <h2 className="text-2xl font-bold text-slate-800">Budget Calculator</h2>
-  </div>
+    <PageContainer className="py-6">
+      <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-200 rounded-xl px-6 py-4 mb-6">
+        <h2 className="text-2xl font-bold text-slate-800">Budget Calculator</h2>
+      </div>
 
-      {/* Top selector pills */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 mb-6">
         {calculators.map(({ id, label, icon: Icon, color }) => {
           const active = activeCalculator === id;
           return (
@@ -129,8 +128,7 @@ export default function CalculatorTab({ state }) {
         })}
       </div>
 
-      {/* Income Calculator */}
-      <div ref={(el) => (sectionRefs.current['income'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div ref={(el) => (sectionRefs.current['income'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
         <div className="bg-blue-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Income Calculator</h3>
@@ -180,8 +178,7 @@ export default function CalculatorTab({ state }) {
         </div>
       </div>
 
-      {/* What-If Scenarios */}
-      <div ref={(el) => (sectionRefs.current['scenarios'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div ref={(el) => (sectionRefs.current['scenarios'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
         <div className="bg-purple-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">What-If Scenarios</h3>
@@ -236,8 +233,7 @@ export default function CalculatorTab({ state }) {
         </div>
       </div>
 
-      {/* Break-Even Calculator */}
-      <div ref={(el) => (sectionRefs.current['breakeven'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div ref={(el) => (sectionRefs.current['breakeven'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
         <div className="bg-green-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Break-Even Calculator</h3>
@@ -267,8 +263,7 @@ export default function CalculatorTab({ state }) {
         </div>
       </div>
 
-      {/* Savings Goal Planner */}
-      <div ref={(el) => (sectionRefs.current['savings'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div ref={(el) => (sectionRefs.current['savings'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
         <div className="bg-orange-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Savings Goal Planner</h3>
@@ -316,8 +311,7 @@ export default function CalculatorTab({ state }) {
         </div>
       </div>
 
-      {/* Debt Payoff Calculator */}
-      <div ref={(el) => (sectionRefs.current['debt'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div ref={(el) => (sectionRefs.current['debt'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
         <div className="bg-red-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Debt Payoff Calculator</h3>
@@ -376,7 +370,6 @@ export default function CalculatorTab({ state }) {
         </div>
       </div>
 
-      {/* Emergency Fund Calculator */}
       <div ref={(el) => (sectionRefs.current['emergency'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <div className="bg-indigo-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">

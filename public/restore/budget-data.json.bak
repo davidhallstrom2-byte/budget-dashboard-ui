@@ -15,6 +15,43 @@
                 "estBudget": 200,
                 "actualCost": 0,
                 "dueDate": "2025-10-14",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-14",
+                    "status": "pending",
+                    "actualCost": 0
+                }
+            },
+            {
+                "id": "income-1759721463835-0",
+                "category": "CSC - Week 1",
+                "estBudget": 200,
+                "actualCost": 0,
+                "dueDate": "2025-10-03",
+                "status": "pending"
+            },
+            {
+                "id": "income-1759721463835-1",
+                "category": "CSC - Week 2",
+                "estBudget": 200,
+                "actualCost": 0,
+                "dueDate": "2025-10-10",
+                "status": "pending"
+            },
+            {
+                "id": "income-1759721463835-2",
+                "category": "CSC - Week 3",
+                "estBudget": 200,
+                "actualCost": 0,
+                "dueDate": "2025-10-17",
+                "status": "pending"
+            },
+            {
+                "id": "income-1759721463835-3",
+                "category": "CSC - Week 4",
+                "estBudget": 200,
+                "actualCost": 0,
+                "dueDate": "2025-10-24",
                 "status": "pending"
             }
         ],
@@ -230,8 +267,13 @@
                 "category": "Credit One X5",
                 "estBudget": 30,
                 "actualCost": 30,
-                "dueDate": "2025-10-03",
-                "status": "pending"
+                "dueDate": "2025-11-03",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-03",
+                    "status": "pending",
+                    "actualCost": 30
+                }
             },
             {
                 "id": "ban-1759153288748",
@@ -326,6 +368,16 @@
                 "estBudget": 5.4800000000000004,
                 "actualCost": 0,
                 "dueDate": "2025-09-16",
+                "status": "pending"
+            }
+        ],
+        "emergencyFund": [
+            {
+                "id": "emergencyFund-1759553873429",
+                "category": "Savings",
+                "estBudget": 1000,
+                "actualCost": 40,
+                "dueDate": "2025-10-04",
                 "status": "pending"
             }
         ],
