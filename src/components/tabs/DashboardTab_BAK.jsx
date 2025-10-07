@@ -1,6 +1,6 @@
 // src/components/tabs/DashboardTab.jsx
 import React, { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, MessageSquare, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package
@@ -37,7 +37,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showUrgentAlert, setShowUrgentAlert] = useState(true);
-  const [viewingNote, setViewingNote] = useState(null);
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
@@ -91,8 +90,8 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
 
   const summary = useMemo(() => {
     const allItems = Object.values(state?.buckets || {}).flat();
-
-    const income = (state?.buckets?.income || []).reduce((sum, item) =>
+    
+    const income = (state?.buckets?.income || []).reduce((sum, item) => 
       sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0
     );
 
@@ -141,7 +140,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
     categoryOrder.forEach(bucketName => {
       const items = state.buckets[bucketName] || [];
       const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
-
+      
       items.forEach(item => {
         rows.push([
           displayTitle,
@@ -173,7 +172,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
   const printReport = () => {
     const printWindow = window.open('', '_blank');
     const allItems = [];
-
+    
     categoryOrder.forEach(bucketName => {
       const items = state.buckets[bucketName] || [];
       const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
@@ -201,7 +200,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
       <body>
         <h1>Budget Dashboard Report</h1>
         <p>Generated: ${new Date().toLocaleString()}</p>
-
+        
         <div class="summary">
           <div class="summary-card">
             <strong>Income:</strong> $${summary.income.toFixed(2)}
@@ -314,12 +313,12 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                   <h3 className="text-xl font-bold">URGENT PAYMENT ALERT</h3>
                 </div>
               </div>
-
+              
               <div className="p-6">
                 <p className="text-red-900 font-semibold mb-4">
                   {urgentItems.length} payment{urgentItems.length !== 1 ? 's' : ''} due within 3 days:
                 </p>
-
+                
                 <div className="space-y-3 mb-6">
                   {urgentItems.map(item => (
                     <div key={`${item.bucket}-${item.id}`} className="bg-red-50 border border-red-200 rounded p-3">
@@ -335,7 +334,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                     </div>
                   ))}
                 </div>
-
+                
                 <button
                   onClick={() => setShowUrgentAlert(false)}
                   className="w-full px-4 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors"
@@ -527,7 +526,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                   <IconComponent className={`w-5 h-5 ${iconColor}`} />
                   <span className="font-medium text-sm sm:text-base">{displayTitle}</span>
                   <span className="text-xs sm:text-sm text-gray-500">({filteredItems.length})</span>
-
+                  
                   <div className="flex gap-1">
                     {statusCounts.overdue > 0 && (
                       <span className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full flex items-center gap-1">
@@ -560,7 +559,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                         <th className="px-3 py-2 text-right text-xs font-medium text-gray-700">Actual Cost</th>
                         <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Due Date</th>
                         <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Status</th>
-                        <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-12">Notes</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -571,17 +569,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                           <td className="px-3 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
                           <td className="px-3 py-2">{getStatusBadge(item)}</td>
-                          <td className="px-3 py-2 text-center">
-                            {item.note && (
-                              <button
-                                onClick={() => setViewingNote({ item, categoryName: displayTitle })}
-                                className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                title="View Notes"
-                              >
-                                <MessageSquare className="w-4 h-4" />
-                              </button>
-                            )}
-                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -590,7 +577,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                         <td className="px-3 py-2 text-sm font-semibold">Subtotal</td>
                         <td className="px-3 py-2 text-sm text-right font-bold">${totalBudgeted.toFixed(2)}</td>
                         <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
-                        <td colSpan="3"></td>
+                        <td colSpan="2"></td>
                       </tr>
                     </tfoot>
                   </table>
@@ -622,7 +609,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                 <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Actual Cost</th>
                 <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Due Date</th>
                 <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Status</th>
-                <th className="px-4 py-2 text-center text-sm font-medium text-gray-700 w-12">Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -639,17 +625,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                     <td className="px-4 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
                     <td className="px-4 py-2 text-sm">{item.dueDate || 'N/A'}</td>
                     <td className="px-4 py-2">{getStatusBadge(item)}</td>
-                    <td className="px-4 py-2 text-center">
-                      {item.note && (
-                        <button
-                          onClick={() => setViewingNote({ item, categoryName: displayTitle })}
-                          className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                          title="View Notes"
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 ));
               })}
@@ -659,50 +634,6 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
       </div>
 
       <EmergencyFundWidget state={state} setState={setState} saveBudget={saveBudget} />
-
-      {viewingNote && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-          onClick={() => setViewingNote(null)}
-        >
-          <div 
-            className="bg-white rounded-lg shadow-xl max-w-md w-full"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {viewingNote.item.category}
-                </h3>
-                <p className="text-sm text-gray-500">{viewingNote.categoryName}</p>
-              </div>
-              <button
-                onClick={() => setViewingNote(null)}
-                className="p-1 hover:bg-gray-100 rounded"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                  {viewingNote.item.note}
-                </p>
-              </div>
-            </div>
-            
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setViewingNote(null)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </PageContainer>
   );
 };

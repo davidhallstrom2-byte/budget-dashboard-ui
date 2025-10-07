@@ -7,36 +7,31 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-01",
-                "status": "pending"
+                "status": "pending",
+                "note": "testing."
             },
             {
-                "id": "inc-2",
-                "category": "Contemporary Services Corporation",
-                "estBudget": 200,
-                "actualCost": 0,
-                "dueDate": "2025-10-14",
+                "id": "income-1759721463835-0",
+                "category": "CSC - Week 1",
+                "estBudget": 36,
+                "actualCost": 41.200000000000003,
+                "dueDate": "2025-11-03",
                 "status": "paid",
+                "note": "",
                 "previousState": {
-                    "dueDate": "2025-10-14",
+                    "dueDate": "2025-10-03",
                     "status": "pending",
                     "actualCost": 0
                 }
             },
             {
-                "id": "income-1759721463835-0",
-                "category": "CSC - Week 1",
-                "estBudget": 200,
-                "actualCost": 0,
-                "dueDate": "2025-10-03",
-                "status": "pending"
-            },
-            {
                 "id": "income-1759721463835-1",
                 "category": "CSC - Week 2",
                 "estBudget": 200,
-                "actualCost": 0,
+                "actualCost": 41.200000000000003,
                 "dueDate": "2025-10-10",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "income-1759721463835-2",
@@ -44,7 +39,8 @@
                 "estBudget": 200,
                 "actualCost": 0,
                 "dueDate": "2025-10-17",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "income-1759721463835-3",
@@ -52,7 +48,26 @@
                 "estBudget": 200,
                 "actualCost": 0,
                 "dueDate": "2025-10-24",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "income-1759765773633",
+                "category": "CSC - Week 5",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-31",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "income-1759809582710",
+                "category": "CSC - Week 2",
+                "estBudget": 36,
+                "actualCost": 0,
+                "dueDate": "2025-10-17",
+                "status": "pending",
+                "note": ""
             }
         ],
         "housing": [
@@ -62,7 +77,8 @@
                 "estBudget": 2575,
                 "actualCost": 0,
                 "dueDate": "2025-10-01",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "hou-4",
@@ -70,7 +86,8 @@
                 "estBudget": 267.33999999999997,
                 "actualCost": 0,
                 "dueDate": "2025-10-09",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "housing-1759387279984",
@@ -78,7 +95,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-11-01",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "housing-1759387288925",
@@ -86,7 +104,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-11-02",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ],
         "transportation": [
@@ -96,7 +115,8 @@
                 "estBudget": 9.9900000000000002,
                 "actualCost": 0,
                 "dueDate": "2025-09-14",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "transportation-1759334479510",
@@ -109,7 +129,8 @@
                     "dueDate": "2025-06-24",
                     "status": "pending",
                     "actualCost": 0
-                }
+                },
+                "note": ""
             },
             {
                 "id": "tra-1",
@@ -117,7 +138,8 @@
                 "estBudget": 120,
                 "actualCost": 115.75,
                 "dueDate": "2025-10-07",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "tra-2",
@@ -125,7 +147,8 @@
                 "estBudget": 100,
                 "actualCost": 100,
                 "dueDate": "2025-09-01",
-                "status": "paid"
+                "status": "paid",
+                "note": ""
             },
             {
                 "id": "tra-3",
@@ -133,7 +156,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ],
         "food": [
@@ -143,7 +167,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-14",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "foo-2",
@@ -151,7 +176,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-09-20",
-                "status": "paid"
+                "status": "paid",
+                "note": ""
             },
             {
                 "id": "foo-3",
@@ -159,7 +185,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ],
         "personal": [
@@ -169,7 +196,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-01",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ],
         "homeOffice": [
@@ -179,7 +207,8 @@
                 "estBudget": 132.25,
                 "actualCost": 0,
                 "dueDate": "2025-10-20",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "hom-5",
@@ -187,7 +216,8 @@
                 "estBudget": 19.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2025-10-27",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "hom-3",
@@ -200,23 +230,26 @@
                     "dueDate": "2025-09-19",
                     "status": "pending",
                     "actualCost": 29.989999999999998
-                }
+                },
+                "note": ""
             },
             {
                 "id": "hom-6",
                 "category": "SuperGrok",
                 "estBudget": 30,
                 "actualCost": 0,
-                "dueDate": "2025-10-12",
-                "status": "pending"
+                "dueDate": "2025-10-14",
+                "status": "pending",
+                "note": "Cancelled subscription. Last day is October 13."
             },
             {
                 "id": "hom-1759152845540",
                 "category": "Claude AI",
                 "estBudget": 20,
                 "actualCost": 0,
-                "dueDate": "2025-10-30",
-                "status": "pending"
+                "dueDate": "2025-10-23",
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "hom-2",
@@ -224,7 +257,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ],
         "banking": [
@@ -232,14 +266,15 @@
                 "id": "ban-3",
                 "category": "Wells Fargo Service Fee",
                 "estBudget": 25,
-                "actualCost": 0,
+                "actualCost": 25,
                 "dueDate": "2025-11-02",
                 "status": "paid",
                 "previousState": {
                     "dueDate": "2025-10-02",
                     "status": "pending",
                     "actualCost": 0
-                }
+                },
+                "note": ""
             },
             {
                 "id": "ban-4",
@@ -252,7 +287,17 @@
                     "dueDate": "2025-10-18",
                     "status": "pending",
                     "actualCost": 0
-                }
+                },
+                "note": ""
+            },
+            {
+                "id": "ban-1759153288748",
+                "category": "BMO ",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "",
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "ban-1759153289207",
@@ -260,7 +305,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-22",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "ban-1759153289481",
@@ -273,15 +319,8 @@
                     "dueDate": "2025-10-03",
                     "status": "pending",
                     "actualCost": 30
-                }
-            },
-            {
-                "id": "ban-1759153288748",
-                "category": "BMO ",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
-                "status": "pending"
+                },
+                "note": ""
             },
             {
                 "id": "ban-1759153289735",
@@ -289,15 +328,22 @@
                 "estBudget": 69,
                 "actualCost": 69,
                 "dueDate": "2025-10-09",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "ban-1759153387192",
                 "category": "Avant",
                 "estBudget": 25.25,
                 "actualCost": 30,
-                "dueDate": "2025-10-07",
-                "status": "pending"
+                "dueDate": "2025-11-07",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-07",
+                    "status": "pending",
+                    "actualCost": 30
+                }
             },
             {
                 "id": "ban-1759153289933",
@@ -305,7 +351,17 @@
                 "estBudget": 40,
                 "actualCost": 40,
                 "dueDate": "2025-10-13",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "banking-1759765816839",
+                "category": "Merrick Bank",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-06",
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "ban-1759153387588",
@@ -313,7 +369,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-11-26",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "banking-1759514314994",
@@ -326,7 +383,8 @@
                     "dueDate": "2025-10-03",
                     "status": "pending",
                     "actualCost": 0
-                }
+                },
+                "note": ""
             }
         ],
         "subscriptions": [
@@ -336,7 +394,8 @@
                 "estBudget": 9.9900000000000002,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "per-7",
@@ -344,7 +403,8 @@
                 "estBudget": 10.99,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "per-8",
@@ -352,7 +412,8 @@
                 "estBudget": 26.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2025-11-01",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "per-9",
@@ -360,7 +421,8 @@
                 "estBudget": 14.99,
                 "actualCost": 0,
                 "dueDate": "2025-10-28",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "per-11",
@@ -368,7 +430,8 @@
                 "estBudget": 5.4800000000000004,
                 "actualCost": 0,
                 "dueDate": "2025-09-16",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ],
         "emergencyFund": [
@@ -378,7 +441,8 @@
                 "estBudget": 1000,
                 "actualCost": 40,
                 "dueDate": "2025-10-04",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ],
         "misc": [
@@ -388,7 +452,8 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",
-                "status": "pending"
+                "status": "pending",
+                "note": ""
             }
         ]
     },

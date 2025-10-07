@@ -1,0 +1,32 @@
+Option 2: New Feature Development
+Pick from the roadmap:
+
+OCR Scanner Enhancement (credit card statement imports)
+Emergency Fund Dashboard Widget
+Debt Payoff Strategies (avalanche vs snowball viz)
+Bill Payment Reminders
+Spending Trend Analysis (historical data)
+Budget Forecasting
+Net Worth Tracking
+
+Option 3: Bug Fixes or Refinements
+If you've noticed any issues while testing.
+What's the priority?
+
+
+
+Quick wins (1-2 hours):
+
+Emergency Fund Dashboard Widget - Add a progress card to Dashboard showing target vs current emergency fund
+Bill Payment Reminders - Alert banner when items are due within 3 days (already have the logic)
+
+Medium complexity (3-5 hours):
+
+OCR Scanner Enhancement - You have StatementScanner.jsx. Add actual OCR processing (Tesseract.js?) or improve the parsing logic
+Debt Payoff Strategies - Add avalanche/snowball comparison to Calculator tab with visualizations
+
+Complex (full day+):
+
+Spending Trend Analysis - Requires adding historical data storage, time-series tracking, and trend charts
+Budget Forecasting - Predictive model based on past spending patterns
+Net Worth Tracking - New module for assets vs liabilities over time

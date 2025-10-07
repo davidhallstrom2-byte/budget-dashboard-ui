@@ -67,7 +67,7 @@ function defaultState() {
       homeOffice: [],
       banking: [],
       subscriptions: [],
-      emergencyFund: [],  // ADD THIS LINE
+      emergencyFund: [],
       misc: [],
     },
     archived: [],
@@ -90,6 +90,7 @@ function normalizeRow(row) {
     delete out.actualSpent;
   }
   if (!out.status) out.status = "pending";
+  if (!out.note) out.note = "";
   return out;
 }
 
@@ -188,7 +189,7 @@ function makeSnapshot(s) {
 const listeners = new Set();
 
 function getSnapshot() {
-  return _snapshot; // cached, stable reference
+  return _snapshot;
 }
 
 function getServerSnapshot() {
@@ -212,23 +213,20 @@ function emit() {
 
 function replaceState(next) {
   state = next;
-  _snapshot = makeSnapshot(state); // rebuild snapshot once per change
+  _snapshot = makeSnapshot(state);
   saveToLocalStorage(state);
   emit();
 }
 
 // Selector-aware hook with stable fallbacks for empty values.
-// Prevents infinite loops when selectors return [] or {} literals.
 export function useBudgetState(selector) {
   const sel = typeof selector === "function" ? selector : (s) => s;
 
-  // Wrap selection to normalize empty collections to stable sentinels
   const selectStable = (snap) => {
     const v = sel(snap);
     if (v === null || v === undefined) return v;
     if (Array.isArray(v)) return v.length === 0 ? EMPTY_ARRAY : v;
     if (typeof v === "object") {
-      // treat plain empty objects as stable sentinel
       if (Object.getPrototypeOf(v) === Object.prototype && Object.keys(v).length === 0) {
         return EMPTY_OBJECT;
       }
@@ -298,12 +296,10 @@ export async function initializeState() {
   }
 }
 
-// Keep existing export for other imports
 export async function saveState() {
   return _saveInternal();
 }
 
-// Backward compatible alias used by BudgetDashboard.jsx
 export async function saveToServer(stateOverride) {
   if (stateOverride && typeof stateOverride === "object") {
     replaceState(normalizeState(stateOverride));
@@ -321,7 +317,6 @@ async function _saveInternal() {
     localStorage: { attempted: false, success: false }
   };
 
-  // Always save to localStorage (instant, no network)
   try {
     saveToLocalStorage(state);
     saveResults.localStorage.attempted = true;
@@ -330,7 +325,6 @@ async function _saveInternal() {
     console.error('localStorage save failed:', err);
   }
 
-  // Save to standalone file (primary, fast)
   saveResults.file.attempted = true;
   try {
     const res = await fetch("/budget-dashboard-fs/save.php", {
@@ -339,7 +333,7 @@ async function _saveInternal() {
       body: JSON.stringify(state),
       credentials: "same-origin",
     });
-    
+
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
       saveResults.file.success = true;
@@ -352,7 +346,6 @@ async function _saveInternal() {
     console.error('❌ File save failed:', err);
   }
 
-  // Save to WordPress database (secondary, backup)
   if (isWordPressHost()) {
     saveResults.database.attempted = true;
     try {
@@ -362,7 +355,7 @@ async function _saveInternal() {
         body: JSON.stringify({ state: state }),
         credentials: "same-origin",
       });
-      
+
       if (res.ok) {
         const result = await res.json();
         saveResults.database.success = true;
@@ -377,32 +370,29 @@ async function _saveInternal() {
     }
   }
 
-  // Determine overall success
   const fileOk = saveResults.file.success;
   const dbOk = saveResults.database.success;
   const localOk = saveResults.localStorage.success;
 
-  // Success if at least one persistence method worked
   const overallSuccess = fileOk || dbOk || localOk;
 
-  // Build status message
   let statusMsg = [];
   if (fileOk) statusMsg.push('File');
   if (dbOk) statusMsg.push(`Database (v${saveResults.database.version})`);
   if (localOk) statusMsg.push('Browser');
-  
+
   let failMsg = [];
   if (!fileOk && saveResults.file.attempted) failMsg.push('File failed');
   if (!dbOk && saveResults.database.attempted) failMsg.push('Database failed');
 
-  const finalMsg = statusMsg.length > 0 
+  const finalMsg = statusMsg.length > 0
     ? `Saved to: ${statusMsg.join(', ')}${failMsg.length > 0 ? ' | ' + failMsg.join(', ') : ''}`
     : 'All save methods failed';
 
   console.log(`💾 Save complete: ${finalMsg}`);
 
-  return { 
-    ok: overallSuccess, 
+  return {
+    ok: overallSuccess,
     results: saveResults,
     message: finalMsg,
     error: !overallSuccess ? 'All save methods failed' : null

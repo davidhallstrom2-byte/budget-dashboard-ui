@@ -1,6 +1,6 @@
 // src/components/tabs/EditorTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus, MessageSquare, X } from 'lucide-react';
+import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package, PiggyBank
@@ -93,9 +93,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
   const [batchAddMode, setBatchAddMode] = useState(false);
   const [batchAddCategory, setBatchAddCategory] = useState('');
   const batchItemNameRef = useRef(null);
-
-  // Note modal state
-  const [noteModal, setNoteModal] = useState(null); // { bucket, id, currentNote }
 
   useEffect(() => {
     if (state?.meta?.categoryNames) {
@@ -750,21 +747,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     return filtered;
   };
 
-  // Note modal helpers
-  const openNoteModal = (bucket, id) => {
-    const item = state.buckets[bucket].find(x => x.id === id);
-    if (!item) return;
-    setNoteModal({ bucket, id, currentNote: item.note || '' });
-  };
-
-  const saveNote = () => {
-    if (!noteModal) return;
-    const { bucket, id, currentNote } = noteModal;
-    updateRow(bucket, id, 'note', currentNote);
-    setNoteModal(null);
-    setTimeout(() => saveBudgetWithIndicator(state, 'Note saved!'), 100);
-  };
-
   const BucketSection = ({ bucketName, items, title }) => {
     const IconComponent = categoryIcons[bucketName]?.icon || Package;
     const iconColor = categoryIcons[bucketName]?.color || 'text-gray-600';
@@ -987,18 +969,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
                           >
                             <Copy className="w-4 h-4" />
                           </button>
-
-                          {/* Note button */}
-                          <button
-                            onClick={() => openNoteModal(bucketName, item.id)}
-                            className={`px-2 py-1 rounded ${
-                              item.note ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                            }`}
-                            title={item.note ? "Edit Note" : "Add Note"}
-                          >
-                            <MessageSquare className="w-4 h-4" />
-                          </button>
-
                           <button
                             onClick={() => handleArchiveClick(bucketName, item.id)}
                             className="px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700"
@@ -1355,47 +1325,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
           />
         );
       })}
-
-      {noteModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Item Note</h3>
-              <button
-                onClick={() => setNoteModal(null)}
-                className="p-1 hover:bg-gray-100 rounded"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              <textarea
-                value={noteModal.currentNote}
-                onChange={(e) => setNoteModal({ ...noteModal, currentNote: e.target.value })}
-                placeholder="Add notes about this budget item..."
-                className="w-full h-40 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                autoFocus
-              />
-            </div>
-            
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
-              <button
-                onClick={() => setNoteModal(null)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveNote}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Save Note
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </PageContainer>
   );
 };
