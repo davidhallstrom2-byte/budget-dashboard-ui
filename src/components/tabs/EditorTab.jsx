@@ -205,49 +205,23 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     return 'pending';
   };
 
-  const handlePaidClick = (bucket, id) => {
-    const item = state.buckets[bucket].find(item => item.id === id);
-    if (!item) return;
+const handlePaidClick = (bucket, id) => {
+  const item = state.buckets[bucket].find(item => item.id === id);
+  if (!item) return;
 
-    let newDate;
-    let updatedBuckets = { ...state.buckets };
-    
-    if (bucket === 'income') {
-      newDate = new Date(item.dueDate + 'T00:00:00');
-      
-      const nextFriday = new Date(item.dueDate + 'T00:00:00');
-      nextFriday.setDate(nextFriday.getDate() + 7);
-      
-      const newIncomeEntry = {
-        id: `income-${Date.now()}`,
-        category: item.category,
-        estBudget: item.estBudget,
-        actualCost: 0,
-        dueDate: nextFriday.toISOString().split('T')[0],
-        status: 'pending'
-      };
-      
-      updatedBuckets.income = [...updatedBuckets.income, newIncomeEntry];
-    } else if (bucket === 'subscriptions') {
-      const currentDate = new Date(item.dueDate + 'T00:00:00');
-      newDate = new Date(currentDate);
-      newDate.setFullYear(newDate.getFullYear() + 1);
-    } else {
-      const currentDate = new Date(item.dueDate + 'T00:00:00');
-      newDate = new Date(currentDate);
-      newDate.setMonth(newDate.getMonth() + 1);
-    }
+  const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
 
-    const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
-
-    updatedBuckets[bucket] = updatedBuckets[bucket].map(it =>
-      it.id === id ? { ...it, status: 'paid', dueDate: newDate.toISOString().split('T')[0], previousState } : it
-    );
-    
-    const updatedState = { ...state, buckets: updatedBuckets };
-    setState(updatedState);
-    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item marked as paid!'), 100);
+  const updatedBuckets = {
+    ...state.buckets,
+    [bucket]: state.buckets[bucket].map(it =>
+      it.id === id ? { ...it, status: 'paid', previousState } : it
+    )
   };
+
+  const updatedState = { ...state, buckets: updatedBuckets };
+  setState(updatedState);
+  setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item marked as paid!'), 100);
+};
 
   const handleUndoPaid = (bucket, id) => {
     const item = state.buckets[bucket].find(item => item.id === id);
@@ -606,15 +580,10 @@ const EditorTab = ({ state, setState, saveBudget }) => {
     setState(updatedState);
   };
 
-  const handleActualCostBlur = (bucket, id, value) => {
-    const item = state.buckets[bucket].find(x => x.id === id);
-    if (!item) return;
-
-    const actualValue = parseFloat(value) || 0;
-    const finalValue = actualValue === 0 && item.estBudget > 0 ? item.estBudget : actualValue;
-
-    updateRow(bucket, id, 'actualCost', finalValue);
-  };
+const handleActualCostBlur = (bucket, id, value) => {
+  const actualValue = parseFloat(value) || 0;
+  updateRow(bucket, id, 'actualCost', actualValue);
+};
 
   const duplicateItem = (bucket, id) => {
     const item = state.buckets[bucket].find(x => x.id === id);

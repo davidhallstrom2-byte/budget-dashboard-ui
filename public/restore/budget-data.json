@@ -28,7 +28,7 @@
                 "id": "income-1759721463835-1",
                 "category": "CSC - Week 2",
                 "estBudget": 200,
-                "actualCost": 41.200000000000003,
+                "actualCost": 0,
                 "dueDate": "2025-10-10",
                 "status": "pending",
                 "note": ""
@@ -54,18 +54,9 @@
             {
                 "id": "income-1759765773633",
                 "category": "CSC - Week 5",
-                "estBudget": 0,
+                "estBudget": 200,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",
-                "status": "pending",
-                "note": ""
-            },
-            {
-                "id": "income-1759809582710",
-                "category": "CSC - Week 2",
-                "estBudget": 36,
-                "actualCost": 0,
-                "dueDate": "2025-10-17",
                 "status": "pending",
                 "note": ""
             }
@@ -94,9 +85,14 @@
                 "category": "Gas",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-01",
-                "status": "pending",
-                "note": ""
+                "dueDate": "2025-10-01",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-11-01",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "housing-1759387288925",
@@ -115,8 +111,13 @@
                 "estBudget": 9.9900000000000002,
                 "actualCost": 0,
                 "dueDate": "2025-09-14",
-                "status": "pending",
-                "note": ""
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-09-14",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "transportation-1759334479510",
@@ -142,20 +143,20 @@
                 "note": ""
             },
             {
-                "id": "tra-2",
-                "category": "Intergon Auto Ins",
-                "estBudget": 100,
-                "actualCost": 100,
-                "dueDate": "2025-09-01",
-                "status": "paid",
-                "note": ""
-            },
-            {
                 "id": "tra-3",
                 "category": "Maintenance",
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "transportation-1759947905037",
+                "category": "Intergon Auto Ins.",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-08",
                 "status": "pending",
                 "note": ""
             }
@@ -166,26 +167,22 @@
                 "category": "Groceries",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-10-14",
-                "status": "pending",
-                "note": ""
+                "dueDate": "",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-11-07",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "foo-2",
                 "category": "Dining Out",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-09-20",
-                "status": "paid",
-                "note": ""
-            },
-            {
-                "id": "foo-3",
-                "category": "Street Food",
-                "estBudget": 0,
-                "actualCost": 0,
                 "dueDate": "",
-                "status": "pending",
+                "status": "paid",
                 "note": ""
             }
         ],
@@ -195,7 +192,7 @@
                 "category": "Clothing",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-10-01",
+                "dueDate": "",
                 "status": "pending",
                 "note": ""
             }
@@ -224,18 +221,14 @@
                 "category": "LinkedIn Premium",
                 "estBudget": 29.989999999999998,
                 "actualCost": 29.989999999999998,
-                "dueDate": "2025-09-19",
-                "status": "pending",
-                "note": ""
-            },
-            {
-                "id": "hom-6",
-                "category": "SuperGrok",
-                "estBudget": 30,
-                "actualCost": 0,
-                "dueDate": "2025-10-14",
-                "status": "pending",
-                "note": "Cancelled subscription. Last day is October 13."
+                "dueDate": "2025-10-06",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-06",
+                    "status": "pending",
+                    "actualCost": 29.989999999999998
+                }
             },
             {
                 "id": "hom-1759152845540",
@@ -262,12 +255,12 @@
                 "category": "Wells Fargo Service Fee",
                 "estBudget": 25,
                 "actualCost": 25,
-                "dueDate": "2025-11-02",
+                "dueDate": "2025-10-01",
                 "status": "paid",
                 "previousState": {
-                    "dueDate": "2025-10-02",
+                    "dueDate": "2025-10-01",
                     "status": "pending",
-                    "actualCost": 0
+                    "actualCost": 25
                 },
                 "note": ""
             },
@@ -276,7 +269,7 @@
                 "category": "U.S. Bank Service Fee",
                 "estBudget": 14.949999999999999,
                 "actualCost": 0,
-                "dueDate": "2025-11-18",
+                "dueDate": "2025-10-18",
                 "status": "paid",
                 "previousState": {
                     "dueDate": "2025-10-18",
@@ -291,8 +284,13 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "",
-                "status": "pending",
-                "note": ""
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-1759153289207",
@@ -300,15 +298,20 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-22",
-                "status": "pending",
-                "note": ""
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-22",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-1759153289481",
                 "category": "Credit One X5",
                 "estBudget": 30,
                 "actualCost": 30,
-                "dueDate": "2025-11-03",
+                "dueDate": "2025-10-03",
                 "status": "paid",
                 "previousState": {
                     "dueDate": "2025-10-03",
@@ -320,9 +323,9 @@
             {
                 "id": "ban-1759153289735",
                 "category": "Capital One",
-                "estBudget": 69,
-                "actualCost": 69,
-                "dueDate": "2025-10-09",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-19",
                 "status": "pending",
                 "note": ""
             },
@@ -330,8 +333,8 @@
                 "id": "ban-1759153387192",
                 "category": "Avant",
                 "estBudget": 25.25,
-                "actualCost": 30,
-                "dueDate": "2025-11-07",
+                "actualCost": 34.990000000000002,
+                "dueDate": "2025-10-07",
                 "status": "paid",
                 "note": "",
                 "previousState": {
@@ -343,36 +346,51 @@
             {
                 "id": "ban-1759153289933",
                 "category": "Milestone (Concora)",
-                "estBudget": 40,
-                "actualCost": 40,
+                "estBudget": 0,
+                "actualCost": 0,
                 "dueDate": "2025-10-13",
-                "status": "pending",
-                "note": ""
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-13",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "banking-1759765816839",
                 "category": "Merrick Bank",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-10-06",
-                "status": "pending",
-                "note": ""
+                "dueDate": "2025-10-07",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-07",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-1759153387588",
                 "category": "Petal",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-26",
-                "status": "pending",
-                "note": ""
+                "dueDate": "2025-10-26",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-26",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "banking-1759514314994",
                 "category": "Cash App",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-03",
+                "dueDate": "",
                 "status": "paid",
                 "previousState": {
                     "dueDate": "2025-10-03",
@@ -413,9 +431,9 @@
             {
                 "id": "per-9",
                 "category": "Amazon Prime",
-                "estBudget": 14.99,
+                "estBudget": 7.6699999999999999,
                 "actualCost": 0,
-                "dueDate": "2025-10-28",
+                "dueDate": "2025-10-31",
                 "status": "pending",
                 "note": ""
             },
@@ -424,7 +442,16 @@
                 "category": "CVS ExtraCare",
                 "estBudget": 5.4800000000000004,
                 "actualCost": 0,
-                "dueDate": "2025-09-16",
+                "dueDate": "2025-11-06",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "subscriptions-1759864709394",
+                "category": "YouTube Premium",
+                "estBudget": 13.99,
+                "actualCost": 0,
+                "dueDate": "2025-10-24",
                 "status": "pending",
                 "note": ""
             }
@@ -434,7 +461,7 @@
                 "id": "emergencyFund-1759553873429",
                 "category": "Savings",
                 "estBudget": 1000,
-                "actualCost": 40,
+                "actualCost": 0,
                 "dueDate": "2025-10-04",
                 "status": "pending",
                 "note": ""
@@ -443,7 +470,7 @@
         "misc": [
             {
                 "id": "misc-1759295661055",
-                "category": "wrg",
+                "category": "",
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",
@@ -473,6 +500,17 @@
             "annualSub": 79,
             "originalBucket": "food",
             "archivedAt": "2025-10-03T18:27:47.556Z"
+        },
+        {
+            "id": "hom-6",
+            "category": "SuperGrok",
+            "estBudget": 30,
+            "actualCost": 0,
+            "dueDate": "2025-10-14",
+            "status": "pending",
+            "note": "Cancelled subscription. Last day is October 13.",
+            "originalBucket": "homeOffice",
+            "archivedAt": "2025-10-08T18:26:12.811Z"
         }
     ]
 }

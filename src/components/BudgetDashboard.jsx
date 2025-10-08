@@ -118,33 +118,22 @@ const BudgetDashboard = () => {
     saveBudget(updatedState, 'Archived item deleted permanently!');
   };
 
-  const handleMarkPaidFromNotification = (bucket, id) => {
-    const item = state.buckets[bucket]?.find(item => item.id === id);
-    if (!item) return;
+const handleMarkPaidFromNotification = (bucket, id) => {
+  const item = state.buckets[bucket]?.find(item => item.id === id);
+  if (!item) return;
 
-    const currentDate = new Date(item.dueDate + 'T00:00:00');
-    let newDate;
-    
-    if (bucket === 'subscriptions') {
-      newDate = new Date(currentDate);
-      newDate.setFullYear(newDate.getFullYear() + 1);
-    } else {
-      newDate = new Date(currentDate);
-      newDate.setMonth(newDate.getMonth() + 1);
-    }
+  const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
 
-    const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
-
-    const updatedBuckets = {
-      ...state.buckets,
-      [bucket]: state.buckets[bucket].map(it =>
-        it.id === id ? { ...it, status: 'paid', dueDate: newDate.toISOString().split('T')[0], previousState } : it
-      )
-    };
-    const updatedState = { ...state, buckets: updatedBuckets };
-    setState(updatedState);
-    saveBudget(updatedState, 'Item marked as paid!');
+  const updatedBuckets = {
+    ...state.buckets,
+    [bucket]: state.buckets[bucket].map(it =>
+      it.id === id ? { ...it, status: 'paid', previousState } : it
+    )
   };
+  const updatedState = { ...state, buckets: updatedBuckets };
+  setState(updatedState);
+  saveBudget(updatedState, 'Item marked as paid!');
+};
 
   if (isLoading) return <LoadingGate />;
 
