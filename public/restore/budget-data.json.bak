@@ -85,7 +85,7 @@
                 "category": "Gas",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-01",
+                "dueDate": "2025-10-01",
                 "status": "paid",
                 "note": "",
                 "previousState": {
@@ -153,10 +153,10 @@
             },
             {
                 "id": "transportation-1759947905037",
-                "category": "Intergon Auto Ins.",
-                "estBudget": 0,
+                "category": "Intergon Auto Ins",
+                "estBudget": 52,
                 "actualCost": 0,
-                "dueDate": "2025-10-08",
+                "dueDate": "2025-10-14",
                 "status": "pending",
                 "note": ""
             }
@@ -325,9 +325,14 @@
                 "category": "Capital One",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-10-19",
-                "status": "pending",
-                "note": ""
+                "dueDate": "2025-10-09",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-09",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-1759153387192",
