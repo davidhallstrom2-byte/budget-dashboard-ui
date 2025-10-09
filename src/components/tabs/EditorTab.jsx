@@ -751,14 +751,12 @@ const filteredItems = getFilteredItems(items).sort((a, b) => {
     const variance = totalActual - totalBudgeted;
     const statusCounts = getCategoryStatusCounts(items);
 
-    return (
-      <div 
-        className="mb-8"
-        draggable
-        onDragStart={(e) => handleCategoryDragStart(e, bucketName)}
-        onDragOver={handleCategoryDragOver}
-        onDrop={(e) => handleCategoryDrop(e, bucketName)}
-      >
+return (
+  <div
+    className="mb-8"
+    onDragOver={handleCategoryDragOver}
+    onDrop={(e) => handleCategoryDrop(e, bucketName)}
+  >
         <div className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2 flex-wrap">
             <GripVertical className="w-4 h-4 text-gray-400 hidden sm:block" />
@@ -1369,6 +1367,49 @@ const filteredItems = getFilteredItems(items).sort((a, b) => {
           </div>
         </div>
       )}
+
+{/* Grand Totals */}
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden">
+        <div className="bg-blue-600 text-white px-4 py-3">
+          <h3 className="text-lg font-bold">GRAND TOTALS</h3>
+        </div>
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Total Items</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {Object.values(state.buckets).flat().length}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Total Est. Budget</p>
+              <p className="text-2xl font-bold text-blue-900">
+                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Total Actual Cost</p>
+              <p className="text-2xl font-bold text-purple-900">
+                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Variance</p>
+              {(() => {
+                const totalBudget = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+                const totalActual = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+                const variance = totalActual - totalBudget;
+                return (
+                  <p className={`text-2xl font-bold ${variance > 0 ? 'text-red-600' : variance < 0 ? 'text-green-600' : 'text-gray-600'}`}>
+                    {variance > 0 ? '+' : ''}${variance.toFixed(2)}
+                  </p>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      </div>
+
     </PageContainer>
   );
 };

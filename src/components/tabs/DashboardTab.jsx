@@ -497,10 +497,10 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
         )}
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 mb-6">
-        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-          <h3 className="font-semibold text-gray-900">Category Breakdown</h3>
-        </div>
+<div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
+  <div className="bg-blue-600 text-white px-4 py-3">
+    <h3 className="text-lg font-bold">Budget List</h3>
+  </div>
 
         {categoryOrder.map(bucketName => {
           const items = state.buckets[bucketName] || [];
@@ -510,7 +510,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
           const IconComponent = categoryIcons[bucketName]?.icon || Package;
           const iconColor = categoryIcons[bucketName]?.color || 'text-gray-600';
           const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
-          const isExpanded = expandedCategories[bucketName];
+          const isExpanded = expandedCategories[bucketName] !== false; // Default to true (expanded)
 
           const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
           const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
@@ -550,22 +550,22 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
                 </div>
               </button>
 
-              {isExpanded && (
-                <div className="px-4 pb-4 overflow-x-auto">
-                  <table className="w-full min-w-[600px]">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Item</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-700">Est. Budget</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-700">Actual Cost</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Due Date</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Status</th>
-                        <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-12">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredItems.map(item => (
-                        <tr key={item.id} className="border-t border-gray-100">
+{isExpanded && (
+  <div className="px-4 pb-4 overflow-x-auto bg-white">
+    <table className="w-full min-w-[600px]">
+      <thead className="bg-gray-100">
+  <tr>
+    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
+    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
+    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
+    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
+    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
+    <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-16">Notes</th>
+  </tr>
+</thead>
+      <tbody className="bg-white">
+        {filteredItems.map(item => (
+                        <tr key={item.id} className="border-t border-gray-200 hover:bg-blue-50">
                           <td className="px-3 py-2 text-sm">{item.category}</td>
                           <td className="px-3 py-2 text-sm text-right">${(item.estBudget || 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
@@ -601,60 +601,45 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
         })}
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 mb-6">
-        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <h3 className="font-semibold text-gray-900">Complete Budget List</h3>
-          <button
-            onClick={printReport}
-            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm self-start sm:self-auto"
-          >
-            <Printer className="w-4 h-4" />
-            Print
-          </button>
+      {/* Grand Totals */}
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
+        <div className="bg-blue-600 text-white px-4 py-3">
+          <h3 className="text-lg font-bold">GRAND TOTALS</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[700px]">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Category</th>
-                <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Item</th>
-                <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Est. Budget</th>
-                <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Actual Cost</th>
-                <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Due Date</th>
-                <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Status</th>
-                <th className="px-4 py-2 text-center text-sm font-medium text-gray-700 w-12">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categoryOrder.map(bucketName => {
-                const items = state.buckets[bucketName] || [];
-                const filteredItems = getFilteredItems(items);
-                const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
-
-                return filteredItems.map((item) => (
-                  <tr key={item.id} className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-2 text-sm font-medium text-gray-900">{displayTitle}</td>
-                    <td className="px-4 py-2 text-sm">{item.category}</td>
-                    <td className="px-4 py-2 text-sm text-right">${(item.estBudget || 0).toFixed(2)}</td>
-                    <td className="px-4 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
-                    <td className="px-4 py-2 text-sm">{item.dueDate || 'N/A'}</td>
-                    <td className="px-4 py-2">{getStatusBadge(item)}</td>
-                    <td className="px-4 py-2 text-center">
-                      {item.note && (
-                        <button
-                          onClick={() => setViewingNote({ item, categoryName: displayTitle })}
-                          className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                          title="View Notes"
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ));
-              })}
-            </tbody>
-          </table>
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Total Items</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {Object.values(state.buckets).flat().length}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Total Est. Budget</p>
+              <p className="text-2xl font-bold text-blue-900">
+                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Total Actual Cost</p>
+              <p className="text-2xl font-bold text-purple-900">
+                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-gray-600 mb-1">Variance</p>
+              {(() => {
+                const totalBudget = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+                const totalActual = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+                const variance = totalActual - totalBudget;
+                return (
+                  <p className={`text-2xl font-bold ${variance > 0 ? 'text-red-600' : variance < 0 ? 'text-green-600' : 'text-gray-600'}`}>
+                    {variance > 0 ? '+' : ''}${variance.toFixed(2)}
+                  </p>
+                );
+              })()}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -703,6 +688,7 @@ const DashboardTab = ({ state, setState, saveBudget }) => {
           </div>
         </div>
       )}
+
     </PageContainer>
   );
 };

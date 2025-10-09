@@ -106,20 +106,6 @@
         ],
         "transportation": [
             {
-                "id": "tra-4",
-                "category": "Uber One",
-                "estBudget": 9.9900000000000002,
-                "actualCost": 0,
-                "dueDate": "2025-09-14",
-                "status": "paid",
-                "note": "",
-                "previousState": {
-                    "dueDate": "2025-09-14",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
                 "id": "tra-1",
                 "category": "Gas",
                 "estBudget": 120,
@@ -139,7 +125,12 @@
                 "estBudget": 52,
                 "actualCost": 0,
                 "dueDate": "2025-10-14",
-                "status": "pending",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-14",
+                    "status": "pending",
+                    "actualCost": 0
+                },
                 "note": ""
             },
             {
@@ -163,6 +154,24 @@
         ],
         "food": [
             {
+                "id": "tra-4",
+                "category": "Uber One",
+                "estBudget": 9.9900000000000002,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "food-1760031019302",
+                "category": "Costco",
+                "estBudget": 120,
+                "actualCost": 0,
+                "dueDate": "2026-07-31",
+                "status": "pending",
+                "note": ""
+            },
+            {
                 "id": "foo-2",
                 "category": "Dining Out",
                 "estBudget": 0,
@@ -183,20 +192,6 @@
         ],
         "personal": [
             {
-                "id": "personal-1760015293581",
-                "category": "Google: Discord Talk",
-                "estBudget": 0,
-                "actualCost": 9.9900000000000002,
-                "dueDate": "2025-10-06",
-                "status": "paid",
-                "previousState": {
-                    "dueDate": "2025-10-06",
-                    "status": "pending",
-                    "actualCost": 9.9900000000000002
-                },
-                "note": ""
-            },
-            {
                 "id": "personal-1759335076131",
                 "category": "Clothing",
                 "estBudget": 0,
@@ -207,20 +202,6 @@
             }
         ],
         "homeOffice": [
-            {
-                "id": "hom-3",
-                "category": "LinkedIn Premium",
-                "estBudget": 29.989999999999998,
-                "actualCost": 29.989999999999998,
-                "dueDate": "2025-10-06",
-                "status": "paid",
-                "note": "",
-                "previousState": {
-                    "dueDate": "2025-10-06",
-                    "status": "pending",
-                    "actualCost": 29.989999999999998
-                }
-            },
             {
                 "id": "hom-1",
                 "category": "Spectrum Internet",
@@ -250,6 +231,15 @@
                 "estBudget": 19.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2025-10-27",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "hom-3",
+                "category": "LinkedIn Premium",
+                "estBudget": 29.989999999999998,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": ""
             }
@@ -377,6 +367,20 @@
         ],
         "subscriptions": [
             {
+                "id": "personal-1760015293581",
+                "category": "Google: Discord Talk",
+                "estBudget": 9.9900000000000002,
+                "actualCost": 9.9900000000000002,
+                "dueDate": "2025-10-06",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-06",
+                    "status": "pending",
+                    "actualCost": 9.9900000000000002
+                },
+                "note": ""
+            },
+            {
                 "id": "subscriptions-1759864709394",
                 "category": "YouTube Premium",
                 "estBudget": 13.99,
@@ -386,20 +390,11 @@
                 "note": ""
             },
             {
-                "id": "per-7",
-                "category": "Paramount+",
-                "estBudget": 10.99,
-                "actualCost": 0,
-                "dueDate": "2025-10-31",
-                "status": "pending",
-                "note": ""
-            },
-            {
                 "id": "per-9",
                 "category": "Amazon Prime",
                 "estBudget": 7.6699999999999999,
                 "actualCost": 0,
-                "dueDate": "2025-10-31",
+                "dueDate": "2025-10-30",
                 "status": "pending",
                 "note": ""
             },
@@ -408,7 +403,7 @@
                 "category": "Netflix",
                 "estBudget": 26.989999999999998,
                 "actualCost": 0,
-                "dueDate": "2025-11-01",
+                "dueDate": "2025-11-04",
                 "status": "pending",
                 "note": ""
             },
@@ -486,6 +481,27 @@
             "note": "Cancelled subscription. Last day is October 13.",
             "originalBucket": "homeOffice",
             "archivedAt": "2025-10-08T18:26:12.811Z"
+        },
+        {
+            "id": "per-7",
+            "category": "Paramount+",
+            "estBudget": 10.99,
+            "actualCost": 0,
+            "dueDate": "2025-10-31",
+            "status": "pending",
+            "note": "",
+            "originalBucket": "subscriptions",
+            "archivedAt": "2025-10-09T13:54:19.370Z"
+        },
+        {
+            "id": "food-1760031052621",
+            "category": "Wallmart",
+            "estBudget": 0,
+            "actualCost": 0,
+            "dueDate": "2025-10-09",
+            "status": "pending",
+            "originalBucket": "food",
+            "archivedAt": "2025-10-09T17:43:37.412Z"
         }
     ]
 }
