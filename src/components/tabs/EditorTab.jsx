@@ -740,7 +740,11 @@ const handleActualCostBlur = (bucket, id, value) => {
     const displayTitle = categoryNames[bucketName] || title;
     const isCollapsed = collapsedCategories[bucketName];
 
-    const filteredItems = getFilteredItems(items);
+const filteredItems = getFilteredItems(items).sort((a, b) => {
+  const dateA = new Date(a.dueDate || '9999-12-31');
+  const dateB = new Date(b.dueDate || '9999-12-31');
+  return dateA - dateB;
+});
 
     const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
     const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);

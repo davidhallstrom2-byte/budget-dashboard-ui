@@ -15,7 +15,7 @@
                 "category": "CSC - Week 1",
                 "estBudget": 36,
                 "actualCost": 41.200000000000003,
-                "dueDate": "2025-11-03",
+                "dueDate": "2025-10-03",
                 "status": "paid",
                 "note": "",
                 "previousState": {
@@ -72,18 +72,9 @@
                 "note": ""
             },
             {
-                "id": "hou-4",
-                "category": "Spectrum Mobile",
-                "estBudget": 267.33999999999997,
-                "actualCost": 0,
-                "dueDate": "2025-10-09",
-                "status": "pending",
-                "note": ""
-            },
-            {
                 "id": "housing-1759387279984",
                 "category": "Gas",
-                "estBudget": 0,
+                "estBudget": -32.469999999999999,
                 "actualCost": 0,
                 "dueDate": "2025-10-01",
                 "status": "paid",
@@ -99,7 +90,16 @@
                 "category": "Electric",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-02",
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "hou-4",
+                "category": "Spectrum Mobile",
+                "estBudget": 267.33999999999997,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": ""
             }
@@ -120,25 +120,34 @@
                 }
             },
             {
-                "id": "transportation-1759334479510",
-                "category": "AAA",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-07-24",
-                "status": "paid",
-                "previousState": {
-                    "dueDate": "2025-06-24",
-                    "status": "pending",
-                    "actualCost": 0
-                },
-                "note": ""
-            },
-            {
                 "id": "tra-1",
                 "category": "Gas",
                 "estBudget": 120,
-                "actualCost": 115.75,
-                "dueDate": "2025-10-07",
+                "actualCost": 73.549999999999997,
+                "dueDate": "2025-10-06",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-06",
+                    "status": "pending",
+                    "actualCost": 73.549999999999997
+                }
+            },
+            {
+                "id": "transportation-1759947905037",
+                "category": "Intergon Auto Ins",
+                "estBudget": 52,
+                "actualCost": 0,
+                "dueDate": "2025-10-14",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "transportation-1759334479510",
+                "category": "AAA",
+                "estBudget": 52,
+                "actualCost": 0,
+                "dueDate": "2026-06-27",
                 "status": "pending",
                 "note": ""
             },
@@ -150,46 +159,21 @@
                 "dueDate": "",
                 "status": "pending",
                 "note": ""
-            },
-            {
-                "id": "transportation-1759947905037",
-                "category": "Intergon Auto Ins",
-                "estBudget": 52,
-                "actualCost": 0,
-                "dueDate": "2025-10-14",
-                "status": "pending",
-                "note": ""
             }
         ],
         "food": [
-            {
-                "id": "foo-1",
-                "category": "Groceries",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
-                "status": "paid",
-                "note": "",
-                "previousState": {
-                    "dueDate": "2025-11-07",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
             {
                 "id": "foo-2",
                 "category": "Dining Out",
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "",
-                "status": "paid",
+                "status": "pending",
                 "note": ""
-            }
-        ],
-        "personal": [
+            },
             {
-                "id": "personal-1759335076131",
-                "category": "Clothing",
+                "id": "foo-1",
+                "category": "Groceries",
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "",
@@ -197,25 +181,23 @@
                 "note": ""
             }
         ],
+        "personal": [
+            {
+                "id": "personal-1760015293581",
+                "category": "Google: Discord Talk",
+                "estBudget": 0,
+                "actualCost": 9.9900000000000002,
+                "dueDate": "2025-10-06",
+                "status": "paid",
+                "previousState": {
+                    "dueDate": "2025-10-06",
+                    "status": "pending",
+                    "actualCost": 9.9900000000000002
+                },
+                "note": ""
+            }
+        ],
         "homeOffice": [
-            {
-                "id": "hom-1",
-                "category": "Spectrum Internet",
-                "estBudget": 132.25,
-                "actualCost": 0,
-                "dueDate": "2025-10-20",
-                "status": "pending",
-                "note": ""
-            },
-            {
-                "id": "hom-5",
-                "category": "ChatGPT Plus",
-                "estBudget": 19.989999999999998,
-                "actualCost": 0,
-                "dueDate": "2025-10-27",
-                "status": "pending",
-                "note": ""
-            },
             {
                 "id": "hom-3",
                 "category": "LinkedIn Premium",
@@ -231,6 +213,20 @@
                 }
             },
             {
+                "id": "hom-1",
+                "category": "Spectrum Internet",
+                "estBudget": 132.25,
+                "actualCost": 132.25,
+                "dueDate": "2025-10-20",
+                "status": "paid",
+                "note": "",
+                "previousState": {
+                    "dueDate": "2025-10-20",
+                    "status": "pending",
+                    "actualCost": 0
+                }
+            },
+            {
                 "id": "hom-1759152845540",
                 "category": "Claude AI",
                 "estBudget": 20,
@@ -240,85 +236,29 @@
                 "note": ""
             },
             {
-                "id": "hom-2",
-                "category": "Supplies",
-                "estBudget": 0,
+                "id": "hom-5",
+                "category": "ChatGPT Plus",
+                "estBudget": 19.989999999999998,
                 "actualCost": 0,
-                "dueDate": "2025-10-31",
+                "dueDate": "2025-10-27",
                 "status": "pending",
                 "note": ""
             }
         ],
         "banking": [
             {
-                "id": "ban-3",
-                "category": "Wells Fargo Service Fee",
-                "estBudget": 25,
-                "actualCost": 25,
-                "dueDate": "2025-10-01",
-                "status": "paid",
-                "previousState": {
-                    "dueDate": "2025-10-01",
-                    "status": "pending",
-                    "actualCost": 25
-                },
-                "note": ""
-            },
-            {
-                "id": "ban-4",
-                "category": "U.S. Bank Service Fee",
-                "estBudget": 14.949999999999999,
-                "actualCost": 0,
-                "dueDate": "2025-10-18",
-                "status": "paid",
-                "previousState": {
-                    "dueDate": "2025-10-18",
-                    "status": "pending",
-                    "actualCost": 0
-                },
-                "note": ""
-            },
-            {
-                "id": "ban-1759153288748",
-                "category": "BMO ",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
+                "id": "ban-1759153387192",
+                "category": "Avant",
+                "estBudget": 25.25,
+                "actualCost": 34.990000000000002,
+                "dueDate": "2025-10-07",
                 "status": "paid",
                 "note": "",
                 "previousState": {
-                    "dueDate": "",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
-                "id": "ban-1759153289207",
-                "category": "Credit One",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-10-22",
-                "status": "paid",
-                "note": "",
-                "previousState": {
-                    "dueDate": "2025-10-22",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
-                "id": "ban-1759153289481",
-                "category": "Credit One X5",
-                "estBudget": 30,
-                "actualCost": 30,
-                "dueDate": "2025-10-03",
-                "status": "paid",
-                "previousState": {
-                    "dueDate": "2025-10-03",
+                    "dueDate": "2025-10-07",
                     "status": "pending",
                     "actualCost": 30
-                },
-                "note": ""
+                }
             },
             {
                 "id": "ban-1759153289735",
@@ -332,20 +272,6 @@
                     "dueDate": "2025-10-09",
                     "status": "pending",
                     "actualCost": 0
-                }
-            },
-            {
-                "id": "ban-1759153387192",
-                "category": "Avant",
-                "estBudget": 25.25,
-                "actualCost": 34.990000000000002,
-                "dueDate": "2025-10-07",
-                "status": "paid",
-                "note": "",
-                "previousState": {
-                    "dueDate": "2025-10-07",
-                    "status": "pending",
-                    "actualCost": 30
                 }
             },
             {
@@ -363,55 +289,90 @@
                 }
             },
             {
-                "id": "banking-1759765816839",
-                "category": "Merrick Bank",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-10-07",
-                "status": "paid",
-                "note": "",
-                "previousState": {
-                    "dueDate": "2025-10-07",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
-                "id": "ban-1759153387588",
-                "category": "Petal",
+                "id": "ban-1759153289207",
+                "category": "Credit One",
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-10-26",
                 "status": "paid",
                 "note": "",
                 "previousState": {
-                    "dueDate": "2025-10-26",
+                    "dueDate": "2025-10-22",
                     "status": "pending",
                     "actualCost": 0
                 }
+            },
+            {
+                "id": "ban-1759153289481",
+                "category": "Credit One X5",
+                "estBudget": 73,
+                "actualCost": 0,
+                "dueDate": "2025-11-03",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "ban-3",
+                "category": "Wells Fargo Service Fee",
+                "estBudget": 25,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "ban-4",
+                "category": "U.S. Bank Service Fee",
+                "estBudget": 14.949999999999999,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "ban-1759153288748",
+                "category": "BMO ",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
             },
             {
                 "id": "banking-1759514314994",
                 "category": "Cash App",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "",
-                "status": "paid",
-                "previousState": {
-                    "dueDate": "2025-10-03",
-                    "status": "pending",
-                    "actualCost": 0
-                },
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "banking-1759765816839",
+                "category": "Merrick Bank",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "ban-1759153387588",
+                "category": "Petal",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-26",
+                "status": "pending",
                 "note": ""
             }
         ],
         "subscriptions": [
             {
-                "id": "per-3",
-                "category": "AMC Premier",
-                "estBudget": 9.9900000000000002,
+                "id": "subscriptions-1759864709394",
+                "category": "YouTube Premium",
+                "estBudget": 13.99,
                 "actualCost": 0,
-                "dueDate": "2025-10-31",
+                "dueDate": "2025-10-24",
                 "status": "pending",
                 "note": ""
             },
@@ -419,6 +380,15 @@
                 "id": "per-7",
                 "category": "Paramount+",
                 "estBudget": 10.99,
+                "actualCost": 0,
+                "dueDate": "2025-10-31",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "per-9",
+                "category": "Amazon Prime",
+                "estBudget": 7.6699999999999999,
                 "actualCost": 0,
                 "dueDate": "2025-10-31",
                 "status": "pending",
@@ -434,15 +404,6 @@
                 "note": ""
             },
             {
-                "id": "per-9",
-                "category": "Amazon Prime",
-                "estBudget": 7.6699999999999999,
-                "actualCost": 0,
-                "dueDate": "2025-10-31",
-                "status": "pending",
-                "note": ""
-            },
-            {
                 "id": "per-11",
                 "category": "CVS ExtraCare",
                 "estBudget": 5.4800000000000004,
@@ -452,11 +413,20 @@
                 "note": ""
             },
             {
-                "id": "subscriptions-1759864709394",
-                "category": "YouTube Premium",
-                "estBudget": 13.99,
+                "id": "per-3",
+                "category": "AMC Premier",
+                "estBudget": 17.989999999999998,
                 "actualCost": 0,
-                "dueDate": "2025-10-24",
+                "dueDate": "2026-08-01",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "personal-1759335076131",
+                "category": "Clothing",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "",
                 "status": "pending",
                 "note": ""
             }
