@@ -3,7 +3,7 @@ import React, { useState, useRef } from 'react';
 import PageContainer from "../common/PageContainer";
 import { Calculator, TrendingUp, PiggyBank, CreditCard, Target } from 'lucide-react';
 
-export default function CalculatorTab({ state }) {
+export default function CalculatorTab({ state, searchQuery }) {
   const [activeCalculator, setActiveCalculator] = useState('income');
   const [incomeAmount, setIncomeAmount] = useState('');
   const [savingsGoal, setSavingsGoal] = useState('');

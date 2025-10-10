@@ -10,6 +10,7 @@ import ArchivedDrawer from './ui/ArchivedDrawer';
 import StickyToolbar from './common/StickyToolbar.jsx';
 import StatementScanner from './statements/StatementScanner';
 import NotificationPanel from './modern/NotificationPanel';
+import { Search, X } from 'lucide-react';
 
 const BudgetDashboard = () => {
   const [state, setState] = useState(null);
@@ -19,6 +20,7 @@ const BudgetDashboard = () => {
   const [saveStatus, setSaveStatus] = useState(null);
   const [isArchiveDrawerOpen, setIsArchiveDrawerOpen] = useState(false);
   const [isStatementScannerOpen, setIsStatementScannerOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -158,7 +160,7 @@ const handleMarkPaidFromNotification = (bucket, id) => {
 
       <StickyToolbar bgTint={activeTabConfig?.bgColor || ''}>
 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 h-auto sm:h-14 py-3 sm:py-0">
-  <div className="flex items-center space-x-1 flex-1 min-w-0">
+  <div className="flex items-center space-x-1 min-w-0">
     {tabs.map((tab) => (
       <button
         key={tab.id}
@@ -180,7 +182,26 @@ const handleMarkPaidFromNotification = (bucket, id) => {
     />
   </div>
 
-  <div className="flex items-center gap-2 flex-wrap">
+  <div className="flex items-center gap-2 justify-end">{/* Search Bar - Now in header, aligned right */}
+    <div className="relative w-48">
+      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+      <input
+        type="text"
+        placeholder="Search..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      />
+      {searchQuery && (
+        <button
+          onClick={() => setSearchQuery('')}
+          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+
     <button
       onClick={() => setIsStatementScannerOpen(true)}
       className="px-3 sm:px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors flex items-center gap-2 text-sm"
@@ -240,16 +261,16 @@ const handleMarkPaidFromNotification = (bucket, id) => {
 
       <div className={`${activeTabConfig?.bgColor || 'bg-white'} min-h-screen`}>
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} setState={setState} saveBudget={saveBudget} />
+          <DashboardTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
         )}
         {activeTab === 'analysis' && (
-          <AnalysisTab state={state} setState={setState} saveBudget={saveBudget} />
+          <AnalysisTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
         )}
         {activeTab === 'calculator' && (
-          <CalculatorTab state={state} setState={setState} saveBudget={saveBudget} />
+          <CalculatorTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
         )}
         {activeTab === 'editor' && (
-          <EditorTab state={state} setState={setState} saveBudget={saveBudget} />
+          <EditorTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
         )}
       </div>
 

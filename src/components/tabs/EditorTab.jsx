@@ -71,7 +71,7 @@ const getFridaysInMonth = (year, month) => {
   return fridays;
 };
 
-const EditorTab = ({ state, setState, saveBudget }) => {
+const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [draggedFromBucket, setDraggedFromBucket] = useState(null);
   const [recentlyDeleted, setRecentlyDeleted] = useState(null);
@@ -84,7 +84,6 @@ const EditorTab = ({ state, setState, saveBudget }) => {
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [statusFilter, setStatusFilter] = useState('all');
   
-  const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   
@@ -1060,26 +1059,6 @@ return (
         </div>
       </div>
 
-      <div className="mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search items by name, budget, or cost..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <span className="text-sm font-medium text-gray-700">Filter by Status:</span>

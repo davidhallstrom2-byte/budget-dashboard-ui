@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle } from 'lucide-react';
 
-export default function AnalysisTab({ state }) {
+export default function AnalysisTab({ state, searchQuery }) {
   const buckets = state?.buckets || {};
   const sum = (arr, key) => (arr || []).reduce((s, x) => s + (Number(x?.[key]) || 0), 0);
 
