@@ -1,6 +1,7 @@
+// C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\components\tabs\EditorTab.jsx
 // src/components/tabs/EditorTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus, MessageSquare, X, CalendarClock } from 'lucide-react';
+import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus, CalendarClock } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package, PiggyBank
@@ -58,16 +59,11 @@ const ITEM_TEMPLATES = [
 const getFridaysInMonth = (year, month) => {
   const fridays = [];
   const date = new Date(year, month, 1);
-  
-  while (date.getDay() !== 5) {
-    date.setDate(date.getDate() + 1);
-  }
-  
+  while (date.getDay() !== 5) date.setDate(date.getDate() + 1);
   while (date.getMonth() === month) {
     fridays.push(new Date(date));
     date.setDate(date.getDate() + 7);
   }
-  
   return fridays;
 };
 
@@ -79,22 +75,19 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [categoryNames, setCategoryNames] = useState({});
   const [recentlyCleared, setRecentlyCleared] = useState(false);
   const [clearTimerId, setClearTimerId] = useState(null);
-  
+
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [statusFilter, setStatusFilter] = useState('all');
-  
+
   const [isSaving, setIsSaving] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
-  
+
   const [categoryOrder, setCategoryOrder] = useState([]);
   const [draggedCategory, setDraggedCategory] = useState(null);
   const [batchAddMode, setBatchAddMode] = useState(false);
   const [batchAddCategory, setBatchAddCategory] = useState('');
   const batchItemNameRef = useRef(null);
-
-  // Note modal state
-  const [noteModal, setNoteModal] = useState(null); // { bucket, id, currentNote }
 
   useEffect(() => {
     if (state?.meta?.categoryNames) {
@@ -142,25 +135,17 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   }, []);
 
   useEffect(() => {
-    if (batchAddMode && batchItemNameRef.current) {
-      batchItemNameRef.current.focus();
-    }
-  }, [batchAddMode, batchAddCategory]);
-
-  useEffect(() => {
     if (!state?.buckets?.income) return;
-    
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
-    
+
     const thisMonthIncome = state.buckets.income.filter(item => {
       const itemDate = new Date(item.dueDate);
       return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear;
     });
-    
     if (thisMonthIncome.length >= 4) return;
-    
+
     const fridays = getFridaysInMonth(currentYear, currentMonth);
     const newEntries = fridays.slice(0, 4).map((friday, idx) => ({
       id: `income-${Date.now()}-${idx}`,
@@ -170,12 +155,11 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       dueDate: friday.toISOString().split('T')[0],
       status: 'pending'
     }));
-    
+
     const updatedBuckets = {
       ...state.buckets,
       income: [...state.buckets.income, ...newEntries]
     };
-    
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
     setTimeout(() => saveBudgetWithIndicator(updatedState, false), 100);
@@ -205,23 +189,23 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     return 'pending';
   };
 
-const handlePaidClick = (bucket, id) => {
-  const item = state.buckets[bucket].find(item => item.id === id);
-  if (!item) return;
+  const handlePaidClick = (bucket, id) => {
+    const item = state.buckets[bucket].find(item => item.id === id);
+    if (!item) return;
 
-  const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
+    const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
 
-  const updatedBuckets = {
-    ...state.buckets,
-    [bucket]: state.buckets[bucket].map(it =>
-      it.id === id ? { ...it, status: 'paid', previousState } : it
-    )
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map(it =>
+        it.id === id ? { ...it, status: 'paid', previousState } : it
+      )
+    };
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item marked as paid!'), 100);
   };
-
-  const updatedState = { ...state, buckets: updatedBuckets };
-  setState(updatedState);
-  setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item marked as paid!'), 100);
-};
 
   const handleUndoPaid = (bucket, id) => {
     const item = state.buckets[bucket].find(item => item.id === id);
@@ -242,16 +226,38 @@ const handlePaidClick = (bucket, id) => {
     const item = state.buckets[bucket].find(item => item.id === id);
     if (!item) return;
 
-    // Calculate next due date (add 1 month)
     const currentDate = new Date(item.dueDate);
     const nextDate = new Date(currentDate);
-    nextDate.setMonth(nextDate.getMonth() + 1);
+    const recurrence = item.recurrence || 'monthly';
+
+    switch (recurrence) {
+      case 'weekly':
+        nextDate.setDate(nextDate.getDate() + 7);
+        break;
+      case 'biweekly':
+        nextDate.setDate(nextDate.getDate() + 14);
+        break;
+      case 'monthly':
+        nextDate.setMonth(nextDate.getMonth() + 1);
+        break;
+      case 'quarterly':
+        nextDate.setMonth(nextDate.getMonth() + 3);
+        break;
+      case 'annual':
+        nextDate.setFullYear(nextDate.getFullYear() + 1);
+        break;
+      case 'varies':
+        nextDate.setMonth(nextDate.getMonth() + 1);
+        break;
+      default:
+        nextDate.setMonth(nextDate.getMonth() + 1);
+    }
 
     const updatedBuckets = {
       ...state.buckets,
       [bucket]: state.buckets[bucket].map(it =>
-        it.id === id ? { 
-          ...it, 
+        it.id === id ? {
+          ...it,
           dueDate: nextDate.toISOString().split('T')[0],
           status: 'pending',
           actualCost: 0,
@@ -261,7 +267,9 @@ const handlePaidClick = (bucket, id) => {
     };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Due date rolled forward to next month!'), 100);
+
+    const recurrenceText = recurrence.charAt(0).toUpperCase() + recurrence.slice(1);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `Rolled forward (${recurrenceText})!`), 100);
   };
 
   const handleArchiveClick = (bucket, id) => {
@@ -285,12 +293,12 @@ const handlePaidClick = (bucket, id) => {
     const updatedBuckets = { ...state.buckets, [bucket]: state.buckets[bucket].filter(x => x.id !== id) };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
-    
+
     if (undoTimerId) clearTimeout(undoTimerId);
     setRecentlyDeleted({ bucket, item });
     const tid = setTimeout(() => setRecentlyDeleted(null), 10000);
     setUndoTimerId(tid);
-    
+
     setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item deleted successfully!'), 100);
   };
 
@@ -314,7 +322,7 @@ const handlePaidClick = (bucket, id) => {
     setRecentlyCleared(true);
     const tid = setTimeout(() => setRecentlyCleared(false), 3000);
     setClearTimerId(tid);
-    
+
     setTimeout(() => saveBudgetWithIndicator(updatedState, 'Row bgcolor reset'), 100);
   };
 
@@ -332,10 +340,8 @@ const handlePaidClick = (bucket, id) => {
 
   const handleMoveUp = (bucket, index) => {
     if (index === 0) return;
-    
     const items = [...state.buckets[bucket]];
     [items[index - 1], items[index]] = [items[index], items[index - 1]];
-    
     const updatedBuckets = { ...state.buckets, [bucket]: items };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
@@ -345,10 +351,8 @@ const handlePaidClick = (bucket, id) => {
   const handleMoveDown = (bucket, index) => {
     const items = state.buckets[bucket];
     if (index === items.length - 1) return;
-    
     const newItems = [...items];
     [newItems[index], newItems[index + 1]] = [newItems[index + 1], newItems[index]];
-    
     const updatedBuckets = { ...state.buckets, [bucket]: newItems };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
@@ -361,14 +365,13 @@ const handlePaidClick = (bucket, id) => {
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e) => { 
-    e.preventDefault(); 
-    e.dataTransfer.dropEffect = 'move'; 
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
   };
 
   const handleDrop = (e, targetBucket) => {
     e.preventDefault();
-    
     if (!draggedItem || !draggedFromBucket) return;
     if (draggedFromBucket === targetBucket) {
       setDraggedItem(null);
@@ -377,16 +380,14 @@ const handlePaidClick = (bucket, id) => {
     }
 
     const updatedSourceBucket = state.buckets[draggedFromBucket].filter(it => it.id !== draggedItem.id);
-    
-    let updatedTargetBucket = [...state.buckets[targetBucket]];
-    updatedTargetBucket.push(draggedItem);
+    const updatedTargetBucket = [...state.buckets[targetBucket], draggedItem];
 
     const updatedBuckets = {
       ...state.buckets,
       [draggedFromBucket]: updatedSourceBucket,
       [targetBucket]: updatedTargetBucket
     };
-    
+
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
     setTimeout(() => saveBudgetWithIndicator(updatedState, `Item moved to ${targetBucket}`), 100);
@@ -406,7 +407,6 @@ const handlePaidClick = (bucket, id) => {
 
   const handleCategoryDrop = (e, targetCategoryKey) => {
     e.preventDefault();
-    
     if (!draggedCategory || draggedCategory === targetCategoryKey) {
       setDraggedCategory(null);
       return;
@@ -420,7 +420,7 @@ const handlePaidClick = (bucket, id) => {
     newOrder.splice(targetIndex, 0, draggedCategory);
 
     setCategoryOrder(newOrder);
-    
+
     const updatedState = {
       ...state,
       meta: {
@@ -435,7 +435,6 @@ const handlePaidClick = (bucket, id) => {
 
   const exportCategoryToCSV = (bucketName, items) => {
     const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
-    
     const headers = ['Item', 'Est. Budget', 'Actual Cost', 'Due Date', 'Status'];
     const rows = items.map(item => [
       item.category || '',
@@ -464,7 +463,6 @@ const handlePaidClick = (bucket, id) => {
   const renameCategory = (bucketName) => {
     const currentName = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
     const newName = prompt(`Rename category "${currentName}" to:`, currentName)?.trim();
-    
     if (!newName || newName === currentName) return;
 
     const updatedNames = { ...categoryNames, [bucketName]: newName };
@@ -488,8 +486,8 @@ const handlePaidClick = (bucket, id) => {
     if (state.buckets[key]) { alert('Category already exists.'); return; }
 
     const newOrder = [...categoryOrder, key];
-    const updatedState = { 
-      ...state, 
+    const updatedState = {
+      ...state,
       buckets: { ...state.buckets, [key]: [] },
       meta: {
         ...state.meta,
@@ -512,7 +510,7 @@ const handlePaidClick = (bucket, id) => {
     }
 
     const options = deletableCategories.map(key => `<option value="${key}">${key}</option>`).join('');
-    
+
     const dialog = document.createElement('div');
     dialog.innerHTML = `
       <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
@@ -529,19 +527,16 @@ const handlePaidClick = (bucket, id) => {
         </div>
       </div>
     `;
-    
     document.body.appendChild(dialog);
-    
     const closeDialog = () => document.body.removeChild(dialog);
-    
     dialog.querySelector('#cancelBtn').onclick = closeDialog;
     dialog.querySelector('#okBtn').onclick = () => {
       const selectedKey = dialog.querySelector('#categorySelect').value;
       if (selectedKey) {
         const { [selectedKey]: _, ...rest } = state.buckets;
         const newOrder = categoryOrder.filter(k => k !== selectedKey);
-        const updatedState = { 
-          ...state, 
+        const updatedState = {
+          ...state,
           buckets: rest,
           meta: {
             ...state.meta,
@@ -563,7 +558,8 @@ const handlePaidClick = (bucket, id) => {
       estBudget: 0,
       actualCost: 0,
       dueDate: new Date().toISOString().split('T')[0],
-      status: 'pending'
+      status: 'pending',
+      recurrence: 'monthly'
     };
     const updatedBuckets = { ...state.buckets, [bucket]: [...state.buckets[bucket], newRow] };
     const updatedState = { ...state, buckets: updatedBuckets };
@@ -583,12 +579,13 @@ const handlePaidClick = (bucket, id) => {
       estBudget: 0,
       actualCost: 0,
       dueDate: new Date().toISOString().split('T')[0],
-      status: 'pending'
+      status: 'pending',
+      recurrence: 'monthly'
     };
 
-    const updatedBuckets = { 
-      ...state.buckets, 
-      [batchAddCategory]: [...(state.buckets[batchAddCategory] || []), newRow] 
+    const updatedBuckets = {
+      ...state.buckets,
+      [batchAddCategory]: [...(state.buckets[batchAddCategory] || []), newRow]
     };
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
@@ -606,10 +603,10 @@ const handlePaidClick = (bucket, id) => {
     setState(updatedState);
   };
 
-const handleActualCostBlur = (bucket, id, value) => {
-  const actualValue = parseFloat(value) || 0;
-  updateRow(bucket, id, 'actualCost', actualValue);
-};
+  const handleActualCostBlur = (bucket, id, value) => {
+    const actualValue = parseFloat(value) || 0;
+    updateRow(bucket, id, 'actualCost', actualValue);
+  };
 
   const duplicateItem = (bucket, id) => {
     const item = state.buckets[bucket].find(x => x.id === id);
@@ -630,15 +627,11 @@ const handleActualCostBlur = (bucket, id, value) => {
 
   const collapseAll = () => {
     const allCategories = {};
-    categoryOrder.forEach(key => {
-      allCategories[key] = true;
-    });
+    categoryOrder.forEach(key => { allCategories[key] = true; });
     setCollapsedCategories(allCategories);
   };
 
-  const expandAll = () => {
-    setCollapsedCategories({});
-  };
+  const expandAll = () => { setCollapsedCategories({}); };
 
   const toggleCategory = (key) => {
     setCollapsedCategories(prev => ({ ...prev, [key]: !prev[key] }));
@@ -648,11 +641,8 @@ const handleActualCostBlur = (bucket, id, value) => {
     const key = `${bucket}:${id}`;
     setSelectedItems(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(key)) {
-        newSet.delete(key);
-      } else {
-        newSet.add(key);
-      }
+      if (newSet.has(key)) newSet.delete(key);
+      else newSet.add(key);
       return newSet;
     });
   };
@@ -694,6 +684,63 @@ const handleActualCostBlur = (bucket, id, value) => {
     setTimeout(() => saveBudgetWithIndicator(updatedState, `${selectedItems.size} items archived!`), 100);
   };
 
+  const bulkRollForward = () => {
+    if (selectedItems.size === 0) return;
+
+    const updatedBuckets = { ...state.buckets };
+    let rolledCount = 0;
+
+    selectedItems.forEach(key => {
+      const [bucket, id] = key.split(':');
+      const itemIndex = updatedBuckets[bucket].findIndex(x => x.id === id);
+
+      if (itemIndex !== -1) {
+        const item = updatedBuckets[bucket][itemIndex];
+
+        const currentDate = new Date(item.dueDate);
+        const nextDate = new Date(currentDate);
+        const recurrence = item.recurrence || 'monthly';
+
+        switch (recurrence) {
+          case 'weekly':
+            nextDate.setDate(nextDate.getDate() + 7);
+            break;
+          case 'biweekly':
+            nextDate.setDate(nextDate.getDate() + 14);
+            break;
+          case 'monthly':
+            nextDate.setMonth(nextDate.getMonth() + 1);
+            break;
+          case 'quarterly':
+            nextDate.setMonth(nextDate.getMonth() + 3);
+            break;
+          case 'annual':
+            nextDate.setFullYear(nextDate.getFullYear() + 1);
+            break;
+          case 'varies':
+            nextDate.setMonth(nextDate.getMonth() + 1);
+            break;
+          default:
+            nextDate.setMonth(nextDate.getMonth() + 1);
+        }
+
+        updatedBuckets[bucket][itemIndex] = {
+          ...item,
+          dueDate: nextDate.toISOString().split('T')[0],
+          status: 'pending',
+          actualCost: 0,
+          previousState: undefined
+        };
+        rolledCount++;
+      }
+    });
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setSelectedItems(new Set());
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `${rolledCount} items rolled forward!`), 100);
+  };
+
   const addFromTemplate = (template) => {
     const newItem = {
       id: `${template.category}-${Date.now()}`,
@@ -701,7 +748,8 @@ const handleActualCostBlur = (bucket, id, value) => {
       estBudget: template.estBudget,
       actualCost: 0,
       dueDate: new Date().toISOString().split('T')[0],
-      status: 'pending'
+      status: 'pending',
+      recurrence: template.recurrence || 'monthly'
     };
 
     const updatedBuckets = {
@@ -745,44 +793,29 @@ const handleActualCostBlur = (bucket, id, value) => {
     return filtered;
   };
 
-  // Note modal helpers
-  const openNoteModal = (bucket, id) => {
-    const item = state.buckets[bucket].find(x => x.id === id);
-    if (!item) return;
-    setNoteModal({ bucket, id, currentNote: item.note || '' });
-  };
-
-  const saveNote = () => {
-    if (!noteModal) return;
-    const { bucket, id, currentNote } = noteModal;
-    updateRow(bucket, id, 'note', currentNote);
-    setNoteModal(null);
-    setTimeout(() => saveBudgetWithIndicator(state, 'Note saved!'), 100);
-  };
-
   const BucketSection = ({ bucketName, items, title }) => {
     const IconComponent = categoryIcons[bucketName]?.icon || Package;
     const iconColor = categoryIcons[bucketName]?.color || 'text-gray-600';
     const displayTitle = categoryNames[bucketName] || title;
     const isCollapsed = collapsedCategories[bucketName];
 
-const filteredItems = getFilteredItems(items).sort((a, b) => {
-  const dateA = new Date(a.dueDate || '9999-12-31');
-  const dateB = new Date(b.dueDate || '9999-12-31');
-  return dateA - dateB;
-});
+    const filteredItems = getFilteredItems(items).sort((a, b) => {
+      const dateA = new Date(a.dueDate || '9999-12-31');
+      const dateB = new Date(b.dueDate || '9999-12-31');
+      return dateA - dateB;
+    });
 
     const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
     const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
     const variance = totalActual - totalBudgeted;
     const statusCounts = getCategoryStatusCounts(items);
 
-return (
-  <div
-    className="mb-8"
-    onDragOver={handleCategoryDragOver}
-    onDrop={(e) => handleCategoryDrop(e, bucketName)}
-  >
+    return (
+      <div
+        className="mb-8"
+        onDragOver={handleCategoryDragOver}
+        onDrop={(e) => handleCategoryDrop(e, bucketName)}
+      >
         <div className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2 flex-wrap">
             <GripVertical className="w-4 h-4 text-gray-400 hidden sm:block" />
@@ -796,7 +829,7 @@ return (
             <IconComponent className={`w-5 h-5 ${iconColor}`} aria-hidden="true" />
             <h3 className="text-base sm:text-lg font-semibold">{displayTitle}</h3>
             <span className="text-xs sm:text-sm opacity-75">({filteredItems.length})</span>
-            
+
             <div className="flex gap-1">
               {statusCounts.overdue > 0 && (
                 <span className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full flex items-center gap-1">
@@ -844,7 +877,7 @@ return (
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, bucketName)}
           >
-            <table className="w-full min-w-[800px]">
+            <table className="w-full min-w-[900px]">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
@@ -858,10 +891,10 @@ return (
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item, index) => {
+                {filteredItems.map((item) => {
                   const itemKey = `${bucketName}:${item.id}`;
                   const isSelected = selectedItems.has(itemKey);
-                  
+
                   return (
                     <tr
                       key={item.id}
@@ -880,16 +913,16 @@ return (
                       <td className="px-1 py-2 w-8">
                         <div className="flex flex-col gap-1">
                           <button
-                            onClick={() => handleMoveUp(bucketName, items.indexOf(item))}
-                            disabled={items.indexOf(item) === 0}
+                            onClick={() => handleMoveUp(bucketName, (state.buckets[bucketName] || []).indexOf(item))}
+                            disabled={(state.buckets[bucketName] || []).indexOf(item) === 0}
                             className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
                             title="Move Up"
                           >
                             <ArrowUp className="w-3 h-3 text-gray-600" />
                           </button>
                           <button
-                            onClick={() => handleMoveDown(bucketName, items.indexOf(item))}
-                            disabled={items.indexOf(item) === items.length - 1}
+                            onClick={() => handleMoveDown(bucketName, (state.buckets[bucketName] || []).indexOf(item))}
+                            disabled={(state.buckets[bucketName] || []).indexOf(item) === (state.buckets[bucketName] || []).length - 1}
                             className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
                             title="Move Down"
                           >
@@ -905,11 +938,7 @@ return (
                           type="text"
                           defaultValue={item.category}
                           onBlur={(e) => updateRow(bucketName, item.id, 'category', e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.target.blur();
-                            }
-                          }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
                           className="w-full p-1 border rounded bg-white"
                           placeholder="Enter item name"
                         />
@@ -919,11 +948,7 @@ return (
                           type="number"
                           defaultValue={item.estBudget}
                           onBlur={(e) => updateRow(bucketName, item.id, 'estBudget', parseFloat(e.target.value) || 0)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.target.blur();
-                            }
-                          }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
                           className="w-full p-1 border rounded bg-white text-right"
                           step="0.01"
                         />
@@ -933,11 +958,7 @@ return (
                           type="number"
                           defaultValue={item.actualCost}
                           onBlur={(e) => handleActualCostBlur(bucketName, item.id, e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.target.blur();
-                            }
-                          }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
                           className="w-full p-1 border rounded bg-white text-right"
                           step="0.01"
                           placeholder={item.estBudget > 0 ? `Auto: ${item.estBudget}` : '0'}
@@ -948,11 +969,7 @@ return (
                           type="date"
                           defaultValue={item.dueDate}
                           onBlur={(e) => updateRow(bucketName, item.id, 'dueDate', e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.target.blur();
-                            }
-                          }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
                           className="w-full p-1 border rounded bg-white"
                         />
                       </td>
@@ -962,19 +979,17 @@ return (
                             <>
                               <button
                                 onClick={() => handleUndoPaid(bucketName, item.id)}
-                                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1 text-xs"
+                                className="px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700"
                                 title="Undo Payment"
                               >
                                 <Undo2 className="w-4 h-4" />
-                                Undo
                               </button>
                               <button
                                 onClick={() => handleRollForward(bucketName, item.id)}
-                                className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-1 text-xs"
+                                className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
                                 title="Roll Forward to Next Month"
                               >
                                 <CalendarClock className="w-4 h-4" />
-                                Roll Forward
                               </button>
                             </>
                           ) : (
@@ -986,24 +1001,13 @@ return (
                               Paid
                             </button>
                           )}
-                          
+
                           <button
                             onClick={() => duplicateItem(bucketName, item.id)}
                             className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
                             title="Duplicate Item"
                           >
                             <Copy className="w-4 h-4" />
-                          </button>
-
-                          {/* Note button */}
-                          <button
-                            onClick={() => openNoteModal(bucketName, item.id)}
-                            className={`px-2 py-1 rounded ${
-                              item.note ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                            }`}
-                            title={item.note ? "Edit Note" : "Add Note"}
-                          >
-                            <MessageSquare className="w-4 h-4" />
                           </button>
 
                           <button
@@ -1020,7 +1024,7 @@ return (
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
-                          
+
                           {(item.status === 'paid' || getRowBackgroundColor(item) !== 'bg-white border-gray-200') && (
                             <button
                               onClick={() => handleClearStatus(bucketName, item.id)}
@@ -1036,22 +1040,6 @@ return (
                   );
                 })}
               </tbody>
-              <tfoot className="bg-gray-100 border-t-2 border-gray-300">
-                <tr>
-                  <td colSpan="4" className="px-4 py-2 text-right font-semibold text-gray-900">Category Totals:</td>
-                  <td className="px-4 py-2 text-right font-bold text-gray-900">${totalBudgeted.toFixed(2)}</td>
-                  <td className="px-4 py-2 text-right font-bold text-gray-900">${totalActual.toFixed(2)}</td>
-                  <td className="px-4 py-2 text-right font-semibold" colSpan="2">
-                    {variance === 0 ? (
-                      <span className="text-gray-600">On Budget</span>
-                    ) : variance > 0 ? (
-                      <span className="text-red-600">Over: +${variance.toFixed(2)}</span>
-                    ) : (
-                      <span className="text-green-600">Under: ${Math.abs(variance).toFixed(2)}</span>
-                    )}
-                  </td>
-                </tr>
-              </tfoot>
             </table>
           </div>
         )}
@@ -1096,7 +1084,6 @@ return (
         </div>
       </div>
 
-
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-gray-700">Filter by Status:</span>
@@ -1111,7 +1098,7 @@ return (
               key={filter.id}
               onClick={() => setStatusFilter(filter.id)}
               className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                statusFilter === filter.id 
+                statusFilter === filter.id
                   ? 'ring-2 ring-blue-500 ' + filter.color
                   : filter.color + ' opacity-60 hover:opacity-100'
               }`}
@@ -1160,8 +1147,8 @@ return (
             <button
               onClick={() => setBatchAddMode(!batchAddMode)}
               className={`flex items-center gap-2 px-3 py-2 rounded transition-colors text-sm ${
-                batchAddMode 
-                  ? 'bg-orange-600 text-white hover:bg-orange-700' 
+                batchAddMode
+                  ? 'bg-orange-600 text-white hover:bg-orange-700'
                   : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
               }`}
               title="Batch Add Mode"
@@ -1169,9 +1156,17 @@ return (
               <ListPlus className="w-4 h-4" />
               <span className="hidden sm:inline">Batch Add {batchAddMode && '(ON)'}</span>
             </button>
-            
+
             {selectedItems.size > 0 && (
               <>
+                <button
+                  onClick={bulkRollForward}
+                  className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm"
+                  title="Roll Forward Selected"
+                >
+                  <CalendarClock className="w-4 h-4" />
+                  <span className="hidden sm:inline">Roll Forward ({selectedItems.size})</span>
+                </button>
                 <button
                   onClick={bulkArchive}
                   className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
@@ -1260,11 +1255,7 @@ return (
                 type="text"
                 placeholder="Enter item name and press Enter"
                 disabled={!batchAddCategory}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    addBatchItem(e);
-                  }
-                }}
+                onKeyDown={(e) => { if (e.key === 'Enter') addBatchItem(e); }}
                 className="w-full p-2 border border-orange-200 rounded focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
               />
             </div>
@@ -1276,7 +1267,7 @@ return (
               <Plus className="w-5 h-5" />
             </button>
           </div>
-          <p className="text-xs text-gray-600 mt-2">💡 Tip: Press Enter after typing item name to quickly add multiple items</p>
+          <p className="text-xs text-gray-600 mt-2">Tip: Press Enter after typing item name to quickly add multiple items</p>
         </div>
       )}
 
@@ -1309,9 +1300,7 @@ return (
 
       {recentlyDeleted && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-          <span className="text-sm text-red-800">
-            Item deleted successfully!
-          </span>
+          <span className="text-sm text-red-800">Item deleted successfully!</span>
           <button
             onClick={undoDelete}
             className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 flex items-center gap-1 text-sm"
@@ -1324,9 +1313,7 @@ return (
 
       {recentlyCleared && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded">
-          <span className="text-sm text-green-800">
-            Row bgcolor reset
-          </span>
+          <span className="text-sm text-green-800">Row bgcolor reset</span>
         </div>
       )}
 
@@ -1342,48 +1329,6 @@ return (
           />
         );
       })}
-
-      {noteModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Item Note</h3>
-              <button
-                onClick={() => setNoteModal(null)}
-                className="p-1 hover:bg-gray-100 rounded"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              <textarea
-                value={noteModal.currentNote}
-                onChange={(e) => setNoteModal({ ...noteModal, currentNote: e.target.value })}
-                placeholder="Add notes about this budget item..."
-                className="w-full h-40 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                autoFocus
-              />
-            </div>
-            
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
-              <button
-                onClick={() => setNoteModal(null)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveNote}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Save Note
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </PageContainer>
   );
 };
