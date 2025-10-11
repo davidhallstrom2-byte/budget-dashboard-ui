@@ -1,6 +1,6 @@
 // src/components/tabs/DashboardTab.jsx
 import React, { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, MessageSquare, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, Plus, Minus } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package
@@ -36,7 +36,6 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [statusFilter, setStatusFilter] = useState('all');
   const [showUrgentAlert, setShowUrgentAlert] = useState(true);
-  const [viewingNote, setViewingNote] = useState(null);
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
@@ -226,6 +225,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                 <th>Actual Cost</th>
                 <th>Due Date</th>
                 <th>Status</th>
+                <th>Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -239,6 +239,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                     <td>$${(item.actualCost || 0).toFixed(2)}</td>
                     <td>${item.dueDate || ''}</td>
                     <td>${status}</td>
+                    <td>${item.note || ''}</td>
                   </tr>
                 `;
               }).join('')}
@@ -290,12 +291,13 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
       {(() => {
         const urgentItems = [];
         Object.entries(state?.buckets || {}).forEach(([bucket, items]) => {
+          if (bucket === 'income') return; // Skip income items
           items.forEach(item => {
             if (item.status !== 'paid') {
               const today = new Date();
               const dueDate = new Date(item.dueDate);
               const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-              if (diffDays >= 0 && diffDays <= 3) {
+              if (diffDays <= 0) {
                 urgentItems.push({ ...item, bucket, daysUntil: diffDays });
               }
             }
@@ -316,7 +318,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
 
               <div className="p-6">
                 <p className="text-red-900 font-semibold mb-4">
-                  {urgentItems.length} payment{urgentItems.length !== 1 ? 's' : ''} due within 3 days:
+                  {urgentItems.length} payment{urgentItems.length !== 1 ? 's' : ''} {urgentItems.some(i => i.daysUntil < 0) ? 'overdue or due today' : 'due today'}:
                 </p>
 
                 <div className="space-y-3 mb-6">
@@ -326,7 +328,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                         <div>
                           <p className="font-bold text-red-900">{item.category}</p>
                           <p className="text-sm text-red-700">
-                            {item.daysUntil === 0 ? '🔴 DUE TODAY' : `Due in ${item.daysUntil} day${item.daysUntil !== 1 ? 's' : ''}`}
+                            {item.daysUntil === 0 ? '🔴 DUE TODAY' : item.daysUntil < 0 ? `⚠️ OVERDUE ${Math.abs(item.daysUntil)} day${Math.abs(item.daysUntil) !== 1 ? 's' : ''}` : `Due in ${item.daysUntil} day${item.daysUntil !== 1 ? 's' : ''}`}
                           </p>
                         </div>
                         <p className="text-lg font-bold text-red-900">${(item.actualCost || item.estBudget || 0).toFixed(2)}</p>
@@ -339,7 +341,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                   onClick={() => setShowUrgentAlert(false)}
                   className="w-full px-4 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors"
                 >
-                  I Acknowledge
+                  I'm On It!
                 </button>
               </div>
             </div>
@@ -392,95 +394,118 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
       </div>
 
 
-      <div className="mb-4 flex flex-col gap-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Filter:</span>
-            {[
-              { id: 'all', label: 'All Items', color: 'bg-gray-200 text-gray-800' },
-              { id: 'overdue', label: 'Overdue', color: 'bg-red-100 text-red-800' },
-              { id: 'dueSoon', label: 'Due Soon', color: 'bg-yellow-100 text-yellow-800' },
-              { id: 'pending', label: 'Pending', color: 'bg-blue-100 text-blue-800' },
-              { id: 'paid', label: 'Paid', color: 'bg-green-100 text-green-800' }
-            ].map(filter => (
-              <button
-                key={filter.id}
-                onClick={() => setStatusFilter(filter.id)}
-                className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                  statusFilter === filter.id
-                    ? 'ring-2 ring-blue-500 ' + filter.color
-                    : filter.color + ' opacity-60 hover:opacity-100'
-                }`}
-              >
-                {filter.label}
-              </button>
-            ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden">
+          <div className="bg-red-600 text-white px-4 py-3 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5" />
+            <h3 className="text-lg font-bold">Overdue Items ({alerts.overdue.length})</h3>
           </div>
+          <div className="bg-white p-4">
+            {alerts.overdue.length > 0 ? (
+              <div className="space-y-2">
+                {alerts.overdue.slice(0, 5).map(item => (
+                  <div key={item.id} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 last:border-b-0">
+                    <span className="text-gray-800 truncate font-medium">{item.category}</span>
+                    <span className="text-red-600 font-bold ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                  </div>
+                ))}
+                {alerts.overdue.length > 5 && (
+                  <p className="text-xs text-gray-600 pt-2">+ {alerts.overdue.length - 5} more overdue items</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 text-center py-2">No overdue items</p>
+            )}
+          </div>
+        </div>
 
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={exportAllToCSV}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Export CSV</span>
-            </button>
-            <button
-              onClick={printReport}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-            >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">Print Report</span>
-            </button>
+        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden">
+          <div className="bg-yellow-500 text-white px-4 py-3 flex items-center gap-2">
+            <Clock className="w-5 h-5" />
+            <h3 className="text-lg font-bold">Due Soon ({alerts.upcoming.length})</h3>
+          </div>
+          <div className="bg-white p-4">
+            {alerts.upcoming.length > 0 ? (
+              <div className="space-y-2">
+                {alerts.upcoming.slice(0, 5).map(item => (
+                  <div key={item.id} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 last:border-b-0">
+                    <span className="text-gray-800 truncate font-medium">{item.category}</span>
+                    <span className="text-yellow-600 font-bold ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                  </div>
+                ))}
+                {alerts.upcoming.length > 5 && (
+                  <p className="text-xs text-gray-600 pt-2">+ {alerts.upcoming.length - 5} more upcoming items</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 text-center py-2">No items due within 5 days</p>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        {alerts.overdue.length > 0 && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertCircle className="w-5 h-5 text-red-600" />
-              <h3 className="font-semibold text-red-900">Overdue Items ({alerts.overdue.length})</h3>
-            </div>
-            <div className="space-y-2">
-              {alerts.overdue.slice(0, 5).map(item => (
-                <div key={item.id} className="flex items-center justify-between text-sm">
-                  <span className="text-red-800 truncate">{item.category}</span>
-                  <span className="text-red-600 ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
-                </div>
-              ))}
-              {alerts.overdue.length > 5 && (
-                <p className="text-xs text-red-600">+ {alerts.overdue.length - 5} more overdue items</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {alerts.upcoming.length > 0 && (
-          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-5 h-5 text-yellow-600" />
-              <h3 className="font-semibold text-yellow-900">Upcoming Items ({alerts.upcoming.length})</h3>
-            </div>
-            <div className="space-y-2">
-              {alerts.upcoming.slice(0, 5).map(item => (
-                <div key={item.id} className="flex items-center justify-between text-sm">
-                  <span className="text-yellow-800 truncate">{item.category}</span>
-                  <span className="text-yellow-600 ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
-                </div>
-              ))}
-              {alerts.upcoming.length > 5 && (
-                <p className="text-xs text-yellow-600">+ {alerts.upcoming.length - 5} more upcoming items</p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
 <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
-  <div className="bg-blue-600 text-white px-4 py-3">
-    <h3 className="text-lg font-bold">Budget List</h3>
+  <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
+    <div className="flex items-center gap-2">
+      <h3 className="text-lg font-bold whitespace-nowrap">Budget List</h3>
+      <button
+        onClick={() => {
+          const allExpanded = {};
+          categoryOrder.forEach(bucket => {
+            allExpanded[bucket] = true;
+          });
+          setExpandedCategories(allExpanded);
+        }}
+        className="p-1 hover:bg-white/20 rounded transition-colors"
+        title="Expand All Categories"
+      >
+        <Plus className="w-5 h-5" />
+      </button>
+      <button
+        onClick={() => setExpandedCategories({})}
+        className="p-1 hover:bg-white/20 rounded transition-colors"
+        title="Collapse All Categories"
+      >
+        <Minus className="w-5 h-5" />
+      </button>
+    </div>
+    <div className="flex items-center gap-2 flex-wrap">
+      {[
+        { id: 'all', label: 'All Items', color: 'bg-white/20 hover:bg-white/30' },
+        { id: 'overdue', label: 'Overdue', color: 'bg-red-500/80 hover:bg-red-500' },
+        { id: 'dueSoon', label: 'Due Soon', color: 'bg-yellow-500/80 hover:bg-yellow-500' },
+        { id: 'pending', label: 'Pending', color: 'bg-blue-400/80 hover:bg-blue-400' },
+        { id: 'paid', label: 'Paid', color: 'bg-green-500/80 hover:bg-green-500' }
+      ].map(filter => (
+        <button
+          key={filter.id}
+          onClick={() => setStatusFilter(filter.id)}
+          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            statusFilter === filter.id
+              ? 'ring-2 ring-white ' + filter.color
+              : filter.color
+          }`}
+        >
+          {filter.label}
+        </button>
+      ))}
+    </div>
+    <div className="flex gap-2 whitespace-nowrap">
+      <button
+        onClick={exportAllToCSV}
+        className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+      >
+        <Download className="w-4 h-4" />
+        <span className="hidden sm:inline">Export CSV</span>
+      </button>
+      <button
+        onClick={printReport}
+        className="flex items-center gap-2 px-3 py-1.5 bg-blue-700 text-white rounded-lg hover:bg-blue-800 text-sm"
+      >
+        <Printer className="w-4 h-4" />
+        <span className="hidden sm:inline">Print Report</span>
+      </button>
+    </div>
   </div>
 
         {categoryOrder.map(bucketName => {
@@ -491,7 +516,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
           const IconComponent = categoryIcons[bucketName]?.icon || Package;
           const iconColor = categoryIcons[bucketName]?.color || 'text-gray-600';
           const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
-          const isExpanded = expandedCategories[bucketName] !== false; // Default to true (expanded)
+          const isExpanded = expandedCategories[bucketName] === true; // Default to false (collapsed)
 
           const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
           const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
@@ -533,7 +558,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
 
 {isExpanded && (
   <div className="px-4 pb-4 overflow-x-auto bg-white">
-    <table className="w-full min-w-[600px]">
+    <table className="w-full min-w-[900px]">
       <thead className="bg-gray-100">
   <tr>
     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
@@ -541,7 +566,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
     <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
-    <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-16">Notes</th>
+    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
   </tr>
 </thead>
       <tbody className="bg-white">
@@ -552,16 +577,20 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                           <td className="px-3 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
                           <td className="px-3 py-2">{getStatusBadge(item)}</td>
-                          <td className="px-3 py-2 text-center">
-                            {item.note && (
-                              <button
-                                onClick={() => setViewingNote({ item, categoryName: displayTitle })}
-                                className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                title="View Notes"
-                              >
-                                <MessageSquare className="w-4 h-4" />
-                              </button>
-                            )}
+                          <td className="px-3 py-2">
+                            <input
+                              type="text"
+                              value={item.note || ''}
+                              onChange={(e) => {
+                                const updatedBucket = state.buckets[bucketName].map(i =>
+                                  i.id === item.id ? { ...i, note: e.target.value } : i
+                                );
+                                setState({ ...state, buckets: { ...state.buckets, [bucketName]: updatedBucket } });
+                              }}
+                              onBlur={saveBudget}
+                              placeholder="Add note..."
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            />
                           </td>
                         </tr>
                       ))}
@@ -571,7 +600,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                         <td className="px-3 py-2 text-sm font-semibold">Subtotal</td>
                         <td className="px-3 py-2 text-sm text-right font-bold">${totalBudgeted.toFixed(2)}</td>
                         <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
-                        <td colSpan="3"></td>
+                        <td colSpan="4"></td>
                       </tr>
                     </tfoot>
                   </table>
@@ -625,50 +654,6 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
       </div>
 
       <EmergencyFundWidget state={state} setState={setState} saveBudget={saveBudget} />
-
-      {viewingNote && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-          onClick={() => setViewingNote(null)}
-        >
-          <div 
-            className="bg-white rounded-lg shadow-xl max-w-md w-full"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {viewingNote.item.category}
-                </h3>
-                <p className="text-sm text-gray-500">{viewingNote.categoryName}</p>
-              </div>
-              <button
-                onClick={() => setViewingNote(null)}
-                className="p-1 hover:bg-gray-100 rounded"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                  {viewingNote.item.note}
-                </p>
-              </div>
-            </div>
-            
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setViewingNote(null)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </PageContainer>
   );

@@ -1060,26 +1060,43 @@ return (
       </div>
 
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <span className="text-sm font-medium text-gray-700">Filter by Status:</span>
-        {[
-          { id: 'all', label: 'All Items', color: 'bg-gray-200 text-gray-800' },
-          { id: 'paid', label: 'Paid', color: 'bg-green-100 text-green-800' },
-          { id: 'pending', label: 'Pending', color: 'bg-blue-100 text-blue-800' },
-          { id: 'overdue', label: 'Overdue', color: 'bg-red-100 text-red-800' }
-        ].map(filter => (
-          <button
-            key={filter.id}
-            onClick={() => setStatusFilter(filter.id)}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-              statusFilter === filter.id 
-                ? 'ring-2 ring-blue-500 ' + filter.color
-                : filter.color + ' opacity-60 hover:opacity-100'
-            }`}
-          >
-            {filter.label}
-          </button>
-        ))}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-gray-700">Filter by Status:</span>
+          {[
+            { id: 'all', label: 'All Items', color: 'bg-gray-200 text-gray-800' },
+            { id: 'paid', label: 'Paid', color: 'bg-green-100 text-green-800' },
+            { id: 'pending', label: 'Pending', color: 'bg-blue-100 text-blue-800' },
+            { id: 'overdue', label: 'Overdue', color: 'bg-red-100 text-red-800' }
+          ].map(filter => (
+            <button
+              key={filter.id}
+              onClick={() => setStatusFilter(filter.id)}
+              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                statusFilter === filter.id 
+                  ? 'ring-2 ring-blue-500 ' + filter.color
+                  : filter.color + ' opacity-60 hover:opacity-100'
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-semibold text-gray-700">Row Color Legend:</span>
+          <span className="flex items-center gap-2 text-sm">
+            <div className="w-4 h-4 bg-green-100 border border-green-200 rounded"></div>
+            Paid
+          </span>
+          <span className="flex items-center gap-2 text-sm">
+            <div className="w-4 h-4 bg-yellow-100 border border-yellow-200 rounded"></div>
+            Due Soon (≤5 days)
+          </span>
+          <span className="flex items-center gap-2 text-sm">
+            <div className="w-4 h-4 bg-red-100 border border-red-200 rounded"></div>
+            Overdue
+          </span>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3 mb-6">
@@ -1275,24 +1292,6 @@ return (
         </div>
       )}
 
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-        <h3 className="font-semibold mb-2">Row Color Legend:</h3>
-        <div className="flex flex-wrap gap-4 text-sm">
-          <span className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-green-100 border border-green-200 rounded"></div>
-            Paid
-          </span>
-          <span className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-yellow-100 border border-yellow-200 rounded"></div>
-            Due Soon (≤5 days)
-          </span>
-          <span className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-red-100 border border-red-200 rounded"></div>
-            Overdue
-          </span>
-        </div>
-      </div>
-
       {categoryOrder.map(key => {
         if (!state.buckets[key]) return null;
         const title = DEFAULT_TITLES[key] || key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
@@ -1346,48 +1345,6 @@ return (
           </div>
         </div>
       )}
-
-{/* Grand Totals */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden">
-        <div className="bg-blue-600 text-white px-4 py-3">
-          <h3 className="text-lg font-bold">GRAND TOTALS</h3>
-        </div>
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600 mb-1">Total Items</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {Object.values(state.buckets).flat().length}
-              </p>
-            </div>
-            <div className="bg-white rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600 mb-1">Total Est. Budget</p>
-              <p className="text-2xl font-bold text-blue-900">
-                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
-              </p>
-            </div>
-            <div className="bg-white rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600 mb-1">Total Actual Cost</p>
-              <p className="text-2xl font-bold text-purple-900">
-                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
-              </p>
-            </div>
-            <div className="bg-white rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600 mb-1">Variance</p>
-              {(() => {
-                const totalBudget = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
-                const totalActual = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
-                const variance = totalActual - totalBudget;
-                return (
-                  <p className={`text-2xl font-bold ${variance > 0 ? 'text-red-600' : variance < 0 ? 'text-green-600' : 'text-gray-600'}`}>
-                    {variance > 0 ? '+' : ''}${variance.toFixed(2)}
-                  </p>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      </div>
 
     </PageContainer>
   );

@@ -33,12 +33,12 @@ export default function CalculatorTab({ state, searchQuery }) {
   totals.netIncome = totals.totalIncome - totals.totalExpenses;
 
   const calculators = [
-    { id: 'income', label: 'Income', icon: TrendingUp, color: 'bg-blue-500' },
-    { id: 'scenarios', label: 'Scenarios', icon: Calculator, color: 'bg-purple-500' },
-    { id: 'breakeven', label: 'Break-Even', icon: Target, color: 'bg-green-500' },
-    { id: 'savings', label: 'Savings Goal', icon: PiggyBank, color: 'bg-orange-500' },
-    { id: 'debt', label: 'Debt Payoff', icon: CreditCard, color: 'bg-red-500' },
-    { id: 'emergency', label: 'Emergency Fund', icon: PiggyBank, color: 'bg-indigo-500' }
+    { id: 'income', label: 'Income', color: 'bg-blue-100 text-blue-800' },
+    { id: 'scenarios', label: 'Scenarios', color: 'bg-purple-100 text-purple-800' },
+    { id: 'breakeven', label: 'Break-Even', color: 'bg-green-100 text-green-800' },
+    { id: 'savings', label: 'Savings Goal', color: 'bg-orange-100 text-orange-800' },
+    { id: 'debt', label: 'Debt Payoff', color: 'bg-red-100 text-red-800' },
+    { id: 'emergency', label: 'Emergency Fund', color: 'bg-indigo-100 text-indigo-800' }
   ];
 
   const scrollToCalculator = (calcId) => {
@@ -111,21 +111,26 @@ export default function CalculatorTab({ state, searchQuery }) {
         <h2 className="text-2xl font-bold text-slate-800">Budget Calculator</h2>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-6">
-        {calculators.map(({ id, label, icon: Icon, color }) => {
-          const active = activeCalculator === id;
-          return (
-            <button
-              key={id}
-              onClick={() => scrollToCalculator(id)}
-              className={`inline-flex items-center gap-2 px-3 py-2 rounded-full border ${active ? `${color} text-white border-transparent` : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
-              title={label}
-            >
-              <Icon className="w-4 h-4" />
-              <span className="text-sm font-medium">{label}</span>
-            </button>
-          );
-        })}
+      <div className="mb-6 flex items-center gap-3">
+        <span className="text-sm font-medium text-gray-700">Filter by Status:</span>
+        <div className="flex flex-wrap gap-2">
+          {calculators.map(({ id, label, color }) => {
+            const active = activeCalculator === id;
+            return (
+              <button
+                key={id}
+                onClick={() => scrollToCalculator(id)}
+                className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                  active 
+                    ? 'ring-2 ring-blue-500 ' + color
+                    : color + ' opacity-60 hover:opacity-100'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div ref={(el) => (sectionRefs.current['income'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
