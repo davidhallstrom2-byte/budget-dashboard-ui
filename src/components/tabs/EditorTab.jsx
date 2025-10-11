@@ -1,6 +1,6 @@
 // src/components/tabs/EditorTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus, MessageSquare, X } from 'lucide-react';
+import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus, MessageSquare, X, CalendarClock } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package, PiggyBank
@@ -201,6 +201,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     const today = new Date();
     const diffDays = Math.ceil((new Date(item.dueDate) - today) / (1000 * 60 * 60 * 24));
     if (diffDays < 0) return 'overdue';
+    if (diffDays <= 5) return 'dueSoon';
     return 'pending';
   };
 
@@ -235,6 +236,32 @@ const handlePaidClick = (bucket, id) => {
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
     setTimeout(() => saveBudgetWithIndicator(updatedState, 'Payment undone!'), 100);
+  };
+
+  const handleRollForward = (bucket, id) => {
+    const item = state.buckets[bucket].find(item => item.id === id);
+    if (!item) return;
+
+    // Calculate next due date (add 1 month)
+    const currentDate = new Date(item.dueDate);
+    const nextDate = new Date(currentDate);
+    nextDate.setMonth(nextDate.getMonth() + 1);
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map(it =>
+        it.id === id ? { 
+          ...it, 
+          dueDate: nextDate.toISOString().split('T')[0],
+          status: 'pending',
+          actualCost: 0,
+          previousState: undefined
+        } : it
+      )
+    };
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Due date rolled forward to next month!'), 100);
   };
 
   const handleArchiveClick = (bucket, id) => {
@@ -932,14 +959,24 @@ return (
                       <td className="px-4 py-2">
                         <div className="flex flex-wrap gap-2">
                           {item.status === 'paid' && item.previousState ? (
-                            <button
-                              onClick={() => handleUndoPaid(bucketName, item.id)}
-                              className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1 text-xs"
-                              title="Undo Payment"
-                            >
-                              <Undo2 className="w-4 h-4" />
-                              Undo
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleUndoPaid(bucketName, item.id)}
+                                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1 text-xs"
+                                title="Undo Payment"
+                              >
+                                <Undo2 className="w-4 h-4" />
+                                Undo
+                              </button>
+                              <button
+                                onClick={() => handleRollForward(bucketName, item.id)}
+                                className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-1 text-xs"
+                                title="Roll Forward to Next Month"
+                              >
+                                <CalendarClock className="w-4 h-4" />
+                                Roll Forward
+                              </button>
+                            </>
                           ) : (
                             <button
                               onClick={() => handlePaidClick(bucketName, item.id)}
@@ -1066,6 +1103,7 @@ return (
           {[
             { id: 'all', label: 'All Items', color: 'bg-gray-200 text-gray-800' },
             { id: 'paid', label: 'Paid', color: 'bg-green-100 text-green-800' },
+            { id: 'dueSoon', label: 'Due Soon', color: 'bg-yellow-100 text-yellow-800' },
             { id: 'pending', label: 'Pending', color: 'bg-blue-100 text-blue-800' },
             { id: 'overdue', label: 'Overdue', color: 'bg-red-100 text-red-800' }
           ].map(filter => (

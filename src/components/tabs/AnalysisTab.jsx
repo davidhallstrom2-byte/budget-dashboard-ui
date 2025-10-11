@@ -70,14 +70,14 @@ export default function AnalysisTab({ state, searchQuery }) {
 
       {/* Navigation Pills */}
       <div className="mb-6 flex items-center gap-3">
-        <span className="text-sm font-medium text-gray-700">Filter by Status:</span>
-        <div className="flex gap-2">
+        <span className="text-sm font-medium text-gray-700">Jump to Section:</span>
+        <div className="flex flex-wrap gap-2">
           {[
             { id: 'overview', label: 'Financial Health', color: 'bg-blue-100 text-blue-800' },
-            { id: 'spending', label: 'Spending Overview', color: 'bg-gray-200 text-gray-800' },
-            { id: 'category', label: 'Category Breakdown', color: 'bg-gray-200 text-gray-800' },
-            { id: 'trends', label: 'Income vs Expenses', color: 'bg-gray-200 text-gray-800' },
-            { id: 'details', label: 'Detailed Analysis', color: 'bg-gray-200 text-gray-800' }
+            { id: 'spending', label: 'Spending Overview', color: 'bg-green-100 text-green-800' },
+            { id: 'category', label: 'Category Breakdown', color: 'bg-purple-100 text-purple-800' },
+            { id: 'trends', label: 'Income vs Expenses', color: 'bg-orange-100 text-orange-800' },
+            { id: 'details', label: 'Detailed Analysis', color: 'bg-indigo-100 text-indigo-800' }
           ].map((section) => {
             const refs = { overview: overviewRef, spending: spendingRef, category: categoryRef, trends: trendsRef, details: detailsRef };
             return (

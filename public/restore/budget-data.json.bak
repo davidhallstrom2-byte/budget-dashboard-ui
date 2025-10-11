@@ -124,13 +124,8 @@
                 "category": "Intergon Auto Ins",
                 "estBudget": 52,
                 "actualCost": 0,
-                "dueDate": "2025-10-14",
-                "status": "paid",
-                "previousState": {
-                    "dueDate": "2025-10-14",
-                    "status": "pending",
-                    "actualCost": 0
-                },
+                "dueDate": "2025-11-14",
+                "status": "pending",
                 "note": ""
             },
             {
@@ -260,20 +255,6 @@
                 }
             },
             {
-                "id": "ban-1759153289735",
-                "category": "Capital One",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-10-09",
-                "status": "paid",
-                "note": "",
-                "previousState": {
-                    "dueDate": "2025-10-09",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
                 "id": "ban-1759153289933",
                 "category": "Milestone (Concora)",
                 "estBudget": 0,
@@ -352,6 +333,15 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "ban-1759153289735",
+                "category": "Capital One",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-09",
                 "status": "pending",
                 "note": ""
             },
