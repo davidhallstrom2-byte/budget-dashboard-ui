@@ -15,7 +15,7 @@
                 "id": "income-1759721463835-0",
                 "category": "CSC - Week 1",
                 "estBudget": 36,
-                "actualCost": 41.200000000000003,
+                "actualCost": 41.2,
                 "dueDate": "2025-10-03",
                 "status": "paid",
                 "note": "",
@@ -91,7 +91,7 @@
             {
                 "id": "hou-4",
                 "category": "Spectrum Mobile",
-                "estBudget": 267.33999999999997,
+                "estBudget": 267.34,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
@@ -104,7 +104,7 @@
                 "id": "tra-1",
                 "category": "Gas",
                 "estBudget": 120,
-                "actualCost": 73.549999999999997,
+                "actualCost": 73.55,
                 "dueDate": "2025-10-06",
                 "status": "paid",
                 "note": "",
@@ -112,7 +112,7 @@
                 "previousState": {
                     "dueDate": "2025-10-06",
                     "status": "pending",
-                    "actualCost": 73.549999999999997
+                    "actualCost": 73.55
                 }
             },
             {
@@ -150,7 +150,7 @@
             {
                 "id": "tra-4",
                 "category": "Uber One (Uber Eats)",
-                "estBudget": 9.9900000000000002,
+                "estBudget": 9.99,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
@@ -229,7 +229,7 @@
             {
                 "id": "hom-5",
                 "category": "ChatGPT Plus",
-                "estBudget": 19.989999999999998,
+                "estBudget": 19.99,
                 "actualCost": 0,
                 "dueDate": "2025-10-27",
                 "status": "pending",
@@ -239,7 +239,7 @@
             {
                 "id": "hom-3",
                 "category": "LinkedIn Premium",
-                "estBudget": 29.989999999999998,
+                "estBudget": 29.99,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
@@ -256,7 +256,9 @@
                 "dueDate": "2025-11-03",
                 "status": "pending",
                 "note": "UPDATE: Add current balance and actual minimum payment",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153387192",
@@ -266,7 +268,9 @@
                 "dueDate": "2025-11-07",
                 "status": "pending",
                 "note": "UPDATE: Add current balance and actual minimum payment",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-3",
@@ -276,17 +280,21 @@
                 "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": "Monthly service fee",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-4",
                 "category": "U.S. Bank Service Fee",
-                "estBudget": 14.949999999999999,
+                "estBudget": 14.95,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": "Monthly service fee",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153288748",
@@ -296,7 +304,9 @@
                 "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "banking-1759514314994",
@@ -306,7 +316,9 @@
                 "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "banking-1759765816839",
@@ -316,7 +328,9 @@
                 "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153289735",
@@ -326,7 +340,9 @@
                 "dueDate": "2025-11-09",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153289933",
@@ -336,7 +352,9 @@
                 "dueDate": "2025-11-13",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153289207",
@@ -346,7 +364,9 @@
                 "dueDate": "2025-11-22",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153387588",
@@ -356,15 +376,17 @@
                 "dueDate": "2025-11-26",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 0
             }
         ],
         "subscriptions": [
             {
                 "id": "personal-1760015293581",
                 "category": "Google: Discord Talk",
-                "estBudget": 9.9900000000000002,
-                "actualCost": 9.9900000000000002,
+                "estBudget": 9.99,
+                "actualCost": 9.99,
                 "dueDate": "2025-10-06",
                 "status": "paid",
                 "note": "Consider canceling to save $10/month",
@@ -372,7 +394,7 @@
                 "previousState": {
                     "dueDate": "2025-10-06",
                     "status": "pending",
-                    "actualCost": 9.9900000000000002
+                    "actualCost": 9.99
                 }
             },
             {
@@ -388,7 +410,7 @@
             {
                 "id": "per-9",
                 "category": "Amazon Prime",
-                "estBudget": 7.6699999999999999,
+                "estBudget": 7.67,
                 "actualCost": 0,
                 "dueDate": "2025-10-30",
                 "status": "pending",
@@ -398,7 +420,7 @@
             {
                 "id": "per-8",
                 "category": "Netflix",
-                "estBudget": 26.989999999999998,
+                "estBudget": 26.99,
                 "actualCost": 0,
                 "dueDate": "2025-11-04",
                 "status": "pending",
@@ -408,7 +430,7 @@
             {
                 "id": "per-11",
                 "category": "CVS ExtraCare",
-                "estBudget": 5.4800000000000004,
+                "estBudget": 5.48,
                 "actualCost": 0,
                 "dueDate": "2025-11-06",
                 "status": "pending",
@@ -418,7 +440,7 @@
             {
                 "id": "per-3",
                 "category": "AMC Premier",
-                "estBudget": 17.989999999999998,
+                "estBudget": 17.99,
                 "actualCost": 0,
                 "dueDate": "2026-08-01",
                 "status": "pending",
@@ -455,7 +477,7 @@
         {
             "id": "hom-4",
             "category": "Google AI Pro",
-            "estBudget": 19.989999999999998,
+            "estBudget": 19.99,
             "actualCost": 0,
             "dueDate": "2025-09-20",
             "status": "pending",

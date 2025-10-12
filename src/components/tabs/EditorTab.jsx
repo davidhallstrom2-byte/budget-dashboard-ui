@@ -796,7 +796,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   const BucketSection = ({ bucketName, items, title }) => {
     const IconComponent = categoryIcons[bucketName]?.icon || Package;
     const iconColor = categoryIcons[bucketName]?.color || 'text-gray-600';
-    const displayTitle = categoryNames[bucketName] || title;
+    const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || title;
     const isCollapsed = collapsedCategories[bucketName];
 
     const filteredItems = getFilteredItems(items).sort((a, b) => {
@@ -877,7 +877,197 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, bucketName)}
           >
-            <table className="w-full min-w-[900px]">
+            {bucketName === 'banking' ? (
+              // BANKING & FINANCE - CUSTOM TABLE
+              <table className="w-full table-fixed">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
+                    <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
+                    <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
+                    <th className="px-2 py-2 text-left text-sm font-medium text-gray-700 w-[21%]">Item</th>
+                    <th className="px-2 py-2 text-right text-sm font-medium text-gray-700 w-[9%]">Minimum</th>
+                    <th className="px-2 py-2 text-right text-sm font-medium text-gray-700 w-[9%]">Balance</th>
+                    <th className="px-2 py-2 text-right text-sm font-medium text-gray-700 w-[9%]">Actual Paid</th>
+                    <th className="px-2 py-2 text-right text-sm font-medium text-gray-700 w-[9%]">Available</th>
+                    <th className="px-2 py-2 text-left text-sm font-medium text-gray-700 w-[11%]">Due Date</th>
+                    <th className="px-2 py-2 text-left text-sm font-medium text-gray-700 w-[24%]">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredItems.map((item) => {
+                    const itemKey = `${bucketName}:${item.id}`;
+                    const isSelected = selectedItems.has(itemKey);
+
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`border-t ${getRowBackgroundColor(item)} ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
+                      >
+                        <td className="px-1 py-2 w-8">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectItem(bucketName, item.id)}
+                            className="w-4 h-4 cursor-pointer"
+                          />
+                        </td>
+                        <td className="px-1 py-2 w-8">
+                          <div className="flex flex-col gap-1">
+                            <button
+                              onClick={() => handleMoveUp(bucketName, (state.buckets[bucketName] || []).indexOf(item))}
+                              disabled={(state.buckets[bucketName] || []).indexOf(item) === 0}
+                              className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Move Up"
+                            >
+                              <ArrowUp className="w-3 h-3 text-gray-600" />
+                            </button>
+                            <button
+                              onClick={() => handleMoveDown(bucketName, (state.buckets[bucketName] || []).indexOf(item))}
+                              disabled={(state.buckets[bucketName] || []).indexOf(item) === (state.buckets[bucketName] || []).length - 1}
+                              className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Move Down"
+                            >
+                              <ArrowDown className="w-3 h-3 text-gray-600" />
+                            </button>
+                          </div>
+                        </td>
+                        <td 
+                          className="px-1 py-2 w-8"
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, bucketName, item)}
+                        >
+                          <GripVertical className="w-4 h-4 text-gray-400 cursor-grab hover:text-gray-600" />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="text"
+                            defaultValue={item.category}
+                            onBlur={(e) => updateRow(bucketName, item.id, 'category', e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                            className="w-full p-1 border rounded bg-white text-sm"
+                            placeholder="Enter item name"
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <input
+                            type="text"
+                            defaultValue={item.estBudget}
+                            onBlur={(e) => updateRow(bucketName, item.id, 'estBudget', parseFloat(e.target.value) || 0)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                            className="w-full p-1 border rounded bg-white text-right text-sm"
+                            placeholder="Min payment"
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <input
+                            type="text"
+                            defaultValue={item.currentBalance || 0}
+                            onBlur={(e) => updateRow(bucketName, item.id, 'currentBalance', parseFloat(e.target.value) || 0)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                            className="w-full p-1 border rounded bg-white text-right text-sm"
+                            placeholder="Balance"
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <input
+                            type="text"
+                            defaultValue={item.actualCost || 0}
+                            onBlur={(e) => updateRow(bucketName, item.id, 'actualCost', parseFloat(e.target.value) || 0)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                            className="w-full p-1 border rounded bg-white text-right text-sm"
+                            placeholder="Paid"
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <input
+                            type="text"
+                            defaultValue={item.availableCredit || 0}
+                            onBlur={(e) => updateRow(bucketName, item.id, 'availableCredit', parseFloat(e.target.value) || 0)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                            className="w-full p-1 border rounded bg-white text-right text-sm"
+                            placeholder="Available"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="date"
+                            defaultValue={item.dueDate}
+                            onBlur={(e) => updateRow(bucketName, item.id, 'dueDate', e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                            className="w-full p-1 border rounded bg-white text-sm"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex flex-wrap gap-1">
+                            {item.status === 'paid' && item.previousState ? (
+                              <>
+                                <button
+                                  onClick={() => handleUndoPaid(bucketName, item.id)}
+                                  className="px-1.5 py-1 bg-gray-600 text-white rounded hover:bg-gray-700"
+                                  title="Undo Payment"
+                                >
+                                  <Undo2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleRollForward(bucketName, item.id)}
+                                  className="px-1.5 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                                  title="Roll Forward to Next Month"
+                                >
+                                  <CalendarClock className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => handlePaidClick(bucketName, item.id)}
+                                className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+                                title="Mark as Paid"
+                              >
+                                Paid
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => duplicateItem(bucketName, item.id)}
+                              className="px-1.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                              title="Duplicate Item"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={() => handleArchiveClick(bucketName, item.id)}
+                              className="px-1.5 py-1 bg-purple-600 text-white rounded hover:bg-purple-700"
+                              title="Archive Item"
+                            >
+                              <Archive className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteClick(bucketName, item.id)}
+                              className="px-1.5 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                              title="Delete Item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+
+                            {(item.status === 'paid' || getRowBackgroundColor(item) !== 'bg-white border-gray-200') && (
+                              <button
+                                onClick={() => handleClearStatus(bucketName, item.id)}
+                                className="px-2 py-1 bg-gray-400 text-white rounded hover:bg-gray-500 text-xs"
+                                title="Clear Status (Reset to White)"
+                              >
+                                Clr
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full min-w-[900px]">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
@@ -899,8 +1089,6 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                     <tr
                       key={item.id}
                       className={`border-t ${getRowBackgroundColor(item)} ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, bucketName, item)}
                     >
                       <td className="px-1 py-2 w-8">
                         <input
@@ -930,7 +1118,11 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                           </button>
                         </div>
                       </td>
-                      <td className="px-1 py-2 w-8">
+                      <td 
+                        className="px-1 py-2 w-8"
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, bucketName, item)}
+                      >
                         <GripVertical className="w-4 h-4 text-gray-400 cursor-grab hover:text-gray-600" />
                       </td>
                       <td className="px-4 py-2">
@@ -1041,6 +1233,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                 })}
               </tbody>
             </table>
+            )}
           </div>
         )}
 

@@ -29,6 +29,7 @@ const DEFAULT_TITLES = {
   homeOffice: 'Home & Office',
   banking: 'Banking & Finance',
   subscriptions: 'Subscriptions',
+  emergencyFund: 'Emergency Fund',
   misc: 'Miscellaneous'
 };
 
@@ -679,23 +680,49 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                   <table className="w-full min-w-[900px]">
                     <thead className="bg-gray-100">
                       <tr>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
+                        {bucketName === 'banking' ? (
+                          <>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-48">Item</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Minimum</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Balance</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Paid</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Available</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
+                          </>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="bg-white">
                       {filteredItems.map(item => (
                         <tr key={item.id} className="border-t border-gray-200 hover:bg-blue-50">
-                          <td className="px-3 py-2 text-sm">{item.category}</td>
-                          <td className="px-3 py-2 text-sm text-right">${(item.estBudget || 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
-                          <td className="px-3 py-2">{getStatusBadge(item)}</td>
-                          <td className="px-3 py-2">
+                          {bucketName === 'banking' ? (
+                            <>
+                              <td className="px-3 py-2 text-sm">{item.category}</td>
+                              <td className="px-3 py-2 text-sm text-right">${(item.estBudget || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-sm text-right">${(item.currentBalance || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-sm text-right">${(item.availableCredit || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
+                              <td className="px-3 py-2">{getStatusBadge(item)}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-3 py-2 text-sm">{item.category}</td>
+                              <td className="px-3 py-2 text-sm text-right">${(item.estBudget || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
+                              <td className="px-3 py-2">{getStatusBadge(item)}</td>
+                              <td className="px-3 py-2">
                             <input
                               type="text"
                               value={item.note || ''}
@@ -709,7 +736,9 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                               placeholder="Add note..."
                               className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                             />
-                          </td>
+                              </td>
+                            </>
+                          )}
                         </tr>
                       ))}
                     </tbody>
