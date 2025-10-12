@@ -816,7 +816,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         onDragOver={handleCategoryDragOver}
         onDrop={(e) => handleCategoryDrop(e, bucketName)}
       >
-        <div className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between cursor-move">
+        <div draggable onDragStart={(e) => handleCategoryDragStart(e, bucketName)} className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2 flex-wrap">
             <GripVertical className="w-4 h-4 text-gray-400 hidden sm:block" />
             <button

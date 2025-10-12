@@ -36,6 +36,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [statusFilter, setStatusFilter] = useState('all');
   const [showUrgentAlert, setShowUrgentAlert] = useState(true);
+  const [viewMode, setViewMode] = useState('grouped'); // 'grouped' or 'flat'
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
@@ -131,6 +132,54 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
 
     return { overdue, upcoming };
   }, [state?.buckets]);
+
+  const handleFilterChange = (filterId) => {
+    setStatusFilter(filterId);
+    // Switch to flat view when filtering, grouped when showing all
+    setViewMode(filterId === 'all' ? 'grouped' : 'flat');
+  };
+
+  const getFilteredItemsWithBucket = () => {
+    const allItems = [];
+    
+    categoryOrder.forEach(bucketName => {
+      const items = state.buckets[bucketName] || [];
+      items.forEach(item => {
+        allItems.push({
+          ...item,
+          bucketName,
+          bucketDisplayName: categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName
+        });
+      });
+    });
+
+    let filtered = allItems;
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(item => {
+        const status = getItemStatus(item);
+        if (statusFilter === 'overdue') return status === 'overdue';
+        if (statusFilter === 'dueSoon') return status === 'dueSoon';
+        if (statusFilter === 'paid') return status === 'paid';
+        if (statusFilter === 'pending') return status === 'pending';
+        return true;
+      });
+    }
+
+    // Apply search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(item =>
+        item.category?.toLowerCase().includes(query) ||
+        item.estBudget?.toString().includes(query) ||
+        item.actualCost?.toString().includes(query) ||
+        item.bucketDisplayName?.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  };
 
   const exportAllToCSV = () => {
     const headers = ['Category', 'Item', 'Est. Budget', 'Actual Cost', 'Due Date', 'Status'];
@@ -444,71 +493,140 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
         </div>
       </div>
 
-<div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
-  <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
-    <div className="flex items-center gap-2">
-      <h3 className="text-lg font-bold whitespace-nowrap">Budget List</h3>
-      <button
-        onClick={() => {
-          const allExpanded = {};
-          categoryOrder.forEach(bucket => {
-            allExpanded[bucket] = true;
-          });
-          setExpandedCategories(allExpanded);
-        }}
-        className="p-1 hover:bg-white/20 rounded transition-colors"
-        title="Expand All Categories"
-      >
-        <Plus className="w-5 h-5" />
-      </button>
-      <button
-        onClick={() => setExpandedCategories({})}
-        className="p-1 hover:bg-white/20 rounded transition-colors"
-        title="Collapse All Categories"
-      >
-        <Minus className="w-5 h-5" />
-      </button>
-    </div>
-    <div className="flex items-center gap-2 flex-wrap">
-      {[
-        { id: 'all', label: 'All Items', color: 'bg-white/20 hover:bg-white/30' },
-        { id: 'overdue', label: 'Overdue', color: 'bg-red-500/80 hover:bg-red-500' },
-        { id: 'dueSoon', label: 'Due Soon', color: 'bg-yellow-500/80 hover:bg-yellow-500' },
-        { id: 'pending', label: 'Pending', color: 'bg-blue-400/80 hover:bg-blue-400' },
-        { id: 'paid', label: 'Paid', color: 'bg-green-500/80 hover:bg-green-500' }
-      ].map(filter => (
-        <button
-          key={filter.id}
-          onClick={() => setStatusFilter(filter.id)}
-          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-            statusFilter === filter.id
-              ? 'ring-2 ring-white ' + filter.color
-              : filter.color
-          }`}
-        >
-          {filter.label}
-        </button>
-      ))}
-    </div>
-    <div className="flex gap-2 whitespace-nowrap">
-      <button
-        onClick={exportAllToCSV}
-        className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-      >
-        <Download className="w-4 h-4" />
-        <span className="hidden sm:inline">Export CSV</span>
-      </button>
-      <button
-        onClick={printReport}
-        className="flex items-center gap-2 px-3 py-1.5 bg-blue-700 text-white rounded-lg hover:bg-blue-800 text-sm"
-      >
-        <Printer className="w-4 h-4" />
-        <span className="hidden sm:inline">Print Report</span>
-      </button>
-    </div>
-  </div>
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
+        <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-bold whitespace-nowrap">Budget List</h3>
+            <button
+              onClick={() => {
+                const allExpanded = {};
+                categoryOrder.forEach(bucket => {
+                  allExpanded[bucket] = true;
+                });
+                setExpandedCategories(allExpanded);
+              }}
+              className="p-1 hover:bg-white/20 rounded transition-colors"
+              title="Expand All Categories"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setExpandedCategories({})}
+              className="p-1 hover:bg-white/20 rounded transition-colors"
+              title="Collapse All Categories"
+            >
+              <Minus className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {[
+              { id: 'all', label: 'All Items', color: 'bg-white/20 hover:bg-white/30' },
+              { id: 'overdue', label: 'Overdue', color: 'bg-red-500/80 hover:bg-red-500' },
+              { id: 'dueSoon', label: 'Due Soon', color: 'bg-yellow-500/80 hover:bg-yellow-500' },
+              { id: 'pending', label: 'Pending', color: 'bg-blue-400/80 hover:bg-blue-400' },
+              { id: 'paid', label: 'Paid', color: 'bg-green-500/80 hover:bg-green-500' }
+            ].map(filter => (
+              <button
+                key={filter.id}
+                onClick={() => handleFilterChange(filter.id)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  statusFilter === filter.id
+                    ? 'ring-2 ring-white ' + filter.color
+                    : filter.color
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 whitespace-nowrap">
+            <button
+              onClick={exportAllToCSV}
+              className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Export CSV</span>
+            </button>
+            <button
+              onClick={printReport}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-700 text-white rounded-lg hover:bg-blue-800 text-sm"
+            >
+              <Printer className="w-4 h-4" />
+              <span className="hidden sm:inline">Print Report</span>
+            </button>
+          </div>
+        </div>
 
-        {categoryOrder.map(bucketName => {
+        {/* FLAT LIST VIEW - shown when filtering */}
+        {viewMode === 'flat' && (() => {
+          const flatItems = getFilteredItemsWithBucket().sort((a, b) => {
+            const dateA = new Date(a.dueDate || '9999-12-31');
+            const dateB = new Date(b.dueDate || '9999-12-31');
+            return dateA - dateB;
+          });
+
+          return (
+            <div className="px-4 pb-4 overflow-x-auto bg-white">
+              <div className="py-3 text-sm text-gray-600">
+                Showing {flatItems.length} {statusFilter !== 'all' ? statusFilter : ''} item{flatItems.length !== 1 ? 's' : ''} across all categories
+              </div>
+              <table className="w-full min-w-[1000px]">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-48">Category</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white">
+                  {flatItems.map(item => {
+                    const rowColor = (() => {
+                      if (item.status === 'paid') return 'bg-green-100 border-green-200';
+                      const today = new Date();
+                      const diffDays = Math.ceil((new Date(item.dueDate) - today) / (1000 * 60 * 60 * 24));
+                      if (diffDays < 0) return 'bg-red-100 border-red-200';
+                      if (diffDays <= 5) return 'bg-yellow-100 border-yellow-200';
+                      return 'bg-white border-gray-200';
+                    })();
+
+                    return (
+                      <tr key={`${item.bucketName}-${item.id}`} className={`border-t ${rowColor} hover:bg-blue-50`}>
+                        <td className="px-3 py-2 text-sm font-medium text-gray-900">{item.bucketDisplayName}</td>
+                        <td className="px-3 py-2 text-sm">{item.category}</td>
+                        <td className="px-3 py-2 text-sm text-right">${(item.estBudget || 0).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-sm text-right">${(item.actualCost || 0).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
+                        <td className="px-3 py-2">{getStatusBadge(item)}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="text"
+                            value={item.note || ''}
+                            onChange={(e) => {
+                              const updatedBucket = state.buckets[item.bucketName].map(i =>
+                                i.id === item.id ? { ...i, note: e.target.value } : i
+                              );
+                              setState({ ...state, buckets: { ...state.buckets, [item.bucketName]: updatedBucket } });
+                            }}
+                            onBlur={saveBudget}
+                            placeholder="Add note..."
+                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
+
+        {/* GROUPED VIEW - shown when no filter or "All Items" */}
+        {viewMode === 'grouped' && categoryOrder.map(bucketName => {
           const items = state.buckets[bucketName] || [];
           const filteredItems = getFilteredItems(items);
           if (filteredItems.length === 0 && (searchQuery || statusFilter !== 'all')) return null;
@@ -516,7 +634,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
           const IconComponent = categoryIcons[bucketName]?.icon || Package;
           const iconColor = categoryIcons[bucketName]?.color || 'text-gray-600';
           const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
-          const isExpanded = expandedCategories[bucketName] === true; // Default to false (collapsed)
+          const isExpanded = expandedCategories[bucketName] === true;
 
           const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
           const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
@@ -556,21 +674,21 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                 </div>
               </button>
 
-{isExpanded && (
-  <div className="px-4 pb-4 overflow-x-auto bg-white">
-    <table className="w-full min-w-[900px]">
-      <thead className="bg-gray-100">
-  <tr>
-    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
-    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
-    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
-    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
-    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
-    <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
-  </tr>
-</thead>
-      <tbody className="bg-white">
-        {filteredItems.map(item => (
+              {isExpanded && (
+                <div className="px-4 pb-4 overflow-x-auto bg-white">
+                  <table className="w-full min-w-[900px]">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      {filteredItems.map(item => (
                         <tr key={item.id} className="border-t border-gray-200 hover:bg-blue-50">
                           <td className="px-3 py-2 text-sm">{item.category}</td>
                           <td className="px-3 py-2 text-sm text-right">${(item.estBudget || 0).toFixed(2)}</td>
@@ -600,7 +718,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                         <td className="px-3 py-2 text-sm font-semibold">Subtotal</td>
                         <td className="px-3 py-2 text-sm text-right font-bold">${totalBudgeted.toFixed(2)}</td>
                         <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
-                        <td colSpan="4"></td>
+                        <td colSpan="3"></td>
                       </tr>
                     </tfoot>
                   </table>
