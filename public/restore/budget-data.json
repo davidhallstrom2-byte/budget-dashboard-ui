@@ -15,7 +15,7 @@
                 "id": "income-1759721463835-0",
                 "category": "CSC - Week 1",
                 "estBudget": 36,
-                "actualCost": 41.2,
+                "actualCost": 41.200000000000003,
                 "dueDate": "2025-10-03",
                 "status": "paid",
                 "note": "",
@@ -69,16 +69,6 @@
         ],
         "housing": [
             {
-                "id": "hou-1",
-                "category": "Rent/Mortgage",
-                "estBudget": 2575,
-                "actualCost": 0,
-                "dueDate": "2025-10-01",
-                "status": "pending",
-                "note": "CRITICAL - Cannot miss",
-                "recurrence": "monthly"
-            },
-            {
                 "id": "housing-1759387288925",
                 "category": "Electric",
                 "estBudget": 0,
@@ -91,7 +81,7 @@
             {
                 "id": "hou-4",
                 "category": "Spectrum Mobile",
-                "estBudget": 267.34,
+                "estBudget": 267.33999999999997,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
@@ -104,7 +94,7 @@
                 "id": "tra-1",
                 "category": "Gas",
                 "estBudget": 120,
-                "actualCost": 73.55,
+                "actualCost": 73.549999999999997,
                 "dueDate": "2025-10-06",
                 "status": "paid",
                 "note": "",
@@ -112,7 +102,7 @@
                 "previousState": {
                     "dueDate": "2025-10-06",
                     "status": "pending",
-                    "actualCost": 73.55
+                    "actualCost": 73.549999999999997
                 }
             },
             {
@@ -150,7 +140,7 @@
             {
                 "id": "tra-4",
                 "category": "Uber One (Uber Eats)",
-                "estBudget": 9.99,
+                "estBudget": 9.9900000000000002,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
@@ -229,7 +219,7 @@
             {
                 "id": "hom-5",
                 "category": "ChatGPT Plus",
-                "estBudget": 19.99,
+                "estBudget": 19.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2025-10-27",
                 "status": "pending",
@@ -239,7 +229,7 @@
             {
                 "id": "hom-3",
                 "category": "LinkedIn Premium",
-                "estBudget": 29.99,
+                "estBudget": 29.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
@@ -287,7 +277,7 @@
             {
                 "id": "ban-4",
                 "category": "U.S. Bank Service Fee",
-                "estBudget": 14.95,
+                "estBudget": 14.949999999999999,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
                 "status": "pending",
@@ -385,16 +375,16 @@
             {
                 "id": "personal-1760015293581",
                 "category": "Google: Discord Talk",
-                "estBudget": 9.99,
-                "actualCost": 9.99,
+                "estBudget": 9.9900000000000002,
+                "actualCost": 9.9900000000000002,
                 "dueDate": "2025-10-06",
                 "status": "paid",
-                "note": "Consider canceling to save $10/month",
+                "note": "Consider canceling to save $10\/month",
                 "recurrence": "monthly",
                 "previousState": {
                     "dueDate": "2025-10-06",
                     "status": "pending",
-                    "actualCost": 9.99
+                    "actualCost": 9.9900000000000002
                 }
             },
             {
@@ -404,43 +394,43 @@
                 "actualCost": 0,
                 "dueDate": "2025-10-24",
                 "status": "pending",
-                "note": "Consider canceling to save $14/month",
+                "note": "Consider canceling to save $14\/month",
                 "recurrence": "monthly"
             },
             {
                 "id": "per-9",
                 "category": "Amazon Prime",
-                "estBudget": 7.67,
+                "estBudget": 7.6699999999999999,
                 "actualCost": 0,
                 "dueDate": "2025-10-30",
                 "status": "pending",
-                "note": "Consider canceling to save $8/month",
+                "note": "Consider canceling to save $8\/month",
                 "recurrence": "monthly"
             },
             {
                 "id": "per-8",
                 "category": "Netflix",
-                "estBudget": 26.99,
+                "estBudget": 26.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2025-11-04",
                 "status": "pending",
-                "note": "Consider canceling to save $27/month",
+                "note": "Consider canceling to save $27\/month",
                 "recurrence": "monthly"
             },
             {
                 "id": "per-11",
                 "category": "CVS ExtraCare",
-                "estBudget": 5.48,
+                "estBudget": 5.4800000000000004,
                 "actualCost": 0,
                 "dueDate": "2025-11-06",
                 "status": "pending",
-                "note": "Consider canceling to save $5/month",
+                "note": "Consider canceling to save $5\/month",
                 "recurrence": "monthly"
             },
             {
                 "id": "per-3",
                 "category": "AMC Premier",
-                "estBudget": 17.99,
+                "estBudget": 17.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2026-08-01",
                 "status": "pending",
@@ -477,7 +467,7 @@
         {
             "id": "hom-4",
             "category": "Google AI Pro",
-            "estBudget": 19.99,
+            "estBudget": 19.989999999999998,
             "actualCost": 0,
             "dueDate": "2025-09-20",
             "status": "pending",
@@ -543,6 +533,18 @@
             "originalBucket": "housing",
             "archivedAt": "2025-10-11T19:00:00.000Z",
             "recurrence": "varies"
+        },
+        {
+            "id": "hou-1",
+            "category": "Rent\/Mortgage",
+            "estBudget": 2575,
+            "actualCost": 0,
+            "dueDate": "2025-10-01",
+            "status": "pending",
+            "note": "CRITICAL - Cannot miss",
+            "recurrence": "monthly",
+            "originalBucket": "housing",
+            "archivedAt": "2025-10-12T20:05:57.925Z"
         }
     ]
 }
