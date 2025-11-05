@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 $ui  = "C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui"
-$url = "http://localhost:4174/budget-dashboard-fs/"
+$url = "https://localhost:4174/budget-dashboard-fs/"
 
 if (-not (Test-Path $ui)) {
   Write-Host "UI path not found: $ui" -ForegroundColor Red

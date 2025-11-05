@@ -2,87 +2,58 @@
     "buckets": {
         "income": [
             {
+                "id": "income-1762372186233-0",
+                "category": "CSC - Week 1",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-07",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "income-1762372186233-1",
+                "category": "CSC - Week 2",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-14",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "income-1762372200960-2",
+                "category": "CSC - Week 3",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-21",
+                "status": "pending",
+                "note": ""
+            },
+            {
+                "id": "income-1762372200960-3",
+                "category": "CSC - Week 4",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-28",
+                "status": "pending",
+                "note": ""
+            },
+            {
                 "id": "inc-1",
                 "category": "Salary",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-10-01",
+                "dueDate": "",
                 "status": "pending",
                 "note": "Get a job!",
                 "recurrence": "monthly"
-            },
-            {
-                "id": "income-1759721463835-0",
-                "category": "CSC - Week 1",
-                "estBudget": 36,
-                "actualCost": 41.200000000000003,
-                "dueDate": "2025-10-03",
-                "status": "paid",
-                "note": "",
-                "recurrence": "weekly",
-                "previousState": {
-                    "dueDate": "2025-10-03",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
-                "id": "income-1759721463835-1",
-                "category": "CSC - Week 2",
-                "estBudget": 200,
-                "actualCost": 0,
-                "dueDate": "2025-10-10",
-                "status": "pending",
-                "note": "",
-                "recurrence": "weekly"
-            },
-            {
-                "id": "income-1759721463835-2",
-                "category": "CSC - Week 3",
-                "estBudget": 200,
-                "actualCost": 0,
-                "dueDate": "2025-10-17",
-                "status": "pending",
-                "note": "",
-                "recurrence": "weekly"
-            },
-            {
-                "id": "income-1759721463835-3",
-                "category": "CSC - Week 4",
-                "estBudget": 200,
-                "actualCost": 0,
-                "dueDate": "2025-10-24",
-                "status": "pending",
-                "note": "",
-                "recurrence": "weekly"
-            },
-            {
-                "id": "income-1759765773633",
-                "category": "CSC - Week 5",
-                "estBudget": 200,
-                "actualCost": 0,
-                "dueDate": "2025-10-31",
-                "status": "pending",
-                "note": "",
-                "recurrence": "weekly"
             }
         ],
         "housing": [
             {
-                "id": "housing-1759387288925",
-                "category": "Electric",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "pending",
-                "note": "Deferred - will catch up when employed",
-                "recurrence": "monthly"
-            },
-            {
                 "id": "hou-4",
                 "category": "Spectrum Mobile",
-                "estBudget": 267.33999999999997,
-                "actualCost": 0,
+                "estBudget": 295.39999999999998,
+                "actualCost": 295.39999999999998,
                 "dueDate": "2025-11-08",
                 "status": "pending",
                 "note": "CRITICAL - Need for job search",
@@ -91,19 +62,20 @@
         ],
         "transportation": [
             {
-                "id": "tra-1",
-                "category": "Gas",
-                "estBudget": 120,
-                "actualCost": 73.549999999999997,
-                "dueDate": "2025-10-06",
+                "id": "transportation-1760978246508",
+                "category": "Gas ",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-10-17",
                 "status": "paid",
-                "note": "",
-                "recurrence": "weekly",
+                "recurrence": "monthly",
                 "previousState": {
-                    "dueDate": "2025-10-06",
-                    "status": "pending",
-                    "actualCost": 73.549999999999997
-                }
+                    "dueDate": "2025-10-17",
+                    "status": "paid",
+                    "actualCost": 0
+                },
+                "note": "",
+                "colorCleared": true
             },
             {
                 "id": "transportation-1759947905037",
@@ -117,7 +89,7 @@
             },
             {
                 "id": "transportation-1759334479510",
-                "category": "AAA (Annual Fee)",
+                "category": "AAA (annual fee)",
                 "estBudget": 52,
                 "actualCost": 0,
                 "dueDate": "2026-06-27",
@@ -142,14 +114,14 @@
                 "category": "Uber One (Uber Eats)",
                 "estBudget": 9.9900000000000002,
                 "actualCost": 0,
-                "dueDate": "2025-11-08",
+                "dueDate": "2025-11-14",
                 "status": "pending",
                 "note": "",
                 "recurrence": "monthly"
             },
             {
                 "id": "food-1760031019302",
-                "category": "Costco (Annual Fee)",
+                "category": "Costco (annual fee)",
                 "estBudget": 120,
                 "actualCost": 0,
                 "dueDate": "2026-07-31",
@@ -192,26 +164,31 @@
         ],
         "homeOffice": [
             {
+                "id": "hom-3",
+                "category": "LinkedIn Premium",
+                "estBudget": 29.989999999999998,
+                "actualCost": 0,
+                "dueDate": "2025-11-20",
+                "status": "pending",
+                "note": "Essential - Job hunting tool",
+                "recurrence": "monthly"
+            },
+            {
                 "id": "hom-1",
                 "category": "Spectrum Internet",
                 "estBudget": 132.25,
-                "actualCost": 132.25,
-                "dueDate": "2025-10-20",
-                "status": "paid",
+                "actualCost": 0,
+                "dueDate": "2025-11-20",
+                "status": "pending",
                 "note": "CRITICAL - Need for job search",
-                "recurrence": "monthly",
-                "previousState": {
-                    "dueDate": "2025-10-20",
-                    "status": "pending",
-                    "actualCost": 0
-                }
+                "recurrence": "monthly"
             },
             {
                 "id": "hom-1759152845540",
                 "category": "Claude AI",
                 "estBudget": 20,
                 "actualCost": 0,
-                "dueDate": "2025-10-23",
+                "dueDate": "2025-11-23",
                 "status": "pending",
                 "note": "Essential - Budget management tool",
                 "recurrence": "monthly"
@@ -221,62 +198,79 @@
                 "category": "ChatGPT Plus",
                 "estBudget": 19.989999999999998,
                 "actualCost": 0,
-                "dueDate": "2025-10-27",
+                "dueDate": "2025-11-27",
                 "status": "pending",
                 "note": "Consider if using for job applications",
-                "recurrence": "monthly"
-            },
-            {
-                "id": "hom-3",
-                "category": "LinkedIn Premium",
-                "estBudget": 29.989999999999998,
-                "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "pending",
-                "note": "Essential - Job hunting tool",
                 "recurrence": "monthly"
             }
         ],
         "banking": [
             {
-                "id": "ban-1759153289481",
-                "category": "Credit One X5",
-                "estBudget": 73,
-                "actualCost": 0,
-                "dueDate": "2025-11-03",
-                "status": "pending",
-                "note": "UPDATE: Add current balance and actual minimum payment",
-                "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
-            },
-            {
-                "id": "ban-1759153387192",
-                "category": "Avant",
-                "estBudget": 25.25,
-                "actualCost": 0,
-                "dueDate": "2025-11-07",
-                "status": "pending",
-                "note": "UPDATE: Add current balance and actual minimum payment",
-                "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
-            },
-            {
                 "id": "ban-3",
                 "category": "Wells Fargo Service Fee",
                 "estBudget": 25,
-                "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "pending",
+                "actualCost": 25,
+                "dueDate": "2025-11-01",
+                "status": "paid",
                 "note": "Monthly service fee",
                 "recurrence": "monthly",
                 "currentBalance": 0,
-                "availableCredit": 0
+                "availableCredit": 8.9000000000000004,
+                "previousState": {
+                    "dueDate": "2025-11-01",
+                    "status": "pending",
+                    "actualCost": 25
+                }
+            },
+            {
+                "id": "ban-1759153289481",
+                "category": "Credit One X5 (0162)",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-03",
+                "status": "paid",
+                "note": "UPDATE: Add current balance and actual minimum payment",
+                "recurrence": "monthly",
+                "currentBalance": 1394,
+                "availableCredit": 106,
+                "previousState": {
+                    "dueDate": "2025-11-03",
+                    "status": "pending",
+                    "actualCost": 0
+                }
+            },
+            {
+                "id": "ban-1759153387192",
+                "category": "Avant (0456)",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "2025-11-07",
+                "status": "paid",
+                "note": "UPDATE: Add current balance and actual minimum payment",
+                "recurrence": "monthly",
+                "currentBalance": 445.86000000000001,
+                "availableCredit": 54,
+                "previousState": {
+                    "dueDate": "2025-11-07",
+                    "status": "pending",
+                    "actualCost": 0
+                }
+            },
+            {
+                "id": "banking-1760976003222",
+                "category": "US Bank (Primary) Service Fee",
+                "estBudget": 12,
+                "actualCost": 0,
+                "dueDate": "2025-11-08",
+                "status": "pending",
+                "recurrence": "monthly",
+                "availableCredit": 0.51000000000000001,
+                "note": "",
+                "currentBalance": 0
             },
             {
                 "id": "ban-4",
-                "category": "U.S. Bank Service Fee",
+                "category": "US Bank (Joint) Service Fee",
                 "estBudget": 14.949999999999999,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
@@ -284,7 +278,7 @@
                 "note": "Monthly service fee",
                 "recurrence": "monthly",
                 "currentBalance": 0,
-                "availableCredit": 0
+                "availableCredit": 14.949999999999999
             },
             {
                 "id": "ban-1759153288748",
@@ -292,35 +286,16 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
-                "status": "pending",
+                "status": "paid",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
                 "currentBalance": 0,
-                "availableCredit": 0
-            },
-            {
-                "id": "banking-1759514314994",
-                "category": "Cash App",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "pending",
-                "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
-            },
-            {
-                "id": "banking-1759765816839",
-                "category": "Merrick Bank",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "pending",
-                "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
+                "availableCredit": 0,
+                "previousState": {
+                    "dueDate": "2025-11-08",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-1759153289735",
@@ -328,73 +303,108 @@
                 "estBudget": 0,
                 "actualCost": 0,
                 "dueDate": "2025-11-09",
-                "status": "pending",
+                "status": "paid",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
+                "currentBalance": 1956.8299999999999,
+                "availableCredit": 43.170000000000002,
+                "previousState": {
+                    "dueDate": "2025-11-09",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
-                "id": "ban-1759153289933",
-                "category": "Milestone (Concora)",
-                "estBudget": 0,
+                "id": "banking-1759765816839",
+                "category": "Merrick Bank",
+                "estBudget": 35,
                 "actualCost": 0,
                 "dueDate": "2025-11-13",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
+                "currentBalance": 424.24000000000001,
+                "availableCredit": 75
+            },
+            {
+                "id": "ban-1759153289933",
+                "category": "Milestone (Concora)",
+                "estBudget": 120,
+                "actualCost": 0,
+                "dueDate": "2025-11-13",
+                "status": "paid",
+                "note": "UPDATE: Add balance and minimum payment if applicable",
+                "recurrence": "monthly",
+                "currentBalance": 813.63999999999999,
+                "availableCredit": 0,
+                "previousState": {
+                    "dueDate": "2025-11-13",
+                    "status": "pending",
+                    "actualCost": 0
+                }
+            },
+            {
+                "id": "banking-1760976965101",
+                "category": "Aspire (annual fee)",
+                "estBudget": 25,
+                "actualCost": 0,
+                "dueDate": "2025-11-21",
+                "status": "pending",
+                "recurrence": "monthly",
+                "currentBalance": 248.56,
+                "note": "",
+                "colorCleared": true,
+                "availableCredit": 134
             },
             {
                 "id": "ban-1759153289207",
                 "category": "Credit One",
-                "estBudget": 0,
+                "estBudget": 64,
                 "actualCost": 0,
                 "dueDate": "2025-11-22",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
+                "currentBalance": 1269.7,
+                "availableCredit": 44
             },
             {
                 "id": "ban-1759153387588",
                 "category": "Petal",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-26",
+                "dueDate": "2025-11-25",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 0
+                "currentBalance": 282.25,
+                "availableCredit": 17.75
             }
         ],
         "subscriptions": [
             {
-                "id": "personal-1760015293581",
-                "category": "Google: Discord Talk",
-                "estBudget": 9.9900000000000002,
-                "actualCost": 9.9900000000000002,
-                "dueDate": "2025-10-06",
+                "id": "per-8",
+                "category": "Netflix",
+                "estBudget": 26.989999999999998,
+                "actualCost": 0,
+                "dueDate": "2025-11-04",
                 "status": "paid",
-                "note": "Consider canceling to save $10\/month",
+                "note": "Consider canceling to save $27\/month",
                 "recurrence": "monthly",
                 "previousState": {
-                    "dueDate": "2025-10-06",
+                    "dueDate": "2025-11-04",
                     "status": "pending",
-                    "actualCost": 9.9900000000000002
+                    "actualCost": 0
                 }
             },
             {
-                "id": "subscriptions-1759864709394",
-                "category": "YouTube Premium",
-                "estBudget": 13.99,
+                "id": "personal-1760015293581",
+                "category": "Google: Discord Talk",
+                "estBudget": 9.9900000000000002,
                 "actualCost": 0,
-                "dueDate": "2025-10-24",
+                "dueDate": "2025-11-06",
                 "status": "pending",
-                "note": "Consider canceling to save $14\/month",
+                "note": "",
                 "recurrence": "monthly"
             },
             {
@@ -402,34 +412,14 @@
                 "category": "Amazon Prime",
                 "estBudget": 7.6699999999999999,
                 "actualCost": 0,
-                "dueDate": "2025-10-30",
+                "dueDate": "2025-11-30",
                 "status": "pending",
                 "note": "Consider canceling to save $8\/month",
                 "recurrence": "monthly"
             },
             {
-                "id": "per-8",
-                "category": "Netflix",
-                "estBudget": 26.989999999999998,
-                "actualCost": 0,
-                "dueDate": "2025-11-04",
-                "status": "pending",
-                "note": "Consider canceling to save $27\/month",
-                "recurrence": "monthly"
-            },
-            {
-                "id": "per-11",
-                "category": "CVS ExtraCare",
-                "estBudget": 5.4800000000000004,
-                "actualCost": 0,
-                "dueDate": "2025-11-06",
-                "status": "pending",
-                "note": "Consider canceling to save $5\/month",
-                "recurrence": "monthly"
-            },
-            {
                 "id": "per-3",
-                "category": "AMC Premier",
+                "category": "AMC Premier (annual fee)",
                 "estBudget": 17.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2026-08-01",
@@ -545,6 +535,42 @@
             "recurrence": "monthly",
             "originalBucket": "housing",
             "archivedAt": "2025-10-12T20:05:57.925Z"
+        },
+        {
+            "id": "subscriptions-1759864709394",
+            "category": "YouTube Premium",
+            "estBudget": 13.99,
+            "actualCost": 0,
+            "dueDate": "2025-10-24",
+            "status": "pending",
+            "note": "Paused until April 23, 2026",
+            "recurrence": "monthly",
+            "originalBucket": "subscriptions",
+            "archivedAt": "2025-10-16T13:07:20.243Z"
+        },
+        {
+            "id": "housing-1759387288925",
+            "category": "Electric",
+            "estBudget": 0,
+            "actualCost": 0,
+            "dueDate": "2025-11-08",
+            "status": "pending",
+            "note": "Deferred - will catch up when employed",
+            "recurrence": "monthly",
+            "originalBucket": "housing",
+            "archivedAt": "2025-10-20T16:43:39.761Z"
+        },
+        {
+            "id": "per-11",
+            "category": "CVS ExtraCare",
+            "estBudget": 5.4800000000000004,
+            "actualCost": 0,
+            "dueDate": "2025-11-06",
+            "status": "pending",
+            "note": "Consider canceling to save $5\/month",
+            "recurrence": "monthly",
+            "originalBucket": "subscriptions",
+            "archivedAt": "2025-11-05T20:29:55.043Z"
         }
     ]
 }

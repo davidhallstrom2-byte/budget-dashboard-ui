@@ -454,9 +454,10 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
             {alerts.overdue.length > 0 ? (
               <div className="space-y-2">
                 {alerts.overdue.slice(0, 5).map(item => (
-                  <div key={item.id} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 last:border-b-0">
+                  <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center text-sm py-2 border-b border-gray-100 last:border-b-0">
                     <span className="text-gray-800 truncate font-medium">{item.category}</span>
-                    <span className="text-red-600 font-bold ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                    <span className="text-gray-600 text-xs whitespace-nowrap">{item.dueDate}</span>
+                    <span className="text-red-600 font-bold text-right whitespace-nowrap">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
                   </div>
                 ))}
                 {alerts.overdue.length > 5 && (
@@ -478,9 +479,10 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
             {alerts.upcoming.length > 0 ? (
               <div className="space-y-2">
                 {alerts.upcoming.slice(0, 5).map(item => (
-                  <div key={item.id} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 last:border-b-0">
+                  <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center text-sm py-2 border-b border-gray-100 last:border-b-0">
                     <span className="text-gray-800 truncate font-medium">{item.category}</span>
-                    <span className="text-yellow-600 font-bold ml-2">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                    <span className="text-gray-600 text-xs whitespace-nowrap">{item.dueDate}</span>
+                    <span className="text-yellow-600 font-bold text-right whitespace-nowrap">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
                   </div>
                 ))}
                 {alerts.upcoming.length > 5 && (
@@ -639,6 +641,11 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
 
           const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
           const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+          
+          // Banking-specific totals
+          const totalBalance = bucketName === 'banking' ? items.reduce((sum, item) => sum + (Number(item.currentBalance) || 0), 0) : 0;
+          const totalAvailable = bucketName === 'banking' ? items.reduce((sum, item) => sum + (Number(item.availableCredit) || 0), 0) : 0;
+          
           const statusCounts = getCategoryStatusCounts(items);
 
           return (
@@ -745,9 +752,21 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                     <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                       <tr>
                         <td className="px-3 py-2 text-sm font-semibold">Subtotal</td>
-                        <td className="px-3 py-2 text-sm text-right font-bold">${totalBudgeted.toFixed(2)}</td>
-                        <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
-                        <td colSpan="3"></td>
+                        {bucketName === 'banking' ? (
+                          <>
+                            <td className="px-3 py-2 text-sm text-right font-bold">${totalBudgeted.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-sm text-right font-bold">${totalBalance.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-sm text-right font-bold">${totalAvailable.toFixed(2)}</td>
+                            <td colSpan="2"></td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-3 py-2 text-sm text-right font-bold">${totalBudgeted.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
+                            <td colSpan="3"></td>
+                          </>
+                        )}
                       </tr>
                     </tfoot>
                   </table>

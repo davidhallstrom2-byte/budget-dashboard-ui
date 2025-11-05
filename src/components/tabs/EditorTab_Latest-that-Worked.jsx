@@ -288,26 +288,19 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
 
   const handleDeleteClick = (bucket, id) => {
-    setState(prevState => {
-      const item = prevState.buckets[bucket].find(x => x.id === id);
-      if (!item) return prevState;
+    const item = state.buckets[bucket].find(x => x.id === id);
+    if (!item) return;
 
-      const updatedBuckets = { 
-        ...prevState.buckets, 
-        [bucket]: prevState.buckets[bucket].filter(x => x.id !== id) 
-      };
-      const updatedState = { ...prevState, buckets: updatedBuckets };
+    const updatedBuckets = { ...state.buckets, [bucket]: state.buckets[bucket].filter(x => x.id !== id) };
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
 
-      if (undoTimerId) clearTimeout(undoTimerId);
-      setRecentlyDeleted({ bucket, item });
-      const tid = setTimeout(() => setRecentlyDeleted(null), 10000);
-      setUndoTimerId(tid);
+    if (undoTimerId) clearTimeout(undoTimerId);
+    setRecentlyDeleted({ bucket, item });
+    const tid = setTimeout(() => setRecentlyDeleted(null), 10000);
+    setUndoTimerId(tid);
 
-      // Save immediately without setTimeout to prevent race conditions
-      saveBudgetWithIndicator(updatedState, 'Item deleted successfully!');
-      
-      return updatedState;
-    });
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item deleted successfully!'), 100);
   };
   const handleClearStatus = (bucket, id) => {
     const item = state.buckets[bucket].find(x => x.id === id);
@@ -655,30 +648,21 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     if (selectedItems.size === 0) return;
     if (!confirm(`Delete ${selectedItems.size} selected items?`)) return;
 
-    const count = selectedItems.size;
-    
-    // Calculate the new state
     const updatedBuckets = { ...state.buckets };
     selectedItems.forEach(key => {
       const [bucket, id] = key.split(':');
       updatedBuckets[bucket] = updatedBuckets[bucket].filter(x => x.id !== id);
     });
+
     const updatedState = { ...state, buckets: updatedBuckets };
-    
-    // Update state and clear selection
     setState(updatedState);
     setSelectedItems(new Set());
-    
-    // Save with the exact state we just calculated
-    saveBudgetWithIndicator(updatedState, `${count} items deleted!`);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `${selectedItems.size} items deleted!`), 100);
   };
 
   const bulkArchive = () => {
     if (selectedItems.size === 0) return;
 
-    const count = selectedItems.size;
-    
-    // Calculate the new state
     const updatedBuckets = { ...state.buckets };
     const newArchived = [...(state.archived || [])];
 
@@ -690,20 +674,16 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         updatedBuckets[bucket] = updatedBuckets[bucket].filter(x => x.id !== id);
       }
     });
+
     const updatedState = { ...state, buckets: updatedBuckets, archived: newArchived };
-    
-    // Update state and clear selection
     setState(updatedState);
     setSelectedItems(new Set());
-    
-    // Save with the exact state we just calculated
-    saveBudgetWithIndicator(updatedState, `${count} items archived!`);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `${selectedItems.size} items archived!`), 100);
   };
 
   const bulkRollForward = () => {
     if (selectedItems.size === 0) return;
 
-    // Calculate the new state
     const updatedBuckets = { ...state.buckets };
     let rolledCount = 0;
 
@@ -731,9 +711,14 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           case 'quarterly':
             nextDate.setMonth(nextDate.getMonth() + 3);
             break;
-          case 'yearly':
+          case 'annual':
             nextDate.setFullYear(nextDate.getFullYear() + 1);
             break;
+          case 'varies':
+            nextDate.setMonth(nextDate.getMonth() + 1);
+            break;
+          default:
+            nextDate.setMonth(nextDate.getMonth() + 1);
         }
 
         updatedBuckets[bucket][itemIndex] = {
@@ -746,14 +731,11 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         rolledCount++;
       }
     });
+
     const updatedState = { ...state, buckets: updatedBuckets };
-    
-    // Update state and clear selection
     setState(updatedState);
     setSelectedItems(new Set());
-    
-    // Save with the exact state we just calculated
-    saveBudgetWithIndicator(updatedState, `${rolledCount} items rolled forward!`);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `${rolledCount} items rolled forward!`), 100);
   };
 
   const addFromTemplate = (template) => {

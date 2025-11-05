@@ -20,8 +20,6 @@ const BudgetDashboard = () => {
   const [isArchiveDrawerOpen, setIsArchiveDrawerOpen] = useState(false);
   const [isStatementScannerOpen, setIsStatementScannerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showExportDialog, setShowExportDialog] = useState(false);
-  const [exportFilename, setExportFilename] = useState('budget-data');
 
   useEffect(() => {
     let mounted = true;
@@ -138,48 +136,6 @@ const handleMarkPaidFromNotification = (bucket, id) => {
   saveBudget(updatedState, 'Item marked as paid!');
 };
 
-  const handleExportJSON = () => {
-    const filename = exportFilename.trim() || 'budget-data';
-    const dataStr = JSON.stringify(state, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${filename}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    setShowExportDialog(false);
-    setSaveStatus({ type: 'success', message: `Exported ${filename}.json` });
-    setTimeout(() => setSaveStatus(null), 3000);
-  };
-
-  const handleImportJSON = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const imported = JSON.parse(e.target.result);
-        
-        // Validate structure
-        if (!imported.buckets || !imported.archived) {
-          throw new Error('Invalid budget file format');
-        }
-
-        setState(imported);
-        saveBudget(imported, 'Budget imported successfully!');
-      } catch (error) {
-        setSaveStatus({ type: 'error', message: `Import failed: ${error.message}` });
-        setTimeout(() => setSaveStatus(null), 3000);
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = ''; // Reset input
-  };
-
   if (isLoading) return <LoadingGate />;
 
   return (
@@ -273,32 +229,6 @@ const handleMarkPaidFromNotification = (bucket, id) => {
               <span className="text-xs">({state.archived?.length || 0})</span>
             </button>
 
-            {/* Export JSON */}
-            <button
-              onClick={() => setShowExportDialog(true)}
-              className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-              title="Export JSON"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-            </button>
-
-            {/* Import JSON */}
-            <label className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors cursor-pointer" title="Import JSON">
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImportJSON}
-                className="hidden"
-              />
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-            </label>
-
             {/* Save Button - Icon only */}
             <button
               onClick={() => saveBudget()}
@@ -355,42 +285,6 @@ const handleMarkPaidFromNotification = (bucket, id) => {
         onClose={() => setIsStatementScannerOpen(false)}
         onImport={handleStatementImport}
       />
-
-      {/* Export Dialog */}
-      {showExportDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96 shadow-xl">
-            <h3 className="text-lg font-bold mb-4">Export Budget</h3>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Filename
-              </label>
-              <input
-                type="text"
-                value={exportFilename}
-                onChange={(e) => setExportFilename(e.target.value)}
-                placeholder="budget-data"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              />
-              <p className="text-xs text-gray-500 mt-1">.json will be added automatically</p>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setShowExportDialog(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExportJSON}
-                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-              >
-                Export
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

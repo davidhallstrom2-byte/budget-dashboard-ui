@@ -301,10 +301,21 @@ export async function saveState() {
 }
 
 export async function saveToServer(stateOverride) {
-  if (stateOverride && typeof stateOverride === "object") {
-    replaceState(normalizeState(stateOverride));
-  }
+  // Don't call replaceState here - it causes emit() which triggers re-renders
+  // The component already called setState with the new state
+  const stateToSave = stateOverride && typeof stateOverride === "object" ? stateOverride : state;
+  
+  // Temporarily set state for saving without emitting
+  const originalState = state;
+  state = normalizeState(stateToSave);
+  
   const result = await _saveInternal();
+  
+  // Restore if save failed (though we don't revert on success to avoid re-emit)
+  if (!result.ok) {
+    state = originalState;
+  }
+  
   if (result.ok) return { success: true };
   return { success: false, error: result.error || "Save failed" };
 }

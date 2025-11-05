@@ -13,3 +13,35 @@
     min-height: 100%;
   }
 }
+
+/* Mobile table horizontal scroll */
+@layer utilities {
+  .table-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Banking table needs min-width on mobile */
+  .banking-table {
+    min-width: 900px;
+  }
+  
+  /* Webkit scrollbar styling for tables */
+  .table-scroll-wrapper::-webkit-scrollbar {
+    height: 8px;
+  }
+  
+  .table-scroll-wrapper::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+  }
+  
+  .table-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+  }
+  
+  .table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #555;
+  }
+}
