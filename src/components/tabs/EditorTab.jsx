@@ -134,36 +134,9 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!state?.buckets?.income) return;
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth();
-
-    const thisMonthIncome = state.buckets.income.filter(item => {
-      const itemDate = new Date(item.dueDate);
-      return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear;
-    });
-    if (thisMonthIncome.length >= 4) return;
-
-    const fridays = getFridaysInMonth(currentYear, currentMonth);
-    const newEntries = fridays.slice(0, 4).map((friday, idx) => ({
-      id: `income-${Date.now()}-${idx}`,
-      category: `CSC - Week ${idx + 1}`,
-      estBudget: 200,
-      actualCost: 0,
-      dueDate: friday.toISOString().split('T')[0],
-      status: 'pending'
-    }));
-
-    const updatedBuckets = {
-      ...state.buckets,
-      income: [...state.buckets.income, ...newEntries]
-    };
-    const updatedState = { ...state, buckets: updatedBuckets };
-    setState(updatedState);
-    setTimeout(() => saveBudgetWithIndicator(updatedState, false), 100);
-  }, [state?.buckets?.income?.length]);
+  // CSC AUTO-GENERATION DISABLED
+  // The useEffect that was here has been removed to prevent automatic regeneration of CSC weekly income entries
+  // Users can now delete CSC rows without them reappearing
 
   const saveBudgetWithIndicator = async (customState = null, customMessage = null) => {
     setIsSaving(true);

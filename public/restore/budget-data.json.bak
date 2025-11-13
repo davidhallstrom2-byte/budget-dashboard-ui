@@ -2,50 +2,13 @@
     "buckets": {
         "income": [
             {
-                "id": "income-1762372186233-0",
+                "id": "income-1763062072546-0",
                 "category": "CSC - Week 1",
-                "estBudget": 0,
+                "estBudget": 200,
                 "actualCost": 0,
                 "dueDate": "2025-11-07",
                 "status": "pending",
                 "note": ""
-            },
-            {
-                "id": "income-1762372186233-1",
-                "category": "CSC - Week 2",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-11-14",
-                "status": "pending",
-                "note": ""
-            },
-            {
-                "id": "income-1762372200960-2",
-                "category": "CSC - Week 3",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-11-21",
-                "status": "pending",
-                "note": ""
-            },
-            {
-                "id": "income-1762372200960-3",
-                "category": "CSC - Week 4",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-11-28",
-                "status": "pending",
-                "note": ""
-            },
-            {
-                "id": "inc-1",
-                "category": "Salary",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "",
-                "status": "pending",
-                "note": "Get a job!",
-                "recurrence": "monthly"
             }
         ],
         "housing": [
@@ -55,33 +18,22 @@
                 "estBudget": 295.39999999999998,
                 "actualCost": 295.39999999999998,
                 "dueDate": "2025-11-08",
-                "status": "pending",
+                "status": "paid",
                 "note": "CRITICAL - Need for job search",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "previousState": {
+                    "dueDate": "2025-11-08",
+                    "status": "pending",
+                    "actualCost": 295.39999999999998
+                }
             }
         ],
         "transportation": [
             {
-                "id": "transportation-1760978246508",
-                "category": "Gas ",
-                "estBudget": 0,
-                "actualCost": 0,
-                "dueDate": "2025-10-17",
-                "status": "paid",
-                "recurrence": "monthly",
-                "previousState": {
-                    "dueDate": "2025-10-17",
-                    "status": "paid",
-                    "actualCost": 0
-                },
-                "note": "",
-                "colorCleared": true
-            },
-            {
                 "id": "transportation-1759947905037",
                 "category": "Intergon Auto Ins",
                 "estBudget": 52,
-                "actualCost": 0,
+                "actualCost": 52,
                 "dueDate": "2025-11-14",
                 "status": "pending",
                 "note": "CRITICAL - Legal requirement",
@@ -96,6 +48,22 @@
                 "status": "pending",
                 "note": "Annual renewal - set calendar reminder 30 days before",
                 "recurrence": "annual"
+            },
+            {
+                "id": "transportation-1760978246508",
+                "category": "Gas ",
+                "estBudget": 0,
+                "actualCost": 0,
+                "dueDate": "",
+                "status": "paid",
+                "recurrence": "monthly",
+                "previousState": {
+                    "dueDate": "2025-10-17",
+                    "status": "paid",
+                    "actualCost": 0
+                },
+                "note": "",
+                "colorCleared": true
             },
             {
                 "id": "tra-3",
@@ -262,11 +230,16 @@
                 "estBudget": 12,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
-                "status": "pending",
+                "status": "paid",
                 "recurrence": "monthly",
                 "availableCredit": 0.51000000000000001,
                 "note": "",
-                "currentBalance": 0
+                "currentBalance": 0,
+                "previousState": {
+                    "dueDate": "2025-11-08",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-4",
@@ -274,11 +247,16 @@
                 "estBudget": 14.949999999999999,
                 "actualCost": 0,
                 "dueDate": "2025-11-08",
-                "status": "pending",
+                "status": "paid",
                 "note": "Monthly service fee",
                 "recurrence": "monthly",
                 "currentBalance": 0,
-                "availableCredit": 14.949999999999999
+                "availableCredit": 14.949999999999999,
+                "previousState": {
+                    "dueDate": "2025-11-08",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "ban-1759153288748",
@@ -403,9 +381,14 @@
                 "estBudget": 9.9900000000000002,
                 "actualCost": 0,
                 "dueDate": "2025-11-06",
-                "status": "pending",
+                "status": "paid",
                 "note": "",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "previousState": {
+                    "dueDate": "2025-11-06",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "per-9",

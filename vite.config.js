@@ -24,26 +24,27 @@ const rewriteBudgetBase = {
     return () => {
       server.middlewares.use((req, res, next) => {
         if (!req.url) return next();
-        
-        // HTTP to HTTPS redirect (301) - Check if request came via HTTP
-        // This works when Vite is behind a proxy or when accessed via non-standard ports
-        const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
-        
+
+        // HTTP to HTTPS redirect (301)
+        const protocol =
+          req.headers['x-forwarded-proto'] ||
+          (req.connection.encrypted ? 'https' : 'http');
+
         if (hasCert && protocol === 'http') {
-          const host = req.headers.host || (useLan ? `${LAN_IP}:4174` : 'localhost:4174');
-          // Remove any port number and add :4174 for HTTPS
+          const host =
+            req.headers.host || (useLan ? `${LAN_IP}:4174` : 'localhost:4174');
           const hostWithoutPort = host.split(':')[0];
           const redirectUrl = `https://${hostWithoutPort}:4174${req.url}`;
-          
+
           console.log(`[HTTP→HTTPS Redirect] ${req.url} → ${redirectUrl}`);
-          res.writeHead(301, { 
-            'Location': redirectUrl,
-            'Content-Type': 'text/plain'
+          res.writeHead(301, {
+            Location: redirectUrl,
+            'Content-Type': 'text/plain',
           });
           res.end(`Redirecting to ${redirectUrl}`);
           return;
         }
-        
+
         // Budget base path rewrite
         if (req.url === '/budget-dashboard-fs' || req.url === '/budget-dashboard-fs/') {
           req.url = '/';
@@ -51,6 +52,7 @@ const rewriteBudgetBase = {
           const isAsset = /\.\w+$/.test(req.url.split('?')[0]);
           if (!isAsset) req.url = '/';
         }
+
         next();
       });
     };
@@ -85,7 +87,7 @@ export default defineConfig({
     hmr: {
       host: useLan ? LAN_IP : 'localhost',
       port: 4174,
-      protocol: hasCert ? (useLan ? 'wss' : 'wss') : 'ws',
+      protocol: hasCert ? 'wss' : 'ws',
     },
   },
   preview: {
@@ -98,5 +100,13 @@ export default defineConfig({
           cert: fs.readFileSync(certPath),
         }
       : false,
+  },
+  // 🔑 Important: generate manifest where BWC expects it
+  build: {
+    manifest: 'manifest.json', // <— this puts it at dist/manifest.json
+    outDir: 'dist',
+    rollupOptions: {
+      input: 'index.html',
+    },
   },
 });
