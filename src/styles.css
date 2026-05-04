@@ -1,4 +1,31 @@
-/* C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\styles\tailwind.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Force large popups/modals to stay inside the screen */
+.fixed.inset-0,
+.modal-overlay {
+  overflow-y: auto !important;
+  align-items: flex-start !important;
+  padding: 24px 12px !important;
+}
+
+/* Limit modal height and make inside scrollable */
+.fixed.inset-0 > div,
+.modal-content,
+.overdue-modal,
+.alert-modal {
+  max-height: calc(100vh - 80px) !important;
+  overflow-y: auto !important;
+}
+
+/* Keep close button reachable */
+.modal-close,
+.close-button,
+button[aria-label="Close"],
+button[title="Close"] {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 9999 !important;
+  background: white !important;
+}

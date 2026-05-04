@@ -1,15 +1,302 @@
-// src/components/BudgetDashboard.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeState, saveToServer } from '../utils/state.js';
 import LoadingGate from './common/LoadingGate';
+import PageContainer from './common/PageContainer';
 import DashboardTab from './tabs/DashboardTab';
 import AnalysisTab from './tabs/AnalysisTab';
 import CalculatorTab from './tabs/CalculatorTab';
-import EditorTab from './tabs/EditorTab';	import ArchivedDrawer from './ui/ArchivedDrawer';
+import TodoTab from './tabs/TodoTab';
+import TodoListSection from './todo/TodoListSection';
+import EditorTab from './tabs/EditorTab';
+import ArchivedDrawer from './ui/ArchivedDrawer';
 import StickyToolbar from './common/StickyToolbar.jsx';
 import StatementScanner from './statements/StatementScanner';
 import NotificationPanel from './modern/NotificationPanel';
-import { Search, X } from 'lucide-react';
+import {
+  Search,
+  X,
+  WalletCards,
+  AlertTriangle,
+  Clock,
+  CheckCircle2,
+  ListTodo,
+  Archive,
+  BarChart3,
+  CheckSquare,
+} from 'lucide-react';
+
+const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
+
+const readTodoTasks = () => {
+  try {
+    const saved = localStorage.getItem(TODO_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeTodoTasks = (tasks) => {
+  try {
+    const current = localStorage.getItem(TODO_STORAGE_KEY);
+
+    if (current) {
+      localStorage.setItem('todoTab.tasks.backup.v1', current);
+    }
+
+    localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(Array.isArray(tasks) ? tasks : []));
+  } catch (error) {
+    console.error('Failed to save to-do tasks:', error);
+  }
+};
+
+const parseDate = (value) => {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : new Date(parsed);
+};
+
+const startOfToday = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const getDaysUntil = (value) => {
+  const date = parseDate(value);
+  if (!date) return null;
+
+  const today = startOfToday();
+  date.setHours(0, 0, 0, 0);
+
+  return Math.ceil((date.getTime() - today.getTime()) / 86400000);
+};
+
+const flattenBudgetItems = (state) => {
+  if (!state?.buckets) return [];
+
+  return Object.entries(state.buckets).flatMap(([bucketKey, items]) =>
+    Array.isArray(items)
+      ? items.map((item) => ({
+          ...item,
+          bucketKey,
+        }))
+      : []
+  );
+};
+
+const getBudgetOverview = (state) => {
+  const items = flattenBudgetItems(state);
+
+  const totalItems = items.length;
+  const paidItems = items.filter((item) => item.status === 'paid').length;
+  const pendingItems = items.filter((item) => item.status !== 'paid').length;
+
+  const overdueItems = items.filter((item) => {
+    if (item.status === 'paid') return false;
+    const days = getDaysUntil(item.dueDate);
+    return days !== null && days < 0;
+  }).length;
+
+  const dueSoonItems = items.filter((item) => {
+    if (item.status === 'paid') return false;
+    const days = getDaysUntil(item.dueDate);
+    return days !== null && days >= 0 && days <= 5;
+  }).length;
+
+  const totalEstimated = items.reduce(
+    (sum, item) => sum + Number(item.estimatedBudget || item.estimatedCost || 0),
+    0
+  );
+
+  const totalActual = items.reduce(
+    (sum, item) => sum + Number(item.actualCost || item.actualSpent || 0),
+    0
+  );
+
+  return {
+    totalItems,
+    paidItems,
+    pendingItems,
+    overdueItems,
+    dueSoonItems,
+    totalEstimated,
+    totalActual,
+    archivedItems: state?.archived?.length || 0,
+  };
+};
+
+const getTodoOverview = (todoTasks) => {
+  const total = todoTasks.length;
+  const completed = todoTasks.filter((task) => task.completed).length;
+  const open = todoTasks.filter((task) => !task.completed).length;
+  const blocked = todoTasks.filter((task) => task.blockedBy && !task.completed).length;
+
+  const overdue = todoTasks.filter((task) => {
+    if (task.completed) return false;
+    const days = getDaysUntil(task.deadline || task.date);
+    return days !== null && days < 0;
+  }).length;
+
+  const dueSoon = todoTasks.filter((task) => {
+    if (task.completed) return false;
+    const days = getDaysUntil(task.deadline || task.date);
+    return days !== null && days >= 0 && days <= 5;
+  }).length;
+
+  return {
+    total,
+    completed,
+    open,
+    blocked,
+    overdue,
+    dueSoon,
+  };
+};
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(Number(value || 0));
+
+const OverviewCard = ({ title, value, detail, icon: Icon, className }) => (
+  <div className={`rounded-2xl border p-4 shadow-sm ${className}`}>
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <p className="text-sm font-bold">{title}</p>
+        <p className="mt-1 text-2xl font-extrabold">{value}</p>
+        {detail && <p className="mt-1 text-xs opacity-80">{detail}</p>}
+      </div>
+      <Icon className="h-8 w-8 opacity-80" />
+    </div>
+  </div>
+);
+
+const DashboardOverviewStrip = ({ state, todoTasks, onNavigateToTab }) => {
+  const budget = useMemo(() => getBudgetOverview(state), [state]);
+  const todo = useMemo(() => getTodoOverview(todoTasks), [todoTasks]);
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-extrabold text-slate-900">Overview</h2>
+          <p className="text-sm text-slate-600">
+            Budget status, task counts, alerts, and saved items in one place.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => onNavigateToTab('editor')}
+            title="View budget items"
+            className="group relative flex items-center gap-2 rounded-full border border-blue-300 bg-blue-100 px-4 py-2 text-sm font-bold text-blue-800 shadow-sm transition-all hover:bg-blue-200 active:scale-95"
+          >
+            <BarChart3 className="h-4 w-4" />
+            <span>{budget.totalItems} items</span>
+
+            {budget.overdueItems > 0 && (
+              <span className="ml-1 rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
+                {budget.overdueItems}
+              </span>
+            )}
+
+            <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black px-2 py-1 text-xs text-white opacity-0 transition group-hover:opacity-100">
+              View budget items
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateToTab('todo')}
+            title="View to-do list"
+            className="group relative flex items-center gap-2 rounded-full border border-red-300 bg-red-100 px-4 py-2 text-sm font-bold text-red-800 shadow-sm transition-all hover:bg-red-200 active:scale-95"
+          >
+            <CheckSquare className="h-4 w-4" />
+            <span>{todo.total} tasks</span>
+
+            {todo.overdue > 0 && (
+              <span className="ml-1 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
+                {todo.overdue}
+              </span>
+            )}
+
+            <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black px-2 py-1 text-xs text-white opacity-0 transition group-hover:opacity-100">
+              View to-do list
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <OverviewCard
+          title="Budget Items"
+          value={budget.totalItems}
+          detail={`${budget.pendingItems} pending · ${budget.paidItems} paid`}
+          icon={WalletCards}
+          className="border-blue-200 bg-blue-50 text-blue-950"
+        />
+
+        <OverviewCard
+          title="Overdue"
+          value={budget.overdueItems + todo.overdue}
+          detail={`${budget.overdueItems} budget · ${todo.overdue} to-do`}
+          icon={AlertTriangle}
+          className="border-red-200 bg-red-50 text-red-950"
+        />
+
+        <OverviewCard
+          title="Due Soon"
+          value={budget.dueSoonItems + todo.dueSoon}
+          detail="Due within 5 days"
+          icon={Clock}
+          className="border-amber-200 bg-amber-50 text-amber-950"
+        />
+
+        <OverviewCard
+          title="To-Do Progress"
+          value={`${todo.completed}/${todo.total}`}
+          detail={`${todo.open} open · ${todo.blocked} blocked`}
+          icon={ListTodo}
+          className="border-violet-200 bg-violet-50 text-violet-950"
+        />
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5" />
+            <h3 className="font-extrabold">Paid Items</h3>
+          </div>
+          <p className="mt-2 text-2xl font-extrabold">{budget.paidItems}</p>
+          <p className="text-sm opacity-80">Items marked paid in budget.</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-900">
+          <div className="flex items-center gap-2">
+            <Archive className="h-5 w-5" />
+            <h3 className="font-extrabold">Archived Items</h3>
+          </div>
+          <p className="mt-2 text-2xl font-extrabold">{budget.archivedItems}</p>
+          <p className="text-sm text-slate-600">Stored in archive drawer.</p>
+        </div>
+
+        <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 text-orange-950">
+          <h3 className="font-extrabold">Budget Totals</h3>
+          <p className="mt-2 text-sm">
+            Estimated: <span className="font-extrabold">{formatCurrency(budget.totalEstimated)}</span>
+          </p>
+          <p className="text-sm">
+            Actual: <span className="font-extrabold">{formatCurrency(budget.totalActual)}</span>
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const BudgetDashboard = () => {
   const [state, setState] = useState(null);
@@ -22,6 +309,7 @@ const BudgetDashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportFilename, setExportFilename] = useState('budget-data');
+  const [todoTasks, setTodoTasks] = useState(readTodoTasks);
 
   useEffect(() => {
     let mounted = true;
@@ -34,36 +322,92 @@ const BudgetDashboard = () => {
         if (mounted) {
           setState({
             buckets: {
-              income: [], housing: [], transportation: [], food: [],
-              personal: [], homeOffice: [], banking: [], subscriptions: [], misc: []
+              income: [],
+              housing: [],
+              transportation: [],
+              food: [],
+              personal: [],
+              homeOffice: [],
+              banking: [],
+              subscriptions: [],
+              misc: [],
             },
-            archived: []
+            archived: [],
           });
         }
       } finally {
         if (mounted) setIsLoading(false);
       }
     })();
-    return () => { mounted = false; };
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const tabs = useMemo(() => ([
-    { id: 'dashboard', label: 'Dashboard', bgColor: 'bg-blue-100' },
-    { id: 'editor',    label: 'Editor',    bgColor: 'bg-orange-100' },
-    { id: 'analysis',  label: 'Analysis',  bgColor: 'bg-purple-100' },
-    { id: 'calculator',label: 'Calculator',bgColor: 'bg-green-100' }
-  ]), []);
+  useEffect(() => {
+    const refreshTodoTasks = () => setTodoTasks(readTodoTasks());
+
+    refreshTodoTasks();
+
+    window.addEventListener('focus', refreshTodoTasks);
+    window.addEventListener('storage', refreshTodoTasks);
+
+    return () => {
+      window.removeEventListener('focus', refreshTodoTasks);
+      window.removeEventListener('storage', refreshTodoTasks);
+    };
+  }, [activeTab]);
+
+  const todoTaskById = useMemo(() => {
+    return todoTasks.reduce((acc, task) => {
+      if (task?.id) acc[task.id] = task;
+      return acc;
+    }, {});
+  }, [todoTasks]);
+
+  const handleTodoTasksChange = (nextTasks) => {
+    setTodoTasks(nextTasks);
+    writeTodoTasks(nextTasks);
+  };
+
+  const handleToggleTodoCompletion = (taskId) => {
+    const nextTasks = todoTasks.map((task) =>
+      task.id === taskId
+        ? {
+            ...task,
+            completed: !task.completed,
+            completedAt: !task.completed ? new Date().toISOString() : '',
+          }
+        : task
+    );
+
+    handleTodoTasksChange(nextTasks);
+  };
+
+  const tabs = useMemo(
+    () => [
+      { id: 'dashboard', label: 'Dashboard', bgColor: 'bg-blue-100' },
+      { id: 'todo', label: 'To-Do', bgColor: 'bg-red-100' },
+      { id: 'editor', label: 'Editor', bgColor: 'bg-orange-100' },
+      { id: 'analysis', label: 'Analysis', bgColor: 'bg-purple-100' },
+      { id: 'calculator', label: 'Calculator', bgColor: 'bg-green-100' },
+    ],
+    []
+  );
 
   const activeTabConfig = useMemo(
-    () => tabs.find(t => t.id === activeTab),
+    () => tabs.find((t) => t.id === activeTab),
     [tabs, activeTab]
   );
 
   const saveBudget = async (customState = null, customMessage = null) => {
     setIsSaving(true);
     setSaveStatus(null);
+
     try {
       const result = await saveToServer(customState || state);
+
       if (customMessage !== false) {
         setSaveStatus(
           result?.success
@@ -75,6 +419,7 @@ const BudgetDashboard = () => {
       setSaveStatus({ type: 'error', message: 'Failed to save budget' });
     } finally {
       setIsSaving(false);
+
       if (customMessage !== false) {
         setTimeout(() => setSaveStatus(null), 3000);
       }
@@ -83,7 +428,7 @@ const BudgetDashboard = () => {
 
   const handleStatementImport = (budgetItems) => {
     const updatedBuckets = { ...state.buckets };
-    
+
     budgetItems.forEach(({ categoryKey, item }) => {
       if (updatedBuckets[categoryKey]) {
         updatedBuckets[categoryKey] = [...updatedBuckets[categoryKey], item];
@@ -98,45 +443,56 @@ const BudgetDashboard = () => {
   };
 
   const handleRestoreArchived = (id) => {
-    const idx = state?.archived?.findIndex(i => i.id === id);
+    const idx = state?.archived?.findIndex((i) => i.id === id);
     if (idx === -1 || idx === undefined) return;
+
     const archivedItem = state.archived[idx];
     const { originalBucket, archivedAt, ...restoredItem } = archivedItem;
 
     const updatedBuckets = {
       ...state.buckets,
-      [originalBucket]: [...(state.buckets[originalBucket] || []), restoredItem]
+      [originalBucket]: [...(state.buckets[originalBucket] || []), restoredItem],
     };
+
     const updatedArchived = state.archived.filter((_, i) => i !== idx);
     const updatedState = { ...state, buckets: updatedBuckets, archived: updatedArchived };
+
     setState(updatedState);
     saveBudget(updatedState, 'Item restored successfully!');
   };
 
   const handleDeleteArchived = (id) => {
     if (!confirm('Permanently delete this archived item?')) return;
-    const updatedArchived = state?.archived?.filter(i => i.id !== id) || [];
+
+    const updatedArchived = state?.archived?.filter((i) => i.id !== id) || [];
     const updatedState = { ...state, archived: updatedArchived };
+
     setState(updatedState);
     saveBudget(updatedState, 'Archived item deleted permanently!');
   };
 
-const handleMarkPaidFromNotification = (bucket, id) => {
-  const item = state.buckets[bucket]?.find(item => item.id === id);
-  if (!item) return;
+  const handleMarkPaidFromNotification = (bucket, id) => {
+    const item = state.buckets[bucket]?.find((budgetItem) => budgetItem.id === id);
+    if (!item) return;
 
-  const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
+    const previousState = {
+      dueDate: item.dueDate,
+      status: item.status,
+      actualCost: item.actualCost,
+    };
 
-  const updatedBuckets = {
-    ...state.buckets,
-    [bucket]: state.buckets[bucket].map(it =>
-      it.id === id ? { ...it, status: 'paid', previousState } : it
-    )
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map((it) =>
+        it.id === id ? { ...it, status: 'paid', previousState } : it
+      ),
+    };
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+
+    setState(updatedState);
+    saveBudget(updatedState, 'Item marked as paid!');
   };
-  const updatedState = { ...state, buckets: updatedBuckets };
-  setState(updatedState);
-  saveBudget(updatedState, 'Item marked as paid!');
-};
 
   const handleExportJSON = () => {
     const filename = exportFilename.trim() || 'budget-data';
@@ -144,12 +500,16 @@ const handleMarkPaidFromNotification = (bucket, id) => {
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(dataBlob);
     const link = document.createElement('a');
+
     link.href = url;
     link.download = `${filename}.json`;
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
     URL.revokeObjectURL(url);
+
     setShowExportDialog(false);
     setSaveStatus({ type: 'success', message: `Exported ${filename}.json` });
     setTimeout(() => setSaveStatus(null), 3000);
@@ -160,11 +520,11 @@ const handleMarkPaidFromNotification = (bucket, id) => {
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = (e) => {
       try {
         const imported = JSON.parse(e.target.result);
-        
-        // Validate structure
+
         if (!imported.buckets || !imported.archived) {
           throw new Error('Invalid budget file format');
         }
@@ -176,8 +536,9 @@ const handleMarkPaidFromNotification = (bucket, id) => {
         setTimeout(() => setSaveStatus(null), 3000);
       }
     };
+
     reader.readAsText(file);
-    event.target.value = ''; // Reset input
+    event.target.value = '';
   };
 
   if (isLoading) return <LoadingGate />;
@@ -203,7 +564,6 @@ const handleMarkPaidFromNotification = (bucket, id) => {
 
       <StickyToolbar bgTint={activeTabConfig?.bgColor || ''}>
         <div className="flex justify-between items-center gap-2 h-14">
-          {/* Left: Tabs - Scrollable */}
           <div className="flex items-center space-x-1 overflow-x-auto flex-shrink min-w-0">
             {tabs.map((tab) => (
               <button
@@ -221,14 +581,12 @@ const handleMarkPaidFromNotification = (bucket, id) => {
             ))}
           </div>
 
-          {/* Right: Notification Bell + Minimal Action Buttons */}
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             <NotificationPanel
               state={state}
               onMarkPaid={handleMarkPaidFromNotification}
             />
 
-            {/* Search - Hidden on mobile */}
             <div className="relative w-48 hidden lg:block">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -248,45 +606,56 @@ const handleMarkPaidFromNotification = (bucket, id) => {
               )}
             </div>
 
-            {/* Scan Statement - Icon only */}
             <button
               onClick={() => setIsStatementScannerOpen(true)}
               className="p-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
               title="Scan Statement"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
               </svg>
             </button>
 
-            {/* Archives - Icon + count */}
             <button
               onClick={() => setIsArchiveDrawerOpen(true)}
               className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1"
               title="Archives"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+                />
               </svg>
               <span className="text-xs">({state.archived?.length || 0})</span>
             </button>
 
-            {/* Export JSON */}
             <button
               onClick={() => setShowExportDialog(true)}
               className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
               title="Export JSON"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
               </svg>
             </button>
 
-            {/* Import JSON */}
-            <label className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors cursor-pointer" title="Import JSON">
+            <label
+              className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors cursor-pointer"
+              title="Import JSON"
+            >
               <input
                 type="file"
                 accept=".json"
@@ -294,32 +663,49 @@ const handleMarkPaidFromNotification = (bucket, id) => {
                 className="hidden"
               />
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                />
               </svg>
             </label>
 
-            {/* Save Button - Icon only */}
             <button
               onClick={() => saveBudget()}
               disabled={isSaving}
               className={`p-2 rounded-lg transition-colors ${
-                isSaving ? 'bg-gray-400 text-white cursor-not-allowed'
-                         : 'bg-blue-500 text-white hover:bg-blue-600'
+                isSaving
+                  ? 'bg-gray-400 text-white cursor-not-allowed'
+                  : 'bg-blue-500 text-white hover:bg-blue-600'
               }`}
               title="Save Budget"
             >
               {isSaving ? (
                 <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle className="opacity-25" cx="12" cy="12" r="10"
-                          stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
                 </svg>
               ) : (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                  />
                 </svg>
               )}
             </button>
@@ -329,16 +715,67 @@ const handleMarkPaidFromNotification = (bucket, id) => {
 
       <div className={`${activeTabConfig?.bgColor || 'bg-white'} min-h-screen`}>
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
+          <>
+            <PageContainer className="py-6 space-y-6">
+              <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl px-6 py-4 mb-6">
+                <h2 className="text-2xl font-bold text-slate-800">
+                  Budget Dashboard
+                </h2>
+              </div>
+
+              <DashboardOverviewStrip
+                state={state}
+                todoTasks={todoTasks}
+                onNavigateToTab={setActiveTab}
+              />
+
+              <TodoListSection
+                tasks={todoTasks}
+                taskById={todoTaskById}
+                searchQuery={searchQuery}
+                onToggle={handleToggleTodoCompletion}
+                onEdit={() => setActiveTab('todo')}
+              />
+            </PageContainer>
+
+            <DashboardTab
+              state={state}
+              setState={setState}
+              saveBudget={saveBudget}
+              searchQuery={searchQuery}
+            />
+          </>
         )}
+
         {activeTab === 'analysis' && (
-          <AnalysisTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
+          <AnalysisTab
+            state={state}
+            setState={setState}
+            saveBudget={saveBudget}
+            searchQuery={searchQuery}
+          />
         )}
+
         {activeTab === 'calculator' && (
-          <CalculatorTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
+          <CalculatorTab
+            state={state}
+            setState={setState}
+            saveBudget={saveBudget}
+            searchQuery={searchQuery}
+          />
         )}
+
+        {activeTab === 'todo' && (
+          <TodoTab />
+        )}
+
         {activeTab === 'editor' && (
-          <EditorTab state={state} setState={setState} saveBudget={saveBudget} searchQuery={searchQuery} />
+          <EditorTab
+            state={state}
+            setState={setState}
+            saveBudget={saveBudget}
+            searchQuery={searchQuery}
+          />
         )}
       </div>
 
@@ -356,11 +793,11 @@ const handleMarkPaidFromNotification = (bucket, id) => {
         onImport={handleStatementImport}
       />
 
-      {/* Export Dialog */}
       {showExportDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96 shadow-xl">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto px-4 py-6">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl max-h-[calc(100vh-3rem)] overflow-y-auto">
             <h3 className="text-lg font-bold mb-4">Export Budget</h3>
+
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Filename
@@ -374,6 +811,7 @@ const handleMarkPaidFromNotification = (bucket, id) => {
               />
               <p className="text-xs text-gray-500 mt-1">.json will be added automatically</p>
             </div>
+
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowExportDialog(false)}
@@ -381,6 +819,7 @@ const handleMarkPaidFromNotification = (bucket, id) => {
               >
                 Cancel
               </button>
+
               <button
                 onClick={handleExportJSON}
                 className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"

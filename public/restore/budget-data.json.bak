@@ -3,10 +3,10 @@
         "income": [
             {
                 "id": "income-1763062072546-0",
-                "category": "CSC - Week 1",
-                "estBudget": 200,
+                "category": "Salary",
+                "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-07",
+                "dueDate": "",
                 "status": "pending",
                 "note": ""
             }
@@ -16,16 +16,11 @@
                 "id": "hou-4",
                 "category": "Spectrum Mobile",
                 "estBudget": 295.39999999999998,
-                "actualCost": 295.39999999999998,
-                "dueDate": "2025-11-08",
-                "status": "paid",
+                "actualCost": 0,
+                "dueDate": "2025-12-08",
+                "status": "pending",
                 "note": "CRITICAL - Need for job search",
-                "recurrence": "monthly",
-                "previousState": {
-                    "dueDate": "2025-11-08",
-                    "status": "pending",
-                    "actualCost": 295.39999999999998
-                }
+                "recurrence": "monthly"
             }
         ],
         "transportation": [
@@ -33,8 +28,8 @@
                 "id": "transportation-1759947905037",
                 "category": "Intergon Auto Ins",
                 "estBudget": 52,
-                "actualCost": 52,
-                "dueDate": "2025-11-14",
+                "actualCost": 0,
+                "dueDate": "2025-12-14",
                 "status": "pending",
                 "note": "CRITICAL - Legal requirement",
                 "recurrence": "monthly"
@@ -82,7 +77,7 @@
                 "category": "Uber One (Uber Eats)",
                 "estBudget": 9.9900000000000002,
                 "actualCost": 0,
-                "dueDate": "2025-11-14",
+                "dueDate": "2025-12-14",
                 "status": "pending",
                 "note": "",
                 "recurrence": "monthly"
@@ -137,9 +132,14 @@
                 "estBudget": 29.989999999999998,
                 "actualCost": 0,
                 "dueDate": "2025-11-20",
-                "status": "pending",
+                "status": "paid",
                 "note": "Essential - Job hunting tool",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "previousState": {
+                    "dueDate": "2025-11-20",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "hom-1",
@@ -147,19 +147,14 @@
                 "estBudget": 132.25,
                 "actualCost": 0,
                 "dueDate": "2025-11-20",
-                "status": "pending",
+                "status": "paid",
                 "note": "CRITICAL - Need for job search",
-                "recurrence": "monthly"
-            },
-            {
-                "id": "hom-1759152845540",
-                "category": "Claude AI",
-                "estBudget": 20,
-                "actualCost": 0,
-                "dueDate": "2025-11-23",
-                "status": "pending",
-                "note": "Essential - Budget management tool",
-                "recurrence": "monthly"
+                "recurrence": "monthly",
+                "previousState": {
+                    "dueDate": "2025-11-20",
+                    "status": "pending",
+                    "actualCost": 0
+                }
             },
             {
                 "id": "hom-5",
@@ -177,186 +172,147 @@
                 "id": "ban-3",
                 "category": "Wells Fargo Service Fee",
                 "estBudget": 25,
-                "actualCost": 25,
-                "dueDate": "2025-11-01",
-                "status": "paid",
+                "actualCost": 0,
+                "dueDate": "2025-12-02",
+                "status": "pending",
                 "note": "Monthly service fee",
                 "recurrence": "monthly",
                 "currentBalance": 0,
-                "availableCredit": 8.9000000000000004,
-                "previousState": {
-                    "dueDate": "2025-11-01",
-                    "status": "pending",
-                    "actualCost": 25
-                }
+                "availableCredit": 5
             },
             {
                 "id": "ban-1759153289481",
                 "category": "Credit One X5 (0162)",
-                "estBudget": 0,
+                "estBudget": 72,
                 "actualCost": 0,
-                "dueDate": "2025-11-03",
-                "status": "paid",
+                "dueDate": "2025-12-03",
+                "status": "pending",
                 "note": "UPDATE: Add current balance and actual minimum payment",
                 "recurrence": "monthly",
-                "currentBalance": 1394,
-                "availableCredit": 106,
-                "previousState": {
-                    "dueDate": "2025-11-03",
-                    "status": "pending",
-                    "actualCost": 0
-                }
+                "currentBalance": 1499.1099999999999,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153387192",
                 "category": "Avant (0456)",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-07",
-                "status": "paid",
+                "dueDate": "2025-12-07",
+                "status": "pending",
                 "note": "UPDATE: Add current balance and actual minimum payment",
                 "recurrence": "monthly",
-                "currentBalance": 445.86000000000001,
-                "availableCredit": 54,
-                "previousState": {
-                    "dueDate": "2025-11-07",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
-                "id": "banking-1760976003222",
-                "category": "US Bank (Primary) Service Fee",
-                "estBudget": 12,
-                "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "paid",
-                "recurrence": "monthly",
-                "availableCredit": 0.51000000000000001,
-                "note": "",
-                "currentBalance": 0,
-                "previousState": {
-                    "dueDate": "2025-11-08",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
-                "id": "ban-4",
-                "category": "US Bank (Joint) Service Fee",
-                "estBudget": 14.949999999999999,
-                "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "paid",
-                "note": "Monthly service fee",
-                "recurrence": "monthly",
-                "currentBalance": 0,
-                "availableCredit": 14.949999999999999,
-                "previousState": {
-                    "dueDate": "2025-11-08",
-                    "status": "pending",
-                    "actualCost": 0
-                }
+                "currentBalance": 499.00999999999999,
+                "availableCredit": 0
             },
             {
                 "id": "ban-1759153288748",
                 "category": "BMO",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-08",
-                "status": "paid",
+                "dueDate": "2025-12-08",
+                "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
                 "currentBalance": 0,
-                "availableCredit": 0,
-                "previousState": {
-                    "dueDate": "2025-11-08",
-                    "status": "pending",
-                    "actualCost": 0
-                }
+                "availableCredit": 0
+            },
+            {
+                "id": "ban-4",
+                "category": "US Bank (Joint - 3900)",
+                "estBudget": 14.949999999999999,
+                "actualCost": 0,
+                "dueDate": "2025-12-08",
+                "status": "pending",
+                "note": "Monthly service fee",
+                "recurrence": "monthly",
+                "currentBalance": 0,
+                "availableCredit": 11.17
+            },
+            {
+                "id": "banking-1760976003222",
+                "category": "US Bank (Primary - 6124)",
+                "estBudget": 12,
+                "actualCost": 0,
+                "dueDate": "2025-12-08",
+                "status": "pending",
+                "recurrence": "monthly",
+                "availableCredit": 20.359999999999999,
+                "note": "",
+                "currentBalance": 0
             },
             {
                 "id": "ban-1759153289735",
                 "category": "Capital One",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-09",
-                "status": "paid",
-                "note": "UPDATE: Add balance and minimum payment if applicable",
-                "recurrence": "monthly",
-                "currentBalance": 1956.8299999999999,
-                "availableCredit": 43.170000000000002,
-                "previousState": {
-                    "dueDate": "2025-11-09",
-                    "status": "pending",
-                    "actualCost": 0
-                }
-            },
-            {
-                "id": "banking-1759765816839",
-                "category": "Merrick Bank",
-                "estBudget": 35,
-                "actualCost": 0,
-                "dueDate": "2025-11-13",
+                "dueDate": "2025-12-09",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 424.24000000000001,
-                "availableCredit": 75
+                "currentBalance": 1956.8299999999999,
+                "availableCredit": 43.170000000000002
             },
             {
                 "id": "ban-1759153289933",
                 "category": "Milestone (Concora)",
-                "estBudget": 120,
+                "estBudget": 57,
                 "actualCost": 0,
-                "dueDate": "2025-11-13",
-                "status": "paid",
+                "dueDate": "2025-12-13",
+                "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 813.63999999999999,
-                "availableCredit": 0,
-                "previousState": {
-                    "dueDate": "2025-11-13",
-                    "status": "pending",
-                    "actualCost": 0
-                }
+                "currentBalance": 820.09000000000003,
+                "availableCredit": 0
             },
             {
-                "id": "banking-1760976965101",
+                "id": "banking-1764090848675",
                 "category": "Aspire (annual fee)",
                 "estBudget": 25,
                 "actualCost": 0,
-                "dueDate": "2025-11-21",
+                "dueDate": "2025-12-21",
                 "status": "pending",
                 "recurrence": "monthly",
-                "currentBalance": 248.56,
+                "currentBalance": 406.33999999999997,
                 "note": "",
                 "colorCleared": true,
-                "availableCredit": 134
+                "availableCredit": 0
+            },
+            {
+                "id": "banking-1759765816839",
+                "category": "Merrick Bank",
+                "estBudget": 58.240000000000002,
+                "actualCost": 0,
+                "dueDate": "2025-12-21",
+                "status": "paid",
+                "note": "UPDATE: Add balance and minimum payment if applicable",
+                "recurrence": "monthly",
+                "currentBalance": 480.17000000000002,
+                "availableCredit": 0,
+                "colorCleared": true
             },
             {
                 "id": "ban-1759153289207",
                 "category": "Credit One",
-                "estBudget": 64,
+                "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-22",
+                "dueDate": "2025-12-22",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 1269.7,
-                "availableCredit": 44
+                "currentBalance": 1234.6199999999999,
+                "availableCredit": 15
             },
             {
                 "id": "ban-1759153387588",
                 "category": "Petal",
                 "estBudget": 0,
                 "actualCost": 0,
-                "dueDate": "2025-11-25",
+                "dueDate": "2025-12-25",
                 "status": "pending",
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
-                "currentBalance": 282.25,
-                "availableCredit": 17.75
+                "currentBalance": 239.91,
+                "availableCredit": 60.090000000000003
             }
         ],
         "subscriptions": [
@@ -554,6 +510,18 @@
             "recurrence": "monthly",
             "originalBucket": "subscriptions",
             "archivedAt": "2025-11-05T20:29:55.043Z"
+        },
+        {
+            "id": "hom-1759152845540",
+            "category": "Claude AI",
+            "estBudget": 20,
+            "actualCost": 0,
+            "dueDate": "2025-11-23",
+            "status": "pending",
+            "note": "Essential - Budget management tool",
+            "recurrence": "monthly",
+            "originalBucket": "homeOffice",
+            "archivedAt": "2025-11-25T16:56:27.246Z"
         }
     ]
 }

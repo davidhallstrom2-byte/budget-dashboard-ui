@@ -38,6 +38,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showUrgentAlert, setShowUrgentAlert] = useState(true);
   const [viewMode, setViewMode] = useState('grouped'); // 'grouped' or 'flat'
+  const [showAllOverdue, setShowAllOverdue] = useState(false);
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
@@ -333,10 +334,6 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
 
   return (
     <PageContainer className="py-6">
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-200 rounded-xl px-6 py-4 mb-6">
-        <h2 className="text-2xl font-bold text-slate-800">Budget Dashboard</h2>
-      </div>
-
       {/* Urgent Payment Alert Modal */}
       {(() => {
         const urgentItems = [];
@@ -357,46 +354,66 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
         if (urgentItems.length === 0 || !showUrgentAlert) return null;
 
         return (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-lg shadow-2xl max-w-md w-full">
-              <div className="bg-red-600 px-6 py-4 rounded-t-lg">
-                <div className="flex items-center gap-3 text-white">
-                  <AlertCircle className="w-8 h-8 flex-shrink-0" />
-                  <h3 className="text-xl font-bold">URGENT PAYMENT ALERT</h3>
-                </div>
-              </div>
+  <div className="fixed inset-0 bg-black/50 z-50 flex justify-center items-start overflow-y-auto px-4 py-6">
+    
+    <div className="bg-white rounded-lg shadow-2xl w-full max-w-md max-h-[calc(100vh-3rem)] overflow-y-auto relative">
 
-              <div className="p-6">
-                <p className="text-red-900 font-semibold mb-4">
-                  {urgentItems.length} payment{urgentItems.length !== 1 ? 's' : ''} {urgentItems.some(i => i.daysUntil < 0) ? 'overdue or due today' : 'due today'}:
+      {/* Header */}
+      <div className="bg-red-600 px-6 py-4 sticky top-0 z-10">
+        <div className="flex items-center justify-between text-white">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-6 h-6 flex-shrink-0" />
+            <h3 className="text-lg font-bold">URGENT PAYMENT ALERT</h3>
+          </div>
+          <button
+            onClick={() => setShowUrgentAlert(false)}
+            className="px-2 py-1 bg-white text-red-600 rounded text-sm font-bold"
+          >
+            X
+          </button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="p-4 space-y-3">
+        <p className="text-red-900 font-semibold">
+          {urgentItems.length} payment{urgentItems.length !== 1 ? 's' : ''} {urgentItems.some(i => i.daysUntil < 0) ? 'overdue or due today' : 'due today'}:
+        </p>
+
+        {urgentItems.map(item => (
+          <div key={`${item.bucket}-${item.id}`} className="bg-red-50 border border-red-200 rounded p-3">
+            <div className="flex justify-between">
+              <div>
+                <p className="font-bold text-red-900">{item.category}</p>
+                <p className="text-sm text-red-700">
+                  {item.daysUntil === 0
+                    ? 'DUE TODAY'
+                    : item.daysUntil < 0
+                    ? `OVERDUE ${Math.abs(item.daysUntil)} day${Math.abs(item.daysUntil) !== 1 ? 's' : ''}`
+                    : `Due in ${item.daysUntil} day${item.daysUntil !== 1 ? 's' : ''}`}
                 </p>
-
-                <div className="space-y-3 mb-6">
-                  {urgentItems.map(item => (
-                    <div key={`${item.bucket}-${item.id}`} className="bg-red-50 border border-red-200 rounded p-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-bold text-red-900">{item.category}</p>
-                          <p className="text-sm text-red-700">
-                            {item.daysUntil === 0 ? '🔴 DUE TODAY' : item.daysUntil < 0 ? `⚠️ OVERDUE ${Math.abs(item.daysUntil)} day${Math.abs(item.daysUntil) !== 1 ? 's' : ''}` : `Due in ${item.daysUntil} day${item.daysUntil !== 1 ? 's' : ''}`}
-                          </p>
-                        </div>
-                        <p className="text-lg font-bold text-red-900">${(item.actualCost || item.estBudget || 0).toFixed(2)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  onClick={() => setShowUrgentAlert(false)}
-                  className="w-full px-4 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  I'm On It!
-                </button>
               </div>
+              <p className="font-bold text-red-900">
+                ${(item.actualCost || item.estBudget || 0).toFixed(2)}
+              </p>
             </div>
           </div>
-        );
+        ))}
+      </div>
+
+      {/* Footer */}
+      <div className="p-4 border-t">
+        <button
+          onClick={() => setShowUrgentAlert(false)}
+          className="w-full px-4 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700"
+        >
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+);
       })()}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -453,7 +470,7 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
           <div className="bg-white p-4">
             {alerts.overdue.length > 0 ? (
               <div className="space-y-2">
-                {alerts.overdue.slice(0, 5).map(item => (
+                {(showAllOverdue ? alerts.overdue : alerts.overdue.slice(0, 5)).map(item => (
                   <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center text-sm py-2 border-b border-gray-100 last:border-b-0">
                     <span className="text-gray-800 truncate font-medium">{item.category}</span>
                     <span className="text-gray-600 text-xs whitespace-nowrap">{item.dueDate}</span>
@@ -461,7 +478,16 @@ const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
                   </div>
                 ))}
                 {alerts.overdue.length > 5 && (
-                  <p className="text-xs text-gray-600 pt-2">+ {alerts.overdue.length - 5} more overdue items</p>
+  <button
+    type="button"
+    onClick={() => setShowAllOverdue(prev => !prev)}
+    className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+  >
+    {showAllOverdue
+      ? "Show fewer overdue items"
+      : `+ ${alerts.overdue.length - 5} more overdue items`}
+  </button>
+
                 )}
               </div>
             ) : (
