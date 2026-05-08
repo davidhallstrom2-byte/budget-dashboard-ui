@@ -39,4 +39,4 @@ if (-not (Test-Path ".\node_modules")) {
 
 # Launch browser and start Vite
 Start-Process $url
-npm.cmd run dev -- --host --port 4174
+npm.cmd run dev -- --host 127.0.0.1 --port 4174 --strictPort
