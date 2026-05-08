@@ -33,16 +33,10 @@ const DEFAULT_TITLES = {
   misc: 'Miscellaneous'
 };
 
-const DashboardTab = ({
-  state,
-  setState,
-  saveBudget,
-  searchQuery,
-  showUrgentAlert = false,
-  onCloseUrgentAlert = () => {},
-}) => {
+const DashboardTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [statusFilter, setStatusFilter] = useState('all');
+  const [showUrgentAlert, setShowUrgentAlert] = useState(true);
   const [viewMode, setViewMode] = useState('grouped'); // 'grouped' or 'flat'
   const [showAllOverdue, setShowAllOverdue] = useState(false);
 
@@ -372,7 +366,7 @@ const DashboardTab = ({
             <h3 className="text-lg font-bold">URGENT PAYMENT ALERT</h3>
           </div>
           <button
-            onClick={onCloseUrgentAlert}
+            onClick={() => setShowUrgentAlert(false)}
             className="px-2 py-1 bg-white text-red-600 rounded text-sm font-bold"
           >
             X
@@ -410,7 +404,7 @@ const DashboardTab = ({
       {/* Footer */}
       <div className="p-4 border-t">
         <button
-          onClick={onCloseUrgentAlert}
+          onClick={() => setShowUrgentAlert(false)}
           className="w-full px-4 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700"
         >
           Close

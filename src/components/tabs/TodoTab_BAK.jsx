@@ -861,8 +861,8 @@ const addParsedTasks = () => {
         <textarea
           value={value || ""}
           onChange={(event) => onChange(event.target.value)}
-          rows={1}
-          className="min-h-[38px] w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          rows={3}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
       );
     }
@@ -1216,8 +1216,8 @@ const addParsedTasks = () => {
                                   <textarea
                                     value={task.details || ""}
                                     onChange={(event) => updateTaskField(task.id, "details", event.target.value)}
-                                    rows={1}
-                                    className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm"
+                                    rows={2}
+                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                   />
                                 </td>
                                 <td className="align-top px-2 py-2">
@@ -1288,8 +1288,8 @@ const addParsedTasks = () => {
                                               <textarea
                                                 value={task[field] || ""}
                                                 onChange={(event) => updateTaskField(task.id, field, event.target.value)}
-                                                rows={1}
-                                                className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                rows={2}
+                                                className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
                                               />
                                             ) : (
                                               <input
