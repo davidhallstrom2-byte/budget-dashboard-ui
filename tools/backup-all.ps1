@@ -26,10 +26,11 @@ Write-Host ""
 
 # Required files that must exist and be committed for GitHub Actions/Linux builds
 $RequiredFiles = @(
-    "src\components\BudgetDashboard.jsx",
-    "src\components\todo\TodoListSection.jsx",
-    "src\components\tabs\TodoTab.jsx",
-    "src\components\tabs\DashboardTab.jsx"
+$RequiredGitFiles = @(
+    "src/components/BudgetDashboard.jsx",
+    "src/components/todo/TodoListSection.jsx",
+    "src/components/tabs/TodoTab.jsx",
+    "src/components/tabs/DashboardTab.jsx"
 )
 
 Write-Host "Checking required files..." -ForegroundColor Green
