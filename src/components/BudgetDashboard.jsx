@@ -205,6 +205,20 @@ const writeTodoTasks = (tasks) => {
   }
 };
 
+const writeTodoTasksExact = (tasks) => {
+  try {
+    const current = localStorage.getItem(TODO_STORAGE_KEY);
+
+    if (current) {
+      localStorage.setItem('todoTab.tasks.backup.v1', current);
+    }
+
+    localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(Array.isArray(tasks) ? tasks : []));
+  } catch (error) {
+    console.error('Failed to save exact to-do tasks:', error);
+  }
+};
+
 const parseDate = (value) => {
   if (!value) return null;
   const parsed = Date.parse(value);
@@ -707,14 +721,28 @@ const BudgetDashboard = () => {
   };
 
 
-  const handleArchiveTodoTask = (taskId) => {
-    const taskToArchive = todoTasks.find((task) => task.id === taskId);
+  const handleArchiveTodoTask = (taskOrId) => {
+    const taskId = typeof taskOrId === 'object' ? taskOrId?.id : taskOrId;
+    if (!taskId) return;
 
+    const taskToArchive = todoTasks.find((task) => task.id === taskId);
     if (!taskToArchive) return;
 
     const updatedArchivedTasks = appendArchivedTodoTask(taskToArchive);
+    const updatedTasks = todoTasks
+      .filter((task) => task.id !== taskId)
+      .map((task) => (task.blockedBy === taskId ? { ...task, blockedBy: '' } : task));
+
     setTodoArchivedTasks(updatedArchivedTasks);
-    handleTodoTasksChange(todoTasks.filter((task) => task.id !== taskId));
+    setTodoTasks(updatedTasks);
+    writeTodoTasksExact(updatedTasks);
+
+    try {
+      window.dispatchEvent(new Event('todoTasksChanged'));
+    } catch {
+      // Ignore event dispatch failures in non-browser contexts.
+    }
+
     setSaveStatus({ type: 'success', message: 'To-do task archived successfully!' });
     setTimeout(() => setSaveStatus(null), 3000);
   };

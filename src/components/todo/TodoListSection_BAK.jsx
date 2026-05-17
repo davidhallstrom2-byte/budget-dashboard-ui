@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Archive,
   AlertCircle,
@@ -648,13 +648,6 @@ export default function TodoListSection({
 }) {
   const [expandedTypes, setExpandedTypes] = useState({});
   const [statusFilter, setStatusFilter] = useState("all");
-  const [locallyArchivedTaskIds, setLocallyArchivedTaskIds] = useState([]);
-
-  useEffect(() => {
-    setLocallyArchivedTaskIds((current) =>
-      current.filter((taskId) => tasks.some((task) => task?.id === taskId))
-    );
-  }, [tasks]);
 
   const canToggle = typeof onToggle === "function";
   const canEdit = typeof onEdit === "function";
@@ -670,15 +663,13 @@ export default function TodoListSection({
 
   const filteredTasks = useMemo(() => {
     const normalizedQuery = String(searchQuery || "").trim().toLowerCase();
-    const locallyArchivedSet = new Set(locallyArchivedTaskIds);
 
     return sortedTasks.filter((task) => {
-      if (task?.id && locallyArchivedSet.has(task.id)) return false;
       if (statusFilter !== "all" && getTaskStatus(task, taskById) !== statusFilter) return false;
       if (normalizedQuery && !getTaskSearchText(task).includes(normalizedQuery)) return false;
       return true;
     });
-  }, [sortedTasks, statusFilter, taskById, searchQuery, locallyArchivedTaskIds]);
+  }, [sortedTasks, statusFilter, taskById, searchQuery]);
 
   const groupedTasks = useMemo(() => groupTasksByType(filteredTasks), [filteredTasks]);
 
@@ -687,15 +678,6 @@ export default function TodoListSection({
       ...current,
       [type]: !current[type],
     }));
-  };
-
-  const handleArchiveClick = (taskId) => {
-    if (!taskId || !canArchive) return;
-
-    setLocallyArchivedTaskIds((current) =>
-      current.includes(taskId) ? current : [...current, taskId]
-    );
-    onArchive(taskId);
   };
 
   const expandAll = () => {
@@ -1028,7 +1010,7 @@ export default function TodoListSection({
                                     {canArchive && task.completed && (
                                       <button
                                         type="button"
-                                        onClick={() => handleArchiveClick(task.id)}
+                                        onClick={() => onArchive(task.id)}
                                         className="inline-flex w-full items-center justify-center gap-1 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-200"
                                         title="Archive completed task"
                                       >
