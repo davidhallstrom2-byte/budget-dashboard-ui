@@ -28,6 +28,12 @@ import {
 const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
 const TODO_ARCHIVE_STORAGE_KEY = 'todoTab.tasks.archived.v1';
 
+const getTodoTaskType = (task = {}) => task.typeOverride || task.type || '';
+
+const isExplicitInsuranceOrDmvTask = (task = {}) => {
+  const type = getTodoTaskType(task);
+  return type === 'Insurance' || type === 'DMV / Vehicle';
+};
 
 const createTodoId = (prefix = 'task') => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -115,7 +121,7 @@ const normalizeTodoTaskList = (tasks = []) => {
   tasks.forEach((task) => {
     if (!task || typeof task !== 'object') return;
 
-    if (isCombinedInsuranceDmvTask(task)) {
+    if (!isExplicitInsuranceOrDmvTask(task) && isCombinedInsuranceDmvTask(task)) {
       const alreadyHasInsurance = tasks.some(
         (item) => item?.id !== task.id && item?.type === 'Insurance' && /auto insurance|insurance assignment/i.test(item?.taskName || '')
       );
@@ -141,9 +147,12 @@ const readTodoTasks = () => {
     const saved = localStorage.getItem(TODO_STORAGE_KEY);
     const parsed = saved ? JSON.parse(saved) : [];
     const baseTasks = Array.isArray(parsed) ? parsed : [];
-    const normalized = normalizeTodoTaskList(baseTasks);
+    const archivedTasks = readTodoArchivedTasks();
+    const archivedIds = new Set(archivedTasks.map((task) => task?.id).filter(Boolean));
+    const activeTasks = baseTasks.filter((task) => task?.id && !archivedIds.has(task.id));
+    const normalized = normalizeTodoTaskList(activeTasks);
 
-    if (normalized.changed) {
+    if (normalized.changed || activeTasks.length !== baseTasks.length) {
       localStorage.setItem('todoTab.tasks.backup.v1', JSON.stringify(baseTasks));
       localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(normalized.tasks));
     }
@@ -205,20 +214,6 @@ const writeTodoTasks = (tasks) => {
   }
 };
 
-const writeTodoTasksExact = (tasks) => {
-  try {
-    const current = localStorage.getItem(TODO_STORAGE_KEY);
-
-    if (current) {
-      localStorage.setItem('todoTab.tasks.backup.v1', current);
-    }
-
-    localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(Array.isArray(tasks) ? tasks : []));
-  } catch (error) {
-    console.error('Failed to save exact to-do tasks:', error);
-  }
-};
-
 const parseDate = (value) => {
   if (!value) return null;
   const parsed = Date.parse(value);
@@ -273,12 +268,6 @@ const getBudgetOverview = (state) => {
     return days !== null && days >= 0 && days <= 5;
   }).length;
 
-  const urgentPaymentItems = items.filter((item) => {
-    if (item.status === 'paid') return false;
-    const days = getDaysUntil(item.dueDate);
-    return days !== null && days <= 0;
-  }).length;
-
   const totalEstimated = items.reduce(
     (sum, item) => sum + Number(item.estimatedBudget || item.estimatedCost || 0),
     0
@@ -295,25 +284,10 @@ const getBudgetOverview = (state) => {
     pendingItems,
     overdueItems,
     dueSoonItems,
-    urgentPaymentItems,
     totalEstimated,
     totalActual,
     archivedItems: state?.archived?.length || 0,
   };
-};
-
-const getUrgentTodoTasks = (todoTasks = []) => {
-  return todoTasks
-    .filter((task) => {
-      if (!task || task.completed) return false;
-      const days = getDaysUntil(task.deadline || task.date);
-      return days !== null && days <= 0;
-    })
-    .map((task) => ({
-      ...task,
-      daysUntil: getDaysUntil(task.deadline || task.date),
-    }))
-    .sort((a, b) => (a.daysUntil ?? 0) - (b.daysUntil ?? 0));
 };
 
 const getTodoOverview = (todoTasks) => {
@@ -321,7 +295,6 @@ const getTodoOverview = (todoTasks) => {
   const completed = todoTasks.filter((task) => task.completed).length;
   const open = todoTasks.filter((task) => !task.completed).length;
   const blocked = todoTasks.filter((task) => task.blockedBy && !task.completed).length;
-  const urgentTasks = getUrgentTodoTasks(todoTasks);
 
   const overdue = todoTasks.filter((task) => {
     if (task.completed) return false;
@@ -342,7 +315,6 @@ const getTodoOverview = (todoTasks) => {
     blocked,
     overdue,
     dueSoon,
-    urgentTasks: urgentTasks.length,
   };
 };
 
@@ -351,17 +323,6 @@ const formatCurrency = (value) =>
     style: 'currency',
     currency: 'USD',
   }).format(Number(value || 0));
-
-const formatTodoDueText = (daysUntil) => {
-  if (daysUntil === null || daysUntil === undefined) return 'No deadline set';
-  if (daysUntil < 0) return `OVERDUE ${Math.abs(daysUntil)} day${Math.abs(daysUntil) === 1 ? '' : 's'}`;
-  if (daysUntil === 0) return 'DUE TODAY';
-  return `Due in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`;
-};
-
-const getTaskOwnerLabel = (task = {}) => task.ownerOverride || task.person || task.owner || task.assignedTo || '';
-
-const getTaskCategoryLabel = (task = {}) => task.typeOverride || task.type || task.category || 'General';
 
 const OverviewCard = ({ title, value, detail, icon: Icon, className }) => (
   <div className={`rounded-2xl border p-4 shadow-sm ${className}`}>
@@ -376,13 +337,7 @@ const OverviewCard = ({ title, value, detail, icon: Icon, className }) => (
   </div>
 );
 
-const DashboardOverviewStrip = ({
-  state,
-  todoTasks,
-  onNavigateToTab,
-  onOpenUrgentPayments,
-  onOpenUrgentTodos,
-}) => {
+const DashboardOverviewStrip = ({ state, todoTasks, onNavigateToTab }) => {
   const budget = useMemo(() => getBudgetOverview(state), [state]);
   const todo = useMemo(() => getTodoOverview(todoTasks), [todoTasks]);
 
@@ -399,53 +354,41 @@ const DashboardOverviewStrip = ({
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={() => {
-              if (budget.urgentPaymentItems > 0) {
-                onOpenUrgentPayments();
-                return;
-              }
-              onNavigateToTab('editor');
-            }}
-            title={budget.urgentPaymentItems > 0 ? 'View overdue and due today payments' : 'View budget items'}
+            onClick={() => onNavigateToTab('editor')}
+            title="View budget items"
             className="group relative flex items-center gap-2 rounded-full border border-blue-300 bg-blue-100 px-4 py-2 text-sm font-bold text-blue-800 shadow-sm transition-all hover:bg-blue-200 active:scale-95"
           >
             <BarChart3 className="h-4 w-4" />
             <span>{budget.totalItems} items</span>
 
-            {budget.urgentPaymentItems > 0 && (
+            {budget.overdueItems > 0 && (
               <span className="ml-1 rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
-                {budget.urgentPaymentItems}
+                {budget.overdueItems}
               </span>
             )}
 
             <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black px-2 py-1 text-xs text-white opacity-0 transition group-hover:opacity-100">
-              {budget.urgentPaymentItems > 0 ? 'View payment alerts' : 'View budget items'}
+              View budget items
             </span>
           </button>
 
           <button
             type="button"
-            onClick={() => {
-              if (todo.urgentTasks > 0) {
-                onOpenUrgentTodos();
-                return;
-              }
-              onNavigateToTab('todo');
-            }}
-            title={todo.urgentTasks > 0 ? 'View overdue and due today tasks' : 'View to-do list'}
+            onClick={() => onNavigateToTab('todo')}
+            title="View to-do list"
             className="group relative flex items-center gap-2 rounded-full border border-red-300 bg-red-100 px-4 py-2 text-sm font-bold text-red-800 shadow-sm transition-all hover:bg-red-200 active:scale-95"
           >
             <CheckSquare className="h-4 w-4" />
             <span>{todo.total} tasks</span>
 
-            {todo.urgentTasks > 0 && (
+            {todo.overdue > 0 && (
               <span className="ml-1 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
-                {todo.urgentTasks}
+                {todo.overdue}
               </span>
             )}
 
             <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black px-2 py-1 text-xs text-white opacity-0 transition group-hover:opacity-100">
-              {todo.urgentTasks > 0 ? 'View to-do alerts' : 'View to-do list'}
+              View to-do list
             </span>
           </button>
         </div>
@@ -518,90 +461,6 @@ const DashboardOverviewStrip = ({
   );
 };
 
-const UrgentTodoAlertModal = ({ tasks, isOpen, onClose, onEditTask }) => {
-  if (!isOpen || tasks.length === 0) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 px-4 py-6">
-      <div className="w-full max-w-xl overflow-hidden rounded-lg bg-white shadow-2xl">
-        <div className="flex items-center justify-between bg-red-600 px-6 py-4 text-white">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="h-7 w-7 flex-shrink-0" />
-            <h2 className="text-2xl font-extrabold">URGENT TO-DO ALERT</h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded bg-white px-3 py-1 text-2xl font-bold text-red-600 hover:bg-red-50"
-            aria-label="Close urgent to-do alert"
-          >
-            X
-          </button>
-        </div>
-
-        <div className="max-h-[75vh] overflow-y-auto p-6">
-          <p className="mb-4 text-lg font-bold text-red-900">
-            {tasks.length} task{tasks.length !== 1 ? 's' : ''} overdue or due today:
-          </p>
-
-          <div className="space-y-4">
-            {tasks.map((task) => {
-              const dueValue = task.deadline || task.date || '';
-              const ownerLabel = getTaskOwnerLabel(task);
-              const categoryLabel = getTaskCategoryLabel(task);
-              const detailLines = [
-                ownerLabel ? `For: ${ownerLabel}` : '',
-                categoryLabel ? `Category: ${categoryLabel}` : '',
-                dueValue ? `Due Date: ${dueValue}` : '',
-                task.phone ? `Phone: ${task.phone}` : '',
-                task.website ? `Website: ${task.website}` : '',
-                task.notes ? `Notes: ${task.notes}` : '',
-              ].filter(Boolean);
-
-              return (
-                <div key={task.id} className="rounded border border-red-200 bg-red-50 p-4 text-red-950">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="text-xl font-extrabold">{task.taskName || 'Untitled task'}</h3>
-                      <p className="mt-1 text-red-700">{formatTodoDueText(task.daysUntil)}</p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => onEditTask(task)}
-                      className="rounded border border-red-300 bg-white px-3 py-1 text-sm font-bold text-red-700 hover:bg-red-100"
-                    >
-                      Edit
-                    </button>
-                  </div>
-
-                  {detailLines.length > 0 && (
-                    <div className="mt-3 space-y-1 text-sm text-red-950">
-                      {detailLines.map((line, index) => (
-                        <p key={`${task.id}-detail-${index}`} className="whitespace-pre-wrap">
-                          {line}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="mt-6 w-full rounded bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const BudgetDashboard = () => {
   const [state, setState] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -617,8 +476,6 @@ const BudgetDashboard = () => {
   const [todoTasks, setTodoTasks] = useState(readTodoTasks);
   const [todoArchivedTasks, setTodoArchivedTasks] = useState(readTodoArchivedTasks);
   const [todoEditTaskId, setTodoEditTaskId] = useState('');
-  const [isUrgentPaymentAlertOpen, setIsUrgentPaymentAlertOpen] = useState(false);
-  const [isUrgentTodoAlertOpen, setIsUrgentTodoAlertOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -678,8 +535,6 @@ const BudgetDashboard = () => {
     }, {});
   }, [todoTasks]);
 
-  const urgentTodoTasks = useMemo(() => getUrgentTodoTasks(todoTasks), [todoTasks]);
-
   const handleTodoTasksChange = (nextTasks) => {
     const normalized = normalizeTodoTaskList(nextTasks);
     setTodoTasks(normalized.tasks);
@@ -721,26 +576,28 @@ const BudgetDashboard = () => {
   };
 
 
-  const handleArchiveTodoTask = (taskOrId) => {
-    const taskId = typeof taskOrId === 'object' ? taskOrId?.id : taskOrId;
-    if (!taskId) return;
-
+  const handleArchiveTodoTask = (taskId) => {
     const taskToArchive = todoTasks.find((task) => task.id === taskId);
+
     if (!taskToArchive) return;
 
     const updatedArchivedTasks = appendArchivedTodoTask(taskToArchive);
-    const updatedTasks = todoTasks
+    const nextTasks = todoTasks
       .filter((task) => task.id !== taskId)
       .map((task) => (task.blockedBy === taskId ? { ...task, blockedBy: '' } : task));
 
     setTodoArchivedTasks(updatedArchivedTasks);
-    setTodoTasks(updatedTasks);
-    writeTodoTasksExact(updatedTasks);
+    setTodoTasks(nextTasks);
 
     try {
+      const current = localStorage.getItem(TODO_STORAGE_KEY);
+      if (current) {
+        localStorage.setItem('todoTab.tasks.backup.v1', current);
+      }
+      localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(nextTasks));
       window.dispatchEvent(new Event('todoTasksChanged'));
-    } catch {
-      // Ignore event dispatch failures in non-browser contexts.
+    } catch (error) {
+      console.error('Failed to save archived to-do update:', error);
     }
 
     setSaveStatus({ type: 'success', message: 'To-do task archived successfully!' });
@@ -1123,8 +980,6 @@ const BudgetDashboard = () => {
                 state={state}
                 todoTasks={todoTasks}
                 onNavigateToTab={setActiveTab}
-                onOpenUrgentPayments={() => setIsUrgentPaymentAlertOpen(true)}
-                onOpenUrgentTodos={() => setIsUrgentTodoAlertOpen(true)}
               />
 
               <TodoListSection
@@ -1145,8 +1000,6 @@ const BudgetDashboard = () => {
               setState={setState}
               saveBudget={saveBudget}
               searchQuery={searchQuery}
-              showUrgentAlert={isUrgentPaymentAlertOpen}
-              onCloseUrgentAlert={() => setIsUrgentPaymentAlertOpen(false)}
             />
           </>
         )}
@@ -1185,16 +1038,6 @@ const BudgetDashboard = () => {
           />
         )}
       </div>
-
-      <UrgentTodoAlertModal
-        tasks={urgentTodoTasks}
-        isOpen={isUrgentTodoAlertOpen}
-        onClose={() => setIsUrgentTodoAlertOpen(false)}
-        onEditTask={(task) => {
-          setIsUrgentTodoAlertOpen(false);
-          handleEditTodoTask(task);
-        }}
-      />
 
       <ArchivedDrawer
         isOpen={isBudgetArchiveDrawerOpen}

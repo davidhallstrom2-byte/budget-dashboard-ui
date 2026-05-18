@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Archive,
   AlertCircle,
@@ -72,6 +72,7 @@ const DEFAULT_FIELD_LABELS = {
   questions: "Questions",
   outcome: "Outcome",
   notes: "Notes",
+  followUpNotes: "Follow-up Notes",
   fileName: "File Name",
   company: "Company",
   vehicle: "Vehicle",
@@ -121,6 +122,7 @@ const HIDDEN_DETAIL_FIELDS = new Set([
   "type",
   "blockedBy",
   "notes",
+  "followUpNotes",
   "typeOverride",
   "ownerOverride",
 ]);
@@ -158,6 +160,7 @@ const getDisplayTaskType = (task = {}) => {
     task.taskName,
     task.details,
     task.notes,
+    task.followUpNotes,
     task.organization,
     task.person,
     task.company,
@@ -298,6 +301,7 @@ const getTaskOwnerLabel = (task = {}) => {
     task.taskName,
     task.details,
     task.notes,
+    task.followUpNotes,
     task.person,
     task.organization,
     task.documents,
@@ -366,6 +370,15 @@ const buildTodoReportHtml = ({ tasks, taskById, typeFields, fieldLabels }) => {
             `
             : "";
 
+          const followUpNotesBlock = task.followUpNotes
+            ? `
+              <div class="notes-block">
+                <div class="notes-label">Follow-up Notes</div>
+                <div class="notes-value">${escapeHtml(task.followUpNotes).replaceAll("\n", "<br>")}</div>
+              </div>
+            `
+            : "";
+
           return `
             <article class="task-card">
               <div class="task-title-row">
@@ -382,6 +395,7 @@ const buildTodoReportHtml = ({ tasks, taskById, typeFields, fieldLabels }) => {
               ${details ? `<div class="task-details">${escapeHtml(details).replaceAll("\n", "<br>")}</div>` : ""}
               ${detailRows ? `<div class="field-list">${detailRows}</div>` : ""}
               ${notesBlock}
+              ${followUpNotesBlock}
             </article>
           `;
         })
@@ -648,13 +662,6 @@ export default function TodoListSection({
 }) {
   const [expandedTypes, setExpandedTypes] = useState({});
   const [statusFilter, setStatusFilter] = useState("all");
-  const [locallyArchivedTaskIds, setLocallyArchivedTaskIds] = useState([]);
-
-  useEffect(() => {
-    setLocallyArchivedTaskIds((current) =>
-      current.filter((taskId) => tasks.some((task) => task?.id === taskId))
-    );
-  }, [tasks]);
 
   const canToggle = typeof onToggle === "function";
   const canEdit = typeof onEdit === "function";
@@ -670,15 +677,13 @@ export default function TodoListSection({
 
   const filteredTasks = useMemo(() => {
     const normalizedQuery = String(searchQuery || "").trim().toLowerCase();
-    const locallyArchivedSet = new Set(locallyArchivedTaskIds);
 
     return sortedTasks.filter((task) => {
-      if (task?.id && locallyArchivedSet.has(task.id)) return false;
       if (statusFilter !== "all" && getTaskStatus(task, taskById) !== statusFilter) return false;
       if (normalizedQuery && !getTaskSearchText(task).includes(normalizedQuery)) return false;
       return true;
     });
-  }, [sortedTasks, statusFilter, taskById, searchQuery, locallyArchivedTaskIds]);
+  }, [sortedTasks, statusFilter, taskById, searchQuery]);
 
   const groupedTasks = useMemo(() => groupTasksByType(filteredTasks), [filteredTasks]);
 
@@ -687,15 +692,6 @@ export default function TodoListSection({
       ...current,
       [type]: !current[type],
     }));
-  };
-
-  const handleArchiveClick = (taskId) => {
-    if (!taskId || !canArchive) return;
-
-    setLocallyArchivedTaskIds((current) =>
-      current.includes(taskId) ? current : [...current, taskId]
-    );
-    onArchive(taskId);
   };
 
   const expandAll = () => {
@@ -1028,7 +1024,7 @@ export default function TodoListSection({
                                     {canArchive && task.completed && (
                                       <button
                                         type="button"
-                                        onClick={() => handleArchiveClick(task.id)}
+                                        onClick={() => onArchive(task.id)}
                                         className="inline-flex w-full items-center justify-center gap-1 rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-800 hover:bg-slate-200"
                                         title="Archive completed task"
                                       >
@@ -1078,6 +1074,22 @@ export default function TodoListSection({
                                       readOnly={!canUpdateField}
                                       rows={4}
                                       placeholder="Add notes..."
+                                      className="mt-1 block w-full resize-y rounded border border-gray-300 bg-white px-3 py-2 text-sm font-normal text-gray-900 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                                    />
+                                  </label>
+
+                                  <label className="mt-3 block text-xs font-semibold text-gray-700">
+                                    Follow-up Notes
+                                    <textarea
+                                      value={task.followUpNotes || ""}
+                                      onChange={(event) =>
+                                        canUpdateField
+                                          ? onUpdateField(task.id, "followUpNotes", event.target.value)
+                                          : noop()
+                                      }
+                                      readOnly={!canUpdateField}
+                                      rows={4}
+                                      placeholder="Add follow-up notes..."
                                       className="mt-1 block w-full resize-y rounded border border-gray-300 bg-white px-3 py-2 text-sm font-normal text-gray-900 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
                                     />
                                   </label>
