@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { X, RotateCcw, Trash2, Archive, ListTodo, WalletCards } from 'lucide-react';
 
 const ArchivedDrawer = ({
@@ -10,7 +10,8 @@ const ArchivedDrawer = ({
   archiveType = 'budget',
   title,
 }) => {
-  if (!isOpen) return null;
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('All');
 
   const isTodoArchive = archiveType === 'todo';
   const drawerTitle = title || (isTodoArchive ? 'To-Do Archives' : 'Budget Archives');
@@ -51,10 +52,51 @@ const ArchivedDrawer = ({
   };
 
   const getTodoType = (item) => item.typeOverride || item.type || 'General';
-
   const getTodoOwner = (item) => item.ownerOverride || item.person || '';
-
   const getTodoDate = (item) => item.deadline || item.date || item.effectiveDate || '';
+
+  const archiveCategories = useMemo(() => {
+    if (!isTodoArchive) return [];
+    return Array.from(new Set(archivedItems.map((item) => getTodoType(item)).filter(Boolean))).sort();
+  }, [archivedItems, isTodoArchive]);
+
+  const filteredArchivedItems = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return archivedItems.filter((item) => {
+      const categoryMatches = !isTodoArchive || categoryFilter === 'All' || getTodoType(item) === categoryFilter;
+      if (!categoryMatches) return false;
+      if (!query) return true;
+
+      const text = [
+        item.taskName,
+        item.title,
+        item.category,
+        item.item,
+        item.type,
+        item.typeOverride,
+        item.details,
+        item.notes,
+        item.followUpNotes,
+        item.person,
+        item.phone,
+        item.caseNumber,
+        item.archivedAt,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return text.includes(query);
+    });
+  }, [archivedItems, categoryFilter, isTodoArchive, searchQuery]);
+
+  if (!isOpen) return null;
+
+  const handleRestore = (id) => {
+    if (isTodoArchive && !window.confirm('Restore this archived task to the active To-Do list?')) return;
+    onRestore(id);
+  };
 
   const renderBudgetItem = (item) => (
     <div
@@ -73,18 +115,18 @@ const ArchivedDrawer = ({
 
         <div className="flex gap-1 ml-2">
           <button
-            onClick={() => onRestore(item.id)}
+            onClick={() => handleRestore(item.id)}
             className="p-2 text-green-600 hover:bg-green-100 rounded transition-colors"
-            title="Restore archived budget item"
-            aria-label="Restore archived budget item"
+            title="Restore item"
+            aria-label="Restore item"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDelete(item.id)}
             className="p-2 text-red-600 hover:bg-red-100 rounded transition-colors"
-            title="Delete archived item permanently"
-            aria-label="Delete archived item permanently"
+            title="Delete permanently"
+            aria-label="Delete permanently"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -162,18 +204,18 @@ const ArchivedDrawer = ({
 
         <div className="flex gap-1 ml-2">
           <button
-            onClick={() => onRestore(item.id)}
+            onClick={() => handleRestore(item.id)}
             className="p-2 text-green-600 hover:bg-green-100 rounded transition-colors"
-            title="Restore archived task"
-            aria-label="Restore archived task"
+            title="Restore task"
+            aria-label="Restore task"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDelete(item.id)}
             className="p-2 text-red-600 hover:bg-red-100 rounded transition-colors"
-            title="Delete archived item permanently"
-            aria-label="Delete archived item permanently"
+            title="Delete permanently"
+            aria-label="Delete permanently"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -209,6 +251,19 @@ const ArchivedDrawer = ({
         </div>
       )}
 
+      {item.followUpNotes && (
+        <div className="text-sm text-gray-600 mb-2">
+          <span className="font-medium">Follow-up Notes:</span>
+          <div className="mt-1 whitespace-pre-wrap text-gray-900">{item.followUpNotes}</div>
+        </div>
+      )}
+
+      {Array.isArray(item.activityLog) && item.activityLog.length > 0 && (
+        <div className="text-xs text-gray-600 mb-2 rounded border border-gray-200 bg-white p-2">
+          <span className="font-medium">Last activity:</span> {item.activityLog[0].action}
+        </div>
+      )}
+
       <div className="text-xs text-gray-500 border-t pt-2">
         Archived: {formatDate(item.archivedAt)}
       </div>
@@ -239,15 +294,46 @@ const ArchivedDrawer = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
+          <div className="mb-4 space-y-2">
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={isTodoArchive ? 'Search archived tasks...' : 'Search archived budget items...'}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              title="Search archived items"
+            />
+            {isTodoArchive && archiveCategories.length > 0 && (
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                title="Filter archive by category"
+              >
+                <option value="All">All categories</option>
+                {archiveCategories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           {archivedItems.length === 0 ? (
             <div className="text-center text-gray-500 mt-8">
               <Archive className="w-12 h-12 mx-auto mb-4 text-gray-300" />
               <p className="text-lg font-medium">No archived items</p>
               <p className="text-sm">Archived items will appear here</p>
             </div>
+          ) : filteredArchivedItems.length === 0 ? (
+            <div className="text-center text-gray-500 mt-8">
+              <Archive className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+              <p className="text-lg font-medium">No matching archived items</p>
+              <p className="text-sm">Try a different search or category filter</p>
+            </div>
           ) : (
             <div className="space-y-3">
-              {archivedItems.map((item) =>
+              {filteredArchivedItems.map((item) =>
                 isTodoArchive ? renderTodoItem(item) : renderBudgetItem(item)
               )}
             </div>
@@ -257,7 +343,7 @@ const ArchivedDrawer = ({
         {archivedItems.length > 0 && (
           <div className="bg-gray-50 p-4 border-t">
             <div className="text-sm text-gray-600 text-center">
-              {archivedItems.length} archived item{archivedItems.length !== 1 ? 's' : ''}
+              {filteredArchivedItems.length} of {archivedItems.length} archived item{archivedItems.length !== 1 ? 's' : ''}
             </div>
           </div>
         )}

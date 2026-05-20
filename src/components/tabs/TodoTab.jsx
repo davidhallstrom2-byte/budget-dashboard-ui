@@ -26,6 +26,8 @@ import {
   Trash2,
   Truck,
   X,
+  History,
+  PanelRightOpen,
 } from "lucide-react";
 import PageContainer from "../common/PageContainer";
 import PremiumTodoListView from "../todo/PremiumTodoListView";
@@ -34,6 +36,8 @@ import ArchivedDrawer from "../ui/ArchivedDrawer";
 const STORAGE_KEY = "todoTab.tasks.v1";
 const STORAGE_BACKUP_KEY = "todoTab.tasks.backup.v1";
 const ARCHIVE_STORAGE_KEY = "todoTab.tasks.archived.v1";
+const SAFETY_SNAPSHOT_STORAGE_KEY = "todoTab.tasks.safetySnapshots.v1";
+const MAX_SAFETY_SNAPSHOTS = 30;
 
 const TASK_TYPES = [
   "General",
@@ -156,6 +160,24 @@ const FIELD_LABEL_DISPLAY = {
   followUpNotes: "Follow-up Notes",
 };
 
+const normalizeType = (value = "") => {
+  const candidate = String(value || "").trim();
+  return TASK_TYPES.includes(candidate) ? candidate : "General";
+};
+
+const getFieldLabel = (task, field) => {
+  const taskType = normalizeType(task?.typeOverride || task?.type);
+
+  if (field === "caseNumber") {
+    if (taskType === "DMV / Vehicle") return "Citation #";
+    if (taskType === "DPSS / Benefits") return "Case #";
+    if (taskType === "Legal") return "Case #";
+    return "Case #";
+  }
+
+  return FIELD_LABEL_DISPLAY[field] || field;
+};
+
 const TYPE_FIELDS = {
   General: ["date", "deadline", "phone", "website", "documents", "questions", "outcome", "notes"],
   Medical: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
@@ -167,6 +189,18 @@ const TYPE_FIELDS = {
   Work: ["organization", "person", "phone", "website", "date", "deadline", "documents", "questions", "outcome", "notes"],
   Dental: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
   "Phone / Lifeline": ["person", "company", "phone", "website", "systemLink", "caseNumber", "deadline", "documents", "questions", "outcome", "notes"],
+};
+
+const REQUIRED_FIELDS_BY_TYPE = {
+  Medical: ["phone", "date"],
+  "DMV / Vehicle": ["plate", "vin", "deadline"],
+  Insurance: ["company", "phone", "effectiveDate"],
+  "DPSS / Benefits": ["caseNumber", "phone"],
+  Legal: ["caseNumber", "deadline", "phone"],
+  Moving: ["date", "address", "phone"],
+  Work: ["organization", "phone"],
+  Dental: ["phone", "date"],
+  "Phone / Lifeline": ["phone", "website"],
 };
 
 const MULTILINE_FIELDS = new Set(["details", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
@@ -181,6 +215,102 @@ const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => 
 
   return Math.max(minRows, Math.min(maxRows, estimatedRows));
 };
+
+const safeJsonParse = (value, fallback) => {
+  try {
+    const parsed = JSON.parse(value || "");
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const formatDateTime = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const readStoredSafetySnapshots = () => {
+  if (typeof localStorage === "undefined") return [];
+  const parsed = safeJsonParse(localStorage.getItem(SAFETY_SNAPSHOT_STORAGE_KEY), []);
+  return Array.isArray(parsed) ? parsed : [];
+};
+
+const writeSafetySnapshot = (action, activeTasks = [], archivedTasks = []) => {
+  if (typeof localStorage === "undefined") return;
+
+  const snapshot = {
+    id: createId(),
+    action,
+    createdAt: new Date().toISOString(),
+    activeTasks,
+    archivedTasks,
+  };
+
+  const nextSnapshots = [snapshot, ...readStoredSafetySnapshots()].slice(0, MAX_SAFETY_SNAPSHOTS);
+  localStorage.setItem(SAFETY_SNAPSHOT_STORAGE_KEY, JSON.stringify(nextSnapshots));
+};
+
+const addTaskHistory = (task = {}, action, detail = "") => {
+  const entry = {
+    id: createId(),
+    action,
+    detail,
+    createdAt: new Date().toISOString(),
+  };
+
+  const currentLog = Array.isArray(task.activityLog) ? task.activityLog : [];
+
+  return {
+    ...task,
+    updatedAt: entry.createdAt,
+    activityLog: [entry, ...currentLog].slice(0, 100),
+  };
+};
+
+const getFollowUpEntries = (task = {}) => (Array.isArray(task.followUpEntries) ? task.followUpEntries : []);
+
+const combineNotesIntoFollowUpEntries = (task = {}) => {
+  const notesText = String(task.notes || "").trim();
+
+  if (!notesText) {
+    return { ...task, notes: "" };
+  }
+
+  const existingEntries = getFollowUpEntries(task);
+  const alreadySaved = existingEntries.some((entry) => String(entry?.text || "").trim() === notesText);
+  const createdAt = task.updatedAt || task.createdAt || new Date().toISOString();
+
+  return {
+    ...task,
+    notes: "",
+    followUpEntries: alreadySaved
+      ? existingEntries
+      : [
+          {
+            id: `notes-${task.id || createId()}`,
+            text: notesText,
+            createdAt,
+            source: "notes",
+          },
+          ...existingEntries,
+        ],
+  };
+};
+
+const stampTask = (task = {}, action, detail = "") => {
+  const createdAt = task.createdAt || new Date().toISOString();
+  return addTaskHistory({ ...task, createdAt }, action, detail);
+};
+
 
 const createId = () => {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -492,11 +622,11 @@ const inferTaskType = (task) => {
 const normalizeTaskCategory = (task = {}) => {
   const correctedType = inferTaskType(task);
   const normalizedType = TASK_TYPES.includes(correctedType) ? correctedType : "General";
-  return {
+  return combineNotesIntoFollowUpEntries({
     ...task,
     type: normalizedType,
     typeOverride: TASK_TYPES.includes(task.typeOverride) ? task.typeOverride : task.typeOverride || "",
-  };
+  });
 };
 
 const normalizeDerivedFields = (task) => {
@@ -649,6 +779,9 @@ export default function TodoTab() {
   const [movingTaskId, setMovingTaskId] = useState(null);
   const [isArchiveDrawerOpen, setIsArchiveDrawerOpen] = useState(false);
   const [archivedTasks, setArchivedTasks] = useState(readStoredArchivedTasks);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [followUpDrafts, setFollowUpDrafts] = useState({});
+  const [editingFollowUpEntries, setEditingFollowUpEntries] = useState({});
 
   useEffect(() => {
     hasHydrated.current = true;
@@ -731,15 +864,19 @@ export default function TodoTab() {
   const saveTask = () => {
     if (!form.taskName.trim() && !form.details.trim()) return;
 
-    const taskToSave = normalizeDerivedFields({
-      ...form,
-      taskName: form.taskName.trim(),
-      details: form.details.trim(),
-      id: editingId || form.id || createId(),
-      typeOverride: form.typeOverride || form.type || "General",
-    });
+    const taskToSave = stampTask(
+      normalizeDerivedFields({
+        ...form,
+        taskName: form.taskName.trim(),
+        details: form.details.trim(),
+        id: editingId || form.id || createId(),
+        typeOverride: form.typeOverride || form.type || "General",
+      }),
+      editingId ? "Task edited" : "Task created"
+    );
 
     if (editingId) {
+      writeSafetySnapshot("Before task edit", tasks, archivedTasks);
       setTasks((current) => current.map((task) => (task.id === editingId ? taskToSave : task)));
     } else {
       setTasks((current) => normalizeInsuranceDmvTasks(applyAutoLinks([taskToSave], current)).tasks);
@@ -766,11 +903,18 @@ export default function TodoTab() {
 const addParsedTasks = () => {
   if (!parsedTasks.length) return;
 
-  const newTasks = parsedTasks.map((task) => ({
-    ...task,
-    id: crypto.randomUUID(),
-    completed: false,
-  }));
+  writeSafetySnapshot("Before bulk import", tasks, archivedTasks);
+
+  const newTasks = parsedTasks.map((task) =>
+    stampTask(
+      {
+        ...task,
+        id: createId(),
+        completed: false,
+      },
+      "Task imported"
+    )
+  );
 
   setTasks((current) => {
     const updated = applyAutoLinks(newTasks, current);
@@ -790,6 +934,9 @@ const addParsedTasks = () => {
   };
 
   const deleteTask = (id) => {
+    if (!window.confirm("Delete this task? A safety snapshot will be saved first.")) return;
+
+    writeSafetySnapshot("Before task delete", tasks, archivedTasks);
     setTasks((current) =>
       current
         .filter((task) => task.id !== id)
@@ -798,24 +945,52 @@ const addParsedTasks = () => {
   };
 
   const toggleTask = (id) => {
-    setTasks((current) => current.map((task) => (task.id === id ? { ...task, completed: !task.completed } : task)));
+    setTasks((current) =>
+      current.map((task) => {
+        if (task.id !== id) return task;
+        const nextCompleted = !task.completed;
+        return addTaskHistory(
+          {
+            ...task,
+            completed: nextCompleted,
+            completedAt: nextCompleted ? new Date().toISOString() : "",
+          },
+          nextCompleted ? "Marked done" : "Reopened"
+        );
+      })
+    );
   };
 
   const updateTaskField = (id, field, value) => {
-    setTasks((current) => current.map((task) => (task.id === id ? { ...task, [field]: value } : task)));
-  };
-
-  const moveTaskToCategory = (id, nextType) => {
-    if (!TASK_TYPES.includes(nextType)) return;
-
     setTasks((current) =>
       current.map((task) =>
         task.id === id
           ? {
               ...task,
-              type: nextType,
-              typeOverride: nextType,
+              [field]: value,
+              updatedAt: new Date().toISOString(),
             }
+          : task
+      )
+    );
+  };
+
+  const moveTaskToCategory = (id, nextType) => {
+    if (!TASK_TYPES.includes(nextType)) return;
+
+    writeSafetySnapshot("Before category move", tasks, archivedTasks);
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === id
+          ? addTaskHistory(
+              {
+                ...task,
+                type: nextType,
+                typeOverride: nextType,
+              },
+              "Category changed",
+              `Moved from ${task.type || "General"} to ${nextType}`
+            )
           : task
       )
     );
@@ -833,13 +1008,17 @@ const addParsedTasks = () => {
   };
 
   const duplicateTask = (task) => {
-    const copy = {
-      ...task,
-      id: createId(),
-      taskName: `${task.taskName || "Task"} Copy`,
-      completed: false,
-      completedAt: "",
-    };
+    const copy = stampTask(
+      {
+        ...task,
+        id: createId(),
+        taskName: `${task.taskName || "Task"} Copy`,
+        completed: false,
+        completedAt: "",
+      },
+      "Task copied",
+      `Copied from ${task.taskName || "task"}`
+    );
     setTasks((current) => normalizeInsuranceDmvTasks([...current, copy]).tasks);
   };
 
@@ -848,10 +1027,15 @@ const addParsedTasks = () => {
 
     setTasks((current) => {
       const taskToArchive = current.find((item) => item.id === task.id) || task;
-      const archivedTask = {
-        ...taskToArchive,
-        archivedAt: new Date().toISOString(),
-      };
+      writeSafetySnapshot("Before task archive", current, archivedTasks);
+
+      const archivedTask = addTaskHistory(
+        {
+          ...taskToArchive,
+          archivedAt: new Date().toISOString(),
+        },
+        "Archived"
+      );
 
       let nextArchived = [archivedTask];
 
@@ -893,11 +1077,16 @@ const addParsedTasks = () => {
     if (!archivedTask) return;
 
     const { archivedAt, archived, ...restoredTask } = archivedTask;
-    const normalizedRestoredTask = normalizeTaskCategory({
-      ...restoredTask,
-      completed: false,
-      status: "Pending",
-    });
+    writeSafetySnapshot("Before archive restore", tasks, archivedTasks);
+
+    const normalizedRestoredTask = addTaskHistory(
+      normalizeTaskCategory({
+        ...restoredTask,
+        completed: false,
+        status: "Pending",
+      }),
+      "Restored from archive"
+    );
     const nextArchived = archivedTasks.filter((item) => item?.id !== id);
 
     setArchivedTasks(nextArchived);
@@ -909,6 +1098,7 @@ const addParsedTasks = () => {
   const deleteArchivedTask = (id) => {
     if (!window.confirm("Permanently delete this archived task?")) return;
 
+    writeSafetySnapshot("Before archived task delete", tasks, archivedTasks);
     const nextArchived = archivedTasks.filter((item) => item?.id !== id);
     setArchivedTasks(nextArchived);
     writeStoredArchivedTasks(nextArchived);
@@ -916,18 +1106,119 @@ const addParsedTasks = () => {
   };
 
   const clearTask = (id) => {
+    writeSafetySnapshot("Before task clear", tasks, archivedTasks);
     setTasks((current) =>
       current.map((task) =>
         task.id === id
-          ? {
-              ...task,
-              completed: false,
-              completedAt: "",
-              blockedBy: "",
-            }
+          ? addTaskHistory(
+              {
+                ...task,
+                completed: false,
+                completedAt: "",
+                blockedBy: "",
+              },
+              "Task cleared"
+            )
           : task
       )
     );
+  };
+
+  const addFollowUpEntry = (id) => {
+    const text = String(followUpDrafts[id] || "").trim();
+    if (!text) return;
+
+    setTasks((current) =>
+      current.map((task) => {
+        if (task.id !== id) return task;
+
+        const entry = {
+          id: createId(),
+          createdAt: new Date().toISOString(),
+          text,
+        };
+
+        return addTaskHistory(
+          {
+            ...task,
+            followUpEntries: [entry, ...getFollowUpEntries(task)],
+          },
+          "Follow-up entry added",
+          text
+        );
+      })
+    );
+
+    setFollowUpDrafts((current) => ({ ...current, [id]: "" }));
+  };
+
+
+  const startEditingFollowUpEntry = (taskId, entry) => {
+    setEditingFollowUpEntries((current) => ({
+      ...current,
+      [`${taskId}:${entry.id}`]: entry.text || "",
+    }));
+  };
+
+  const cancelEditingFollowUpEntry = (taskId, entryId) => {
+    setEditingFollowUpEntries((current) => {
+      const next = { ...current };
+      delete next[`${taskId}:${entryId}`];
+      return next;
+    });
+  };
+
+  const saveFollowUpEntry = (taskId, entryId) => {
+    const editKey = `${taskId}:${entryId}`;
+    const nextText = String(editingFollowUpEntries[editKey] || "").trim();
+    if (!nextText) return;
+
+    setTasks((current) =>
+      current.map((task) => {
+        if (task.id !== taskId) return task;
+
+        const nextEntries = getFollowUpEntries(task).map((entry) =>
+          entry.id === entryId
+            ? {
+                ...entry,
+                text: nextText,
+                updatedAt: new Date().toISOString(),
+              }
+            : entry
+        );
+
+        return addTaskHistory(
+          {
+            ...task,
+            followUpEntries: nextEntries,
+          },
+          "Follow-up entry edited",
+          nextText
+        );
+      })
+    );
+
+    cancelEditingFollowUpEntry(taskId, entryId);
+  };
+
+  const deleteFollowUpEntry = (taskId, entryId) => {
+    if (!window.confirm("Remove this follow-up entry?")) return;
+
+    setTasks((current) =>
+      current.map((task) => {
+        if (task.id !== taskId) return task;
+
+        return addTaskHistory(
+          {
+            ...task,
+            followUpEntries: getFollowUpEntries(task).filter((entry) => entry.id !== entryId),
+          },
+          "Follow-up entry removed"
+        );
+      })
+    );
+
+    cancelEditingFollowUpEntry(taskId, entryId);
   };
 
   const toggleCategory = (type) => {
@@ -1053,6 +1344,8 @@ const addParsedTasks = () => {
       return categoryTasks.some((task) => !task.completed);
     });
   }, [showActiveOnly, tasksByType]);
+
+  const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) || null, [selectedTaskId, tasks]);
 
   const exportText = useMemo(() => {
     return sortTasks(tasks)
@@ -1224,6 +1517,18 @@ const addParsedTasks = () => {
             <button
               type="button"
               onClick={() => {
+                writeSafetySnapshot("Manual safety snapshot", tasks, archivedTasks);
+                alert("Safety snapshot saved.");
+              }}
+              title="Save a manual safety snapshot of active and archived To-Do tasks"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800"
+            >
+              <History size={16} />
+              Safety Snapshot
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setArchivedTasks(readStoredArchivedTasks());
                 setIsArchiveDrawerOpen(true);
               }}
@@ -1391,7 +1696,7 @@ const addParsedTasks = () => {
                           </td>
                         </tr>
                       ) : (
-                        categoryTasks.map((task) => {
+                        categoryTasks.map((task, taskIndex) => {
                           const blocker = task.blockedBy ? taskById[task.blockedBy] : null;
                           const isBlocked = Boolean(blocker && !blocker.completed);
                           const controls = controlledByMap[task.id] || [];
@@ -1421,8 +1726,9 @@ const addParsedTasks = () => {
                             (field) => task[field] && !hiddenDetailFields.has(field)
                           );
 
+                          const followUpEntries = getFollowUpEntries(task);
                           const hasDetailFields = true;
-                          const mainRowDividerClass = "border-b border-slate-200";
+                          const mainRowDividerClass = taskIndex > 0 ? "border-t-4 border-black" : "";
 
                           return (
                             <React.Fragment key={task.id}>
@@ -1528,6 +1834,15 @@ const addParsedTasks = () => {
                                     </button>
                                     <button
                                       type="button"
+                                      onClick={() => setSelectedTaskId(task.id)}
+                                      className="inline-flex items-center justify-center rounded bg-cyan-700 px-2 py-1 text-white hover:bg-cyan-800"
+                                      aria-label="Open task detail drawer"
+                                      title="Open task detail drawer"
+                                    >
+                                      <PanelRightOpen className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      type="button"
                                       onClick={() => editTask(task)}
                                       className="inline-flex items-center justify-center rounded bg-slate-700 px-2 py-1 text-white hover:bg-slate-800"
                                       aria-label="Edit task"
@@ -1557,14 +1872,14 @@ const addParsedTasks = () => {
                               </tr>
 
                               {hasDetailFields && (
-                                <tr className={`${getTaskDetailRowClass(task, isBlocked)} border-b-2 border-black`}>
+                                <tr className={`${getTaskDetailRowClass(task, isBlocked)} border-b border-slate-200`}>
                                   <td></td>
                                   <td colSpan={5} className="px-2 pb-3">
                                     {fieldsToShow.length > 0 && (
                                       <div className="grid gap-2 md:grid-cols-3">
                                         {fieldsToShow.map((field) => (
                                           <label key={field} className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                            {FIELD_LABEL_DISPLAY[field] || field}
+                                            {getFieldLabel(task, field)}
                                             <div className="mt-1">
                                               {MULTILINE_FIELDS.has(field) ? (
                                                 <textarea
@@ -1586,27 +1901,108 @@ const addParsedTasks = () => {
                                       </div>
                                     )}
 
-                                    <div className="mt-2 grid gap-2 md:grid-cols-2">
-                                      <label className="block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                        Notes
+                                    <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
+                                      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Notes</div>
+                                      <div className="flex gap-2">
                                         <textarea
-                                          value={task.notes || ""}
-                                          onChange={(event) => updateTaskField(task.id, "notes", event.target.value)}
-                                          rows={getTextareaRows(task.notes, 2, 12, 80)}
-                                          className="mt-1 min-h-[54px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                          value={followUpDrafts[task.id] || ""}
+                                          onChange={(event) => setFollowUpDrafts((current) => ({ ...current, [task.id]: event.target.value }))}
+                                          rows={2}
+                                          placeholder="Add a follow-up note..."
+                                          className="min-h-[44px] flex-1 resize-y rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
                                         />
-                                      </label>
+                                        <button
+                                          type="button"
+                                          onClick={() => addFollowUpEntry(task.id)}
+                                          className="self-start rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                                          title="Add follow-up entry"
+                                        >
+                                          Add Note
+                                        </button>
+                                      </div>
 
-                                      <label className="block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                        Follow-up Notes
-                                        <textarea
-                                          value={task.followUpNotes || ""}
-                                          onChange={(event) => updateTaskField(task.id, "followUpNotes", event.target.value)}
-                                          rows={getTextareaRows(task.followUpNotes, 2, 12, 80)}
-                                          className="mt-1 min-h-[54px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                        />
-                                      </label>
+                                      {followUpEntries.length > 0 && (
+                                        <div className="mt-3 space-y-2">
+                                          {followUpEntries.slice(0, 10).map((entry) => {
+                                            const editKey = `${task.id}:${entry.id}`;
+                                            const isEditingEntry = Object.prototype.hasOwnProperty.call(editingFollowUpEntries, editKey);
+
+                                            return (
+                                              <div key={entry.id} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                                                <div className="flex items-start justify-between gap-3">
+                                                  <div>
+                                                    <div className="text-xs font-bold text-slate-500">{formatDateTime(entry.createdAt)}</div>
+                                                    {entry.updatedAt && (
+                                                      <div className="text-[11px] font-semibold text-slate-400">Edited {formatDateTime(entry.updatedAt)}</div>
+                                                    )}
+                                                  </div>
+                                                  <div className="flex shrink-0 items-center gap-2">
+                                                    {isEditingEntry ? (
+                                                      <>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => saveFollowUpEntry(task.id, entry.id)}
+                                                          className="rounded bg-green-600 px-2 py-1 text-xs font-bold text-white hover:bg-green-700"
+                                                          title="Save follow-up entry"
+                                                        >
+                                                          Save
+                                                        </button>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => cancelEditingFollowUpEntry(task.id, entry.id)}
+                                                          className="rounded bg-slate-500 px-2 py-1 text-xs font-bold text-white hover:bg-slate-600"
+                                                          title="Cancel editing follow-up entry"
+                                                        >
+                                                          Cancel
+                                                        </button>
+                                                      </>
+                                                    ) : (
+                                                      <>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => startEditingFollowUpEntry(task.id, entry)}
+                                                          className="rounded bg-slate-800 p-1.5 text-white hover:bg-slate-700"
+                                                          title="Edit follow-up entry"
+                                                          aria-label="Edit follow-up entry"
+                                                        >
+                                                          <Edit2 className="h-4 w-4" />
+                                                        </button>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => deleteFollowUpEntry(task.id, entry.id)}
+                                                          className="rounded bg-red-600 p-1.5 text-white hover:bg-red-700"
+                                                          title="Remove follow-up entry"
+                                                          aria-label="Remove follow-up entry"
+                                                        >
+                                                          <Trash2 className="h-4 w-4" />
+                                                        </button>
+                                                      </>
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                {isEditingEntry ? (
+                                                  <textarea
+                                                    value={editingFollowUpEntries[editKey] || ""}
+                                                    onChange={(event) =>
+                                                      setEditingFollowUpEntries((current) => ({
+                                                        ...current,
+                                                        [editKey]: event.target.value,
+                                                      }))
+                                                    }
+                                                    rows={getTextareaRows(editingFollowUpEntries[editKey], 2, 10, 80)}
+                                                    className="mt-2 min-h-[54px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                                                  />
+                                                ) : (
+                                                  <div className="mt-1 whitespace-pre-wrap text-slate-900">{entry.text}</div>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
                                     </div>
+
                                   </td>
                                 </tr>
                               )}
@@ -1659,7 +2055,7 @@ const addParsedTasks = () => {
                         <div className="font-semibold">{task.taskName}</div>
                         <div className="text-slate-600">Type: {task.type}</div>
                         {task.deadline && <div className="text-slate-600">Deadline: {task.deadline}</div>}
-                        {task.caseNumber && <div className="text-slate-600">Case / Citation #: {task.caseNumber}</div>}
+                        {task.caseNumber && <div className="text-slate-600">{getFieldLabel(task, "caseNumber")}: {task.caseNumber}</div>}
                         {task.phone && <div className="text-slate-600">Phone: {task.phone}</div>}
                       </div>
                     ))}
@@ -1713,7 +2109,7 @@ const addParsedTasks = () => {
 
                 {visibleFormFields.map((field) => (
                   <label key={field} className="text-sm font-medium">
-                    {FIELD_LABEL_DISPLAY[field] || field}
+                    {getFieldLabel(form, field)}
                     <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
                   </label>
                 ))}
@@ -1730,7 +2126,7 @@ const addParsedTasks = () => {
                     .filter((field) => !visibleFormFields.includes(field))
                     .map((field) => (
                       <label key={field} className="text-sm font-medium">
-                        {FIELD_LABEL_DISPLAY[field] || field}
+                        {getFieldLabel(form, field)}
                         <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
                       </label>
                     ))}
@@ -1773,6 +2169,80 @@ const addParsedTasks = () => {
               </div>
 
               <textarea readOnly value={exportText} rows={18} className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 font-mono text-sm text-slate-800 shadow-inner" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedTask && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 backdrop-blur-sm">
+          <div className="flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Task Details</h3>
+                <p className="text-sm font-semibold text-slate-600">{selectedTask.taskName || "Untitled task"}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedTaskId(null)} title="Close task detail drawer" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-sm font-semibold md:col-span-2">
+                  Task name
+                  <input value={selectedTask.taskName || ""} onChange={(event) => updateTaskField(selectedTask.id, "taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </label>
+                <label className="text-sm font-semibold">
+                  Category
+                  <select value={selectedTask.type || "General"} onChange={(event) => moveTaskToCategory(selectedTask.id, event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    {TASK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                </label>
+                <label className="text-sm font-semibold">
+                  Due Date
+                  <input value={selectedTask.deadline || selectedTask.date || ""} onChange={(event) => updateTaskField(selectedTask.id, selectedTask.deadline !== undefined ? "deadline" : "date", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </label>
+                <label className="text-sm font-semibold md:col-span-2">
+                  Details
+                  <textarea value={selectedTask.details || ""} onChange={(event) => updateTaskField(selectedTask.id, "details", event.target.value)} rows={getTextareaRows(selectedTask.details, 3, 12, 90)} className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </label>
+
+                {Array.from(new Set([...(TYPE_FIELDS[selectedTask.type] || []), ...Object.keys(DEFAULT_FORM).filter((field) => selectedTask[field])]))
+                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
+                  .map((field) => (
+                    <label key={field} className="text-sm font-semibold">
+                      {getFieldLabel(selectedTask, field)}
+                      <div className="mt-1">
+                        {MULTILINE_FIELDS.has(field) ? (
+                          <textarea value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                        ) : (
+                          <input value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                        )}
+                      </div>
+                    </label>
+                  ))}
+              </div>
+
+              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h4 className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-wide text-slate-700">
+                  <History className="h-4 w-4" />
+                  Activity History
+                </h4>
+                {Array.isArray(selectedTask.activityLog) && selectedTask.activityLog.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedTask.activityLog.slice(0, 20).map((entry) => (
+                      <div key={entry.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                        <div className="font-bold text-slate-900">{entry.action}</div>
+                        <div className="text-xs text-slate-500">{formatDateTime(entry.createdAt)}</div>
+                        {entry.detail && <div className="mt-1 whitespace-pre-wrap text-slate-700">{entry.detail}</div>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-600">No activity history yet.</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
