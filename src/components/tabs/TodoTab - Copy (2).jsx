@@ -29,7 +29,6 @@ import {
 } from "lucide-react";
 import PageContainer from "../common/PageContainer";
 import PremiumTodoListView from "../todo/PremiumTodoListView";
-import ArchivedDrawer from "../ui/ArchivedDrawer";
 
 const STORAGE_KEY = "todoTab.tasks.v1";
 const STORAGE_BACKUP_KEY = "todoTab.tasks.backup.v1";
@@ -321,25 +320,6 @@ const readStoredTasks = () => {
     return normalizedBackup.tasks;
   } catch {
     return [];
-  }
-};
-
-
-const readStoredArchivedTasks = () => {
-  try {
-    const saved = localStorage.getItem(ARCHIVE_STORAGE_KEY);
-    const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const writeStoredArchivedTasks = (items) => {
-  try {
-    localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(Array.isArray(items) ? items : []));
-  } catch {
-    // Keep the UI responsive if browser storage is unavailable.
   }
 };
 
@@ -647,8 +627,6 @@ export default function TodoTab() {
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [showActiveOnly, setShowActiveOnly] = useState(true);
   const [movingTaskId, setMovingTaskId] = useState(null);
-  const [isArchiveDrawerOpen, setIsArchiveDrawerOpen] = useState(false);
-  const [archivedTasks, setArchivedTasks] = useState(readStoredArchivedTasks);
 
   useEffect(() => {
     hasHydrated.current = true;
@@ -672,18 +650,6 @@ export default function TodoTab() {
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeInsuranceDmvTasks(tasks).tasks));
   }, [tasks]);
-
-  useEffect(() => {
-    const refreshArchivedTasks = () => setArchivedTasks(readStoredArchivedTasks());
-
-    window.addEventListener("todoTasksChanged", refreshArchivedTasks);
-    window.addEventListener("storage", refreshArchivedTasks);
-
-    return () => {
-      window.removeEventListener("todoTasksChanged", refreshArchivedTasks);
-      window.removeEventListener("storage", refreshArchivedTasks);
-    };
-  }, []);
 
   const taskById = useMemo(() => {
     return tasks.reduce((map, task) => {
@@ -865,8 +831,6 @@ const addParsedTasks = () => {
         localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(nextArchived));
       }
 
-      setArchivedTasks(nextArchived);
-
       const nextTasks = current
         .filter((item) => item.id !== task.id)
         .map((item) => (item.blockedBy === task.id ? { ...item, blockedBy: "" } : item));
@@ -886,33 +850,6 @@ const addParsedTasks = () => {
     });
 
     setMovingTaskId(null);
-  };
-
-  const restoreArchivedTask = (id) => {
-    const archivedTask = archivedTasks.find((item) => item?.id === id);
-    if (!archivedTask) return;
-
-    const { archivedAt, archived, ...restoredTask } = archivedTask;
-    const normalizedRestoredTask = normalizeTaskCategory({
-      ...restoredTask,
-      completed: false,
-      status: "Pending",
-    });
-    const nextArchived = archivedTasks.filter((item) => item?.id !== id);
-
-    setArchivedTasks(nextArchived);
-    writeStoredArchivedTasks(nextArchived);
-    setTasks((current) => normalizeInsuranceDmvTasks([normalizedRestoredTask, ...current.filter((item) => item?.id !== id)]).tasks);
-    window.dispatchEvent(new Event("todoTasksChanged"));
-  };
-
-  const deleteArchivedTask = (id) => {
-    if (!window.confirm("Permanently delete this archived task?")) return;
-
-    const nextArchived = archivedTasks.filter((item) => item?.id !== id);
-    setArchivedTasks(nextArchived);
-    writeStoredArchivedTasks(nextArchived);
-    window.dispatchEvent(new Event("todoTasksChanged"));
   };
 
   const clearTask = (id) => {
@@ -1221,20 +1158,6 @@ const addParsedTasks = () => {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-2xl font-bold text-slate-900">Manage Categories & Tasks</h3>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setArchivedTasks(readStoredArchivedTasks());
-                setIsArchiveDrawerOpen(true);
-              }}
-              title={`Open archive drawer with ${archivedTasks.length} archived task${archivedTasks.length === 1 ? "" : "s"}`}
-              aria-label={`Open archive drawer with ${archivedTasks.length} archived task${archivedTasks.length === 1 ? "" : "s"}`}
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-violet-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-violet-800"
-            >
-              <Archive size={16} />
-              Archive Drawer
-              <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-black">{archivedTasks.length}</span>
-            </button>
             <button
               type="button"
               onClick={() => setShowActiveOnly((current) => !current)}
@@ -1777,16 +1700,6 @@ const addParsedTasks = () => {
           </div>
         </div>
       )}
-
-      <ArchivedDrawer
-        isOpen={isArchiveDrawerOpen}
-        onClose={() => setIsArchiveDrawerOpen(false)}
-        archivedItems={archivedTasks}
-        onRestore={restoreArchivedTask}
-        onDelete={deleteArchivedTask}
-        archiveType="todo"
-        title="To-Do Archives"
-      />
 
       {showPremiumTodoView && <PremiumTodoListView tasks={tasks} onClose={() => setShowPremiumTodoView(false)} />}
     </PageContainer>

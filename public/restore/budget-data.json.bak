@@ -312,7 +312,7 @@
                 "note": "UPDATE: Add balance and minimum payment if applicable",
                 "recurrence": "monthly",
                 "currentBalance": 239.91,
-                "availableCredit": 60.090000000000003
+                "availableCredit": 13.17
             }
         ],
         "subscriptions": [

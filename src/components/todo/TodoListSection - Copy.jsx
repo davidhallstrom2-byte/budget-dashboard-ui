@@ -779,7 +779,6 @@ export default function TodoListSection({
               key={filter.id}
               type="button"
               onClick={() => setStatusFilter(filter.id)}
-              title={`Show ${filter.label.toLowerCase()} tasks`}
               className={getFilterButtonClass(statusFilter === filter.id, filter.color, filter.color)}
             >
               {filter.label}
@@ -842,7 +841,6 @@ export default function TodoListSection({
                   type="button"
                   onClick={() => toggleType(type)}
                   className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
-                  title={expanded ? `Collapse ${type} tasks` : `Expand ${type} tasks`}
                 >
                   <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                     {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -1017,7 +1015,6 @@ export default function TodoListSection({
                                         type="button"
                                         onClick={() => onToggle(task.id)}
                                         className="inline-flex w-full items-center justify-center gap-1 rounded border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-800 hover:bg-green-100"
-                                        title={task.completed ? "Reopen task" : "Mark task done"}
                                       >
                                         <CheckCircle2 className="w-3 h-3" />
                                         {task.completed ? "Reopen" : "Done"}
@@ -1041,7 +1038,6 @@ export default function TodoListSection({
                                         type="button"
                                         onClick={() => onEdit(task)}
                                         className="inline-flex w-full items-center justify-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100"
-                                        title="Edit task"
                                       >
                                         <Edit3 className="w-3 h-3" />
                                         Edit
@@ -1053,7 +1049,6 @@ export default function TodoListSection({
                                         type="button"
                                         onClick={() => onDelete(task.id)}
                                         className="inline-flex w-full items-center justify-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-800 hover:bg-red-100"
-                                        title="Delete task"
                                       >
                                         <Trash2 className="w-3 h-3" />
                                         Delete

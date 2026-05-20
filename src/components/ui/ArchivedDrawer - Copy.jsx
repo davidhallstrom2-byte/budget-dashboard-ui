@@ -75,16 +75,14 @@ const ArchivedDrawer = ({
           <button
             onClick={() => onRestore(item.id)}
             className="p-2 text-green-600 hover:bg-green-100 rounded transition-colors"
-            title="Restore archived budget item"
-            aria-label="Restore archived budget item"
+            title="Restore Item"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDelete(item.id)}
             className="p-2 text-red-600 hover:bg-red-100 rounded transition-colors"
-            title="Delete archived item permanently"
-            aria-label="Delete archived item permanently"
+            title="Delete Permanently"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -164,16 +162,14 @@ const ArchivedDrawer = ({
           <button
             onClick={() => onRestore(item.id)}
             className="p-2 text-green-600 hover:bg-green-100 rounded transition-colors"
-            title="Restore archived task"
-            aria-label="Restore archived task"
+            title="Restore Task"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDelete(item.id)}
             className="p-2 text-red-600 hover:bg-red-100 rounded transition-colors"
-            title="Delete archived item permanently"
-            aria-label="Delete archived item permanently"
+            title="Delete Permanently"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -232,7 +228,6 @@ const ArchivedDrawer = ({
             onClick={onClose}
             className="text-white hover:text-purple-200 transition-colors"
             title="Close archive drawer"
-            aria-label="Close archive drawer"
           >
             <X className="w-6 h-6" />
           </button>
