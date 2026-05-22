@@ -873,6 +873,8 @@ const getGoogleCalendarUrl = (shift) => {
     dates: `${startDateTime}/${finishDateTime}`,
     location: [shift.venue, shift.address, shift.city].filter(Boolean).join(', '),
     details,
+    ctz: 'America/Los_Angeles',
+    color: '#F4B400',
   });
 
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
@@ -903,6 +905,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [selectedDetailShiftId, setSelectedDetailShiftId] = useState(null);
   const [movingShiftId, setMovingShiftId] = useState(null);
   const [expandedNoteIds, setExpandedNoteIds] = useState(() => new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   useEffect(() => {
     try {
@@ -1129,29 +1132,53 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
   const handleDeleteArchivedShift = (id) => {
     const shift = archivedShifts.find((item) => item.id === id);
-    const label = shift?.jobName || shift?.event || 'this shift';
-
-    if (!window.confirm(`Permanently delete ${label}?`)) return;
-
-    writeCscSafetySnapshot('Before archived CSC shift delete', shifts, archivedShifts);
-    setArchivedShifts((currentArchived) => currentArchived.filter((item) => item.id !== id));
-    if (selectedDetailShiftId === id) {
-      setSelectedDetailShiftId(null);
-    }
-    setSaveMessage('Archived CSC shift permanently deleted.');
-    setTimeout(() => setSaveMessage(''), 2500);
+    setDeleteConfirm({
+      id,
+      type: 'archived',
+      title: 'Delete archived shift?',
+      label: shift?.jobName || shift?.event || shift?.venue || 'this shift',
+      message: 'This will permanently delete the archived CSC shift. This cannot be undone unless you restore from a backup.',
+    });
   };
 
   const handleDeleteShift = (id) => {
     const shift = shifts.find((item) => item.id === id);
-    const label = shift?.jobName || shift?.event || 'this shift';
+    setDeleteConfirm({
+      id,
+      type: 'active',
+      title: 'Delete shift?',
+      label: shift?.jobName || shift?.event || shift?.venue || 'this shift',
+      message: 'This will remove the CSC shift from your active schedule. This cannot be undone unless you restore from a backup.',
+    });
+  };
 
-    if (!window.confirm(`Delete ${label}?`)) return;
+  const cancelDeleteShift = () => {
+    setDeleteConfirm(null);
+  };
+
+  const confirmDeleteShift = () => {
+    if (!deleteConfirm) return;
+
+    if (deleteConfirm.type === 'archived') {
+      writeCscSafetySnapshot('Before archived CSC shift delete', shifts, archivedShifts);
+      setArchivedShifts((currentArchived) => currentArchived.filter((item) => item.id !== deleteConfirm.id));
+      if (selectedDetailShiftId === deleteConfirm.id) {
+        setSelectedDetailShiftId(null);
+      }
+      setSaveMessage('Archived CSC shift permanently deleted.');
+      setTimeout(() => setSaveMessage(''), 2500);
+      setDeleteConfirm(null);
+      return;
+    }
 
     writeCscSafetySnapshot('Before CSC shift delete', shifts, archivedShifts);
-    setShifts((currentShifts) => currentShifts.filter((item) => item.id !== id));
+    setShifts((currentShifts) => currentShifts.filter((item) => item.id !== deleteConfirm.id));
+    if (selectedDetailShiftId === deleteConfirm.id) {
+      setSelectedDetailShiftId(null);
+    }
     setSaveMessage('CSC shift deleted.');
     setTimeout(() => setSaveMessage(''), 2500);
+    setDeleteConfirm(null);
   };
 
   const handleTogglePremiumView = () => {
@@ -2161,6 +2188,52 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </div>
         </section>
       </div>
+
+        {deleteConfirm && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 px-4 py-6">
+            <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-black text-slate-950">{deleteConfirm.title}</h3>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Are you sure you want to delete <span className="font-bold text-slate-900">{deleteConfirm.label}</span>?
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={cancelDeleteShift}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  aria-label="Close delete confirmation"
+                  title="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <p className="mt-4 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800">
+                {deleteConfirm.message}
+              </p>
+
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={cancelDeleteShift}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteShift}
+                  className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-red-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Yes, delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showPremiumOverlay && (
           <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/70 px-4 py-6 print:static print:overflow-visible print:bg-white print:p-0">
