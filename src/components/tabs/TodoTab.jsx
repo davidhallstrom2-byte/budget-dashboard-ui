@@ -39,6 +39,108 @@ const ARCHIVE_STORAGE_KEY = "todoTab.tasks.archived.v1";
 const SAFETY_SNAPSHOT_STORAGE_KEY = "todoTab.tasks.safetySnapshots.v1";
 const MAX_SAFETY_SNAPSHOTS = 30;
 
+const CONTACTS_STORAGE_KEY = "todoTab.contacts.v1";
+
+const DEFAULT_CONTACTS = [
+  {
+    id: "contact-dpss",
+    name: "DPSS",
+    category: "DPSS / Benefits",
+    phone: "(866) 613-3777",
+    website: "https://benefitscal.com",
+    organization: "DPSS",
+    notes: "Benefits, GR, CalFresh, Medi-Cal case support.",
+  },
+  {
+    id: "contact-dmv",
+    name: "California DMV",
+    category: "DMV / Vehicle",
+    phone: "1-800-777-0133",
+    website: "https://www.dmv.ca.gov/",
+    organization: "California DMV",
+    notes: "Driver license, registration, address changes, vehicle issues.",
+  },
+  {
+    id: "contact-usps",
+    name: "USPS",
+    category: "Moving",
+    phone: "1-800-275-8777",
+    website: "https://www.usps.com/manage/forward.htm",
+    organization: "USPS",
+    notes: "Mail forwarding and change of address.",
+  },
+  {
+    id: "contact-spectrum",
+    name: "Spectrum",
+    category: "Phone / Lifeline",
+    phone: "1-833-267-6094",
+    website: "https://www.spectrum.net/",
+    organization: "Spectrum",
+    notes: "Internet, cable, service change, billing, downgrade, transfer.",
+  },
+  {
+    id: "contact-health-net",
+    name: "Health Net",
+    category: "Medical",
+    phone: "1-800-675-6110",
+    website: "https://www.healthnet.com/",
+    organization: "Health Net",
+    notes: "Medi-Cal plan support and member services.",
+  },
+  {
+    id: "contact-dr-taylor",
+    name: "Dr. Taylor",
+    category: "Medical",
+    phone: "(626) 459-5420",
+    address: "11436 Garvey Ave, Ste B, El Monte, CA 91732",
+    organization: "Mayflower Medical Group",
+    person: "Dr. Taylor",
+    notes: "Primary care.",
+  },
+  {
+    id: "contact-dr-ananyan",
+    name: "Dr. Ananyan",
+    category: "Medical",
+    phone: "323-264-6157",
+    address: "3616 E 1st St, Los Angeles, CA 90063",
+    organization: "Podiatry",
+    person: "Dr. Ananyan",
+    notes: "Podiatry.",
+  },
+  {
+    id: "contact-custodio-dubey",
+    name: "Custodio & Dubey",
+    category: "Legal",
+    phone: "213-593-9095",
+    organization: "Custodio & Dubey",
+    person: "Keshav Nair / Maria Saavedra",
+    notes: "Attorney contact.",
+  },
+  {
+    id: "contact-211-la",
+    name: "211 LA",
+    category: "Moving",
+    phone: "211",
+    website: "https://211la.org/",
+    organization: "211 LA",
+    notes: "Moving assistance and local support resources.",
+  },
+];
+
+const EMPTY_CONTACT_FORM = {
+  id: "",
+  name: "",
+  category: "General",
+  phone: "",
+  directPhone: "",
+  website: "",
+  address: "",
+  organization: "",
+  company: "",
+  person: "",
+  notes: "",
+};
+
 const TASK_TYPES = [
   "General",
   "Medical",
@@ -236,6 +338,68 @@ const formatDateTime = (value) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+
+const normalizeContact = (contact = {}) => ({
+  ...EMPTY_CONTACT_FORM,
+  ...contact,
+  id: contact.id || createId(),
+  name: String(contact.name || contact.organization || contact.company || contact.person || "Untitled contact").trim(),
+  category: TASK_TYPES.includes(contact.category) ? contact.category : "General",
+});
+
+const readStoredContacts = () => {
+  if (typeof localStorage === "undefined") return DEFAULT_CONTACTS.map(normalizeContact);
+
+  const parsed = safeJsonParse(localStorage.getItem(CONTACTS_STORAGE_KEY), null);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    const defaults = DEFAULT_CONTACTS.map(normalizeContact);
+    localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(defaults));
+    return defaults;
+  }
+
+  return parsed.map(normalizeContact);
+};
+
+const writeStoredContacts = (contacts = []) => {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts.map(normalizeContact)));
+};
+
+const createEmptyContact = () => ({
+  ...EMPTY_CONTACT_FORM,
+  id: createId(),
+});
+
+const CONTACT_APPLY_FIELDS = [
+  "phone",
+  "address",
+  "website",
+  "organization",
+  "company",
+  "person",
+];
+
+const applyContactToTaskData = (task = {}, contact = {}, replaceExisting = false) => {
+  const next = { ...task };
+
+  if (TASK_TYPES.includes(contact.category) && (replaceExisting || !next.type || next.type === "General")) {
+    next.type = contact.category;
+    next.typeOverride = contact.category;
+  }
+
+  CONTACT_APPLY_FIELDS.forEach((field) => {
+    if (contact[field] && (replaceExisting || !String(next[field] || "").trim())) {
+      next[field] = contact[field];
+    }
+  });
+
+  if (contact.directPhone && (replaceExisting || !String(next.phone || "").trim())) {
+    next.phone = contact.directPhone;
+  }
+
+  return normalizeDerivedFields(next);
 };
 
 const readStoredSafetySnapshots = () => {
@@ -782,6 +946,13 @@ export default function TodoTab() {
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [followUpDrafts, setFollowUpDrafts] = useState({});
   const [editingFollowUpEntries, setEditingFollowUpEntries] = useState({});
+  const [contacts, setContacts] = useState(readStoredContacts);
+  const [isContactsOpen, setIsContactsOpen] = useState(false);
+  const [contactSearch, setContactSearch] = useState("");
+  const [contactForm, setContactForm] = useState(createEmptyContact);
+  const [editingContactId, setEditingContactId] = useState(null);
+  const [replaceExistingContactFields, setReplaceExistingContactFields] = useState(false);
+  const [contactApplyTarget, setContactApplyTarget] = useState("form");
 
   useEffect(() => {
     hasHydrated.current = true;
@@ -817,6 +988,10 @@ export default function TodoTab() {
       window.removeEventListener("storage", refreshArchivedTasks);
     };
   }, []);
+
+  useEffect(() => {
+    writeStoredContacts(contacts);
+  }, [contacts]);
 
   const taskById = useMemo(() => {
     return tasks.reduce((map, task) => {
@@ -974,6 +1149,131 @@ const addParsedTasks = () => {
       )
     );
   };
+
+  const openContactManager = (target = "form") => {
+    setContactApplyTarget(target);
+    setContactForm(createEmptyContact());
+    setEditingContactId(null);
+    setIsContactsOpen(true);
+  };
+
+  const applyContactToForm = (contact) => {
+    if (!contact) return;
+    setForm((current) => applyContactToTaskData(current, contact, replaceExistingContactFields));
+  };
+
+  const applyContactToSelectedTask = (contact) => {
+    if (!contact || !selectedTaskId) return;
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === selectedTaskId
+          ? addTaskHistory(
+              applyContactToTaskData(task, contact, replaceExistingContactFields),
+              "Contact applied",
+              contact.name
+            )
+          : task
+      )
+    );
+  };
+
+  const applyContactToTarget = (contact) => {
+    if (contactApplyTarget === "selectedTask" && selectedTaskId) {
+      applyContactToSelectedTask(contact);
+      return;
+    }
+
+    applyContactToForm(contact);
+  };
+
+  const saveContact = () => {
+    const cleanName = contactForm.name.trim();
+    if (!cleanName) return;
+
+    const contactToSave = normalizeContact({
+      ...contactForm,
+      name: cleanName,
+      updatedAt: new Date().toISOString(),
+      createdAt: contactForm.createdAt || new Date().toISOString(),
+    });
+
+    setContacts((current) => {
+      if (editingContactId) {
+        return current.map((contact) => (contact.id === editingContactId ? contactToSave : contact));
+      }
+
+      return [contactToSave, ...current];
+    });
+
+    setContactForm(createEmptyContact());
+    setEditingContactId(null);
+  };
+
+  const editContact = (contact) => {
+    setContactForm(normalizeContact(contact));
+    setEditingContactId(contact.id);
+  };
+
+  const deleteContact = (id) => {
+    if (!window.confirm("Delete this saved contact?")) return;
+
+    setContacts((current) => current.filter((contact) => contact.id !== id));
+    if (editingContactId === id) {
+      setContactForm(createEmptyContact());
+      setEditingContactId(null);
+    }
+  };
+
+  const resetContactForm = () => {
+    setContactForm(createEmptyContact());
+    setEditingContactId(null);
+  };
+
+  const renderContactPicker = (target = "form") => (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-black text-slate-900">Contact Picker</div>
+        <button
+          type="button"
+          onClick={() => openContactManager(target)}
+          title="Add, edit, delete, search, and use saved contacts"
+          className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+        >
+          Manage Contacts
+        </button>
+      </div>
+      <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+        <select
+          value=""
+          onChange={(event) => {
+            const contact = contacts.find((item) => item.id === event.target.value);
+            if (contact) {
+              target === "selectedTask" ? applyContactToSelectedTask(contact) : applyContactToForm(contact);
+            }
+          }}
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+        >
+          <option value="">Select saved contact...</option>
+          {contacts.map((contact) => (
+            <option key={contact.id} value={contact.id}>
+              {contact.name}{contact.category ? ` - ${contact.category}` : ""}
+            </option>
+          ))}
+        </select>
+        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+          <input
+            type="checkbox"
+            checked={replaceExistingContactFields}
+            onChange={(event) => setReplaceExistingContactFields(event.target.checked)}
+          />
+          Replace filled fields
+        </label>
+      </div>
+      <div className="mt-2 text-xs font-semibold text-slate-500">
+        By default, saved contacts fill empty fields only.
+      </div>
+    </div>
+  );
 
   const moveTaskToCategory = (id, nextType) => {
     if (!TASK_TYPES.includes(nextType)) return;
@@ -1347,6 +1647,31 @@ const addParsedTasks = () => {
 
   const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) || null, [selectedTaskId, tasks]);
 
+
+  const filteredContacts = useMemo(() => {
+    const query = contactSearch.trim().toLowerCase();
+    if (!query) return contacts;
+
+    return contacts.filter((contact) =>
+      [
+        contact.name,
+        contact.category,
+        contact.phone,
+        contact.directPhone,
+        contact.website,
+        contact.address,
+        contact.organization,
+        contact.company,
+        contact.person,
+        contact.notes,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [contactSearch, contacts]);
+
   const exportText = useMemo(() => {
     return sortTasks(tasks)
       .map((task) => {
@@ -1402,21 +1727,6 @@ const addParsedTasks = () => {
             >
               <FileText className="h-4 w-4" />
               Import
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setForm(createEmptyTask());
-                setEditingId(null);
-                setShowAdvanced(false);
-                setIsCreateOpen(true);
-              }}
-              title="Add task"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-            >
-              <Plus className="h-4 w-4" />
-              Add Task
             </button>
 
             <button
@@ -2020,7 +2330,7 @@ const addParsedTasks = () => {
       </section>
 
       {isImportOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/50 px-4 py-4 backdrop-blur-sm sm:px-6">
           <div className="flex h-full w-full max-w-3xl flex-col bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
               <div>
@@ -2068,7 +2378,7 @@ const addParsedTasks = () => {
       )}
 
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/50 px-4 py-4 backdrop-blur-sm sm:px-6">
           <div id="todo-create-task" className="flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
               <div>
@@ -2082,6 +2392,8 @@ const addParsedTasks = () => {
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <div className="grid gap-3 md:grid-cols-2">
+                {renderContactPicker("form")}
+
                 <label className="text-sm font-medium md:col-span-2">
                   Task name
                   <input value={form.taskName} onChange={(event) => updateForm("taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -2143,7 +2455,7 @@ const addParsedTasks = () => {
       )}
 
       {isExportOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/50 px-4 py-4 backdrop-blur-sm sm:px-6">
           <div className="flex h-full w-full max-w-3xl flex-col bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
               <div>
@@ -2175,7 +2487,7 @@ const addParsedTasks = () => {
       )}
 
       {selectedTask && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/50 px-4 py-4 backdrop-blur-sm sm:px-6">
           <div className="flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
               <div>
@@ -2189,6 +2501,8 @@ const addParsedTasks = () => {
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <div className="grid gap-3 md:grid-cols-2">
+                {renderContactPicker("selectedTask")}
+
                 <label className="text-sm font-semibold md:col-span-2">
                   Task name
                   <input value={selectedTask.taskName || ""} onChange={(event) => updateTaskField(selectedTask.id, "taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -2242,6 +2556,227 @@ const addParsedTasks = () => {
                 ) : (
                   <div className="text-sm text-slate-600">No activity history yet.</div>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isContactsOpen && (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/50 px-4 py-4 backdrop-blur-sm sm:px-6">
+          <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Manage Contacts</h3>
+                <p className="text-sm font-semibold text-slate-600">Add, edit, delete, search, and use saved contacts.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsContactsOpen(false)}
+                title="Close contacts"
+                className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[340px_1fr]">
+              <div className="overflow-y-auto border-r border-slate-200 px-4 py-5">
+                <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">
+                  {contactApplyTarget === "selectedTask" && selectedTask
+                    ? `Use applies to: ${selectedTask.taskName || "selected task"}`
+                    : "Use applies to the Add Task form."}
+                </div>
+
+                <div className="grid gap-3">
+                  <label className="text-sm font-bold text-slate-800">
+                    Name
+                    <input
+                      value={contactForm.name}
+                      onChange={(event) => setContactForm((current) => ({ ...current, name: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Category
+                    <select
+                      value={contactForm.category}
+                      onChange={(event) => setContactForm((current) => ({ ...current, category: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    >
+                      {TASK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Phone
+                    <input
+                      value={contactForm.phone}
+                      onChange={(event) => setContactForm((current) => ({ ...current, phone: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Direct Phone
+                    <input
+                      value={contactForm.directPhone}
+                      onChange={(event) => setContactForm((current) => ({ ...current, directPhone: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Website
+                    <input
+                      value={contactForm.website}
+                      onChange={(event) => setContactForm((current) => ({ ...current, website: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Address
+                    <textarea
+                      value={contactForm.address}
+                      onChange={(event) => setContactForm((current) => ({ ...current, address: event.target.value }))}
+                      rows={getTextareaRows(contactForm.address, 2, 6)}
+                      className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Organization
+                    <input
+                      value={contactForm.organization}
+                      onChange={(event) => setContactForm((current) => ({ ...current, organization: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Company
+                    <input
+                      value={contactForm.company}
+                      onChange={(event) => setContactForm((current) => ({ ...current, company: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Person
+                    <input
+                      value={contactForm.person}
+                      onChange={(event) => setContactForm((current) => ({ ...current, person: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="text-sm font-bold text-slate-800">
+                    Notes
+                    <textarea
+                      value={contactForm.notes}
+                      onChange={(event) => setContactForm((current) => ({ ...current, notes: event.target.value }))}
+                      rows={getTextareaRows(contactForm.notes, 2, 8)}
+                      className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={saveContact}
+                    title={editingContactId ? "Save contact changes" : "Add saved contact"}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+                  >
+                    {editingContactId ? "Save Contact" : "Add Contact"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetContactForm}
+                    title="Clear contact form"
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-col overflow-hidden px-4 py-5">
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <input
+                    value={contactSearch}
+                    onChange={(event) => setContactSearch(event.target.value)}
+                    placeholder="Search contacts..."
+                    className="min-w-[240px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={replaceExistingContactFields}
+                      onChange={(event) => setReplaceExistingContactFields(event.target.checked)}
+                    />
+                    Replace filled fields when using
+                  </label>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-slate-200">
+                  {filteredContacts.length ? (
+                    <div className="divide-y divide-slate-200">
+                      {filteredContacts.map((contact) => (
+                        <div key={contact.id} className="bg-white p-4 hover:bg-slate-50">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-base font-black text-slate-900">{contact.name}</div>
+                              <div className="mt-1 text-xs font-black uppercase tracking-wide text-slate-500">{contact.category}</div>
+                              <div className="mt-2 grid gap-1 text-sm text-slate-700 md:grid-cols-2">
+                                {contact.phone && <div><span className="font-bold">Phone:</span> {contact.phone}</div>}
+                                {contact.directPhone && <div><span className="font-bold">Direct:</span> {contact.directPhone}</div>}
+                                {contact.website && <div className="truncate"><span className="font-bold">Website:</span> {contact.website}</div>}
+                                {contact.organization && <div><span className="font-bold">Organization:</span> {contact.organization}</div>}
+                                {contact.company && <div><span className="font-bold">Company:</span> {contact.company}</div>}
+                                {contact.person && <div><span className="font-bold">Person:</span> {contact.person}</div>}
+                                {contact.address && <div className="whitespace-pre-wrap md:col-span-2"><span className="font-bold">Address:</span> {contact.address}</div>}
+                                {contact.notes && <div className="whitespace-pre-wrap md:col-span-2"><span className="font-bold">Notes:</span> {contact.notes}</div>}
+                              </div>
+                            </div>
+
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => applyContactToTarget(contact)}
+                                title="Use this contact"
+                                className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
+                              >
+                                Use
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => editContact(contact)}
+                                title="Edit this contact"
+                                className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-900"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteContact(contact.id)}
+                                title="Delete this contact"
+                                className="rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white hover:bg-red-700"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-6 text-sm font-semibold text-slate-600">No contacts found.</div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

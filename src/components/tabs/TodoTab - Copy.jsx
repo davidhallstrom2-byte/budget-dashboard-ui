@@ -160,6 +160,24 @@ const FIELD_LABEL_DISPLAY = {
   followUpNotes: "Follow-up Notes",
 };
 
+const normalizeType = (value = "") => {
+  const candidate = String(value || "").trim();
+  return TASK_TYPES.includes(candidate) ? candidate : "General";
+};
+
+const getFieldLabel = (task, field) => {
+  const taskType = normalizeType(task?.typeOverride || task?.type);
+
+  if (field === "caseNumber") {
+    if (taskType === "DMV / Vehicle") return "Citation #";
+    if (taskType === "DPSS / Benefits") return "Case #";
+    if (taskType === "Legal") return "Case #";
+    return "Case #";
+  }
+
+  return FIELD_LABEL_DISPLAY[field] || field;
+};
+
 const TYPE_FIELDS = {
   General: ["date", "deadline", "phone", "website", "documents", "questions", "outcome", "notes"],
   Medical: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
@@ -1678,7 +1696,7 @@ const addParsedTasks = () => {
                           </td>
                         </tr>
                       ) : (
-                        categoryTasks.map((task) => {
+                        categoryTasks.map((task, taskIndex) => {
                           const blocker = task.blockedBy ? taskById[task.blockedBy] : null;
                           const isBlocked = Boolean(blocker && !blocker.completed);
                           const controls = controlledByMap[task.id] || [];
@@ -1710,7 +1728,7 @@ const addParsedTasks = () => {
 
                           const followUpEntries = getFollowUpEntries(task);
                           const hasDetailFields = true;
-                          const mainRowDividerClass = "border-b border-slate-200";
+                          const mainRowDividerClass = taskIndex > 0 ? "border-t-4 border-black" : "";
 
                           return (
                             <React.Fragment key={task.id}>
@@ -1854,14 +1872,14 @@ const addParsedTasks = () => {
                               </tr>
 
                               {hasDetailFields && (
-                                <tr className={`${getTaskDetailRowClass(task, isBlocked)} border-b-2 border-black`}>
+                                <tr className={`${getTaskDetailRowClass(task, isBlocked)} border-b border-slate-200`}>
                                   <td></td>
                                   <td colSpan={5} className="px-2 pb-3">
                                     {fieldsToShow.length > 0 && (
                                       <div className="grid gap-2 md:grid-cols-3">
                                         {fieldsToShow.map((field) => (
                                           <label key={field} className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                            {FIELD_LABEL_DISPLAY[field] || field}
+                                            {getFieldLabel(task, field)}
                                             <div className="mt-1">
                                               {MULTILINE_FIELDS.has(field) ? (
                                                 <textarea
@@ -2037,7 +2055,7 @@ const addParsedTasks = () => {
                         <div className="font-semibold">{task.taskName}</div>
                         <div className="text-slate-600">Type: {task.type}</div>
                         {task.deadline && <div className="text-slate-600">Deadline: {task.deadline}</div>}
-                        {task.caseNumber && <div className="text-slate-600">Case / Citation #: {task.caseNumber}</div>}
+                        {task.caseNumber && <div className="text-slate-600">{getFieldLabel(task, "caseNumber")}: {task.caseNumber}</div>}
                         {task.phone && <div className="text-slate-600">Phone: {task.phone}</div>}
                       </div>
                     ))}
@@ -2091,7 +2109,7 @@ const addParsedTasks = () => {
 
                 {visibleFormFields.map((field) => (
                   <label key={field} className="text-sm font-medium">
-                    {FIELD_LABEL_DISPLAY[field] || field}
+                    {getFieldLabel(form, field)}
                     <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
                   </label>
                 ))}
@@ -2108,7 +2126,7 @@ const addParsedTasks = () => {
                     .filter((field) => !visibleFormFields.includes(field))
                     .map((field) => (
                       <label key={field} className="text-sm font-medium">
-                        {FIELD_LABEL_DISPLAY[field] || field}
+                        {getFieldLabel(form, field)}
                         <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
                       </label>
                     ))}
@@ -2194,7 +2212,7 @@ const addParsedTasks = () => {
                   .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
                   .map((field) => (
                     <label key={field} className="text-sm font-semibold">
-                      {FIELD_LABEL_DISPLAY[field] || field}
+                      {getFieldLabel(selectedTask, field)}
                       <div className="mt-1">
                         {MULTILINE_FIELDS.has(field) ? (
                           <textarea value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />

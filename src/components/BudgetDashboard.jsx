@@ -6,6 +6,7 @@ import AnalysisTab from './tabs/AnalysisTab';
 import CalculatorTab from './tabs/CalculatorTab';
 import TodoTab from './tabs/TodoTab';
 import EditorTab from './tabs/EditorTab';
+import CscShiftsTab from './tabs/CscShiftsTab';
 import ArchivedDrawer from './ui/ArchivedDrawer';
 import StickyToolbar from './common/StickyToolbar.jsx';
 import StatementScanner from './statements/StatementScanner';
@@ -478,6 +479,7 @@ const BudgetDashboard = () => {
   const tabs = useMemo(
     () => [
       { id: 'todo', label: 'To-Do', bgColor: 'bg-red-100', inactiveClass: 'bg-red-100 text-red-900 hover:bg-red-200' },
+      { id: 'cscShifts', label: 'CSC Shifts', bgColor: 'bg-yellow-100', inactiveClass: 'bg-yellow-100 text-yellow-900 hover:bg-yellow-200' },
       { id: 'dashboard', label: 'Budget', bgColor: 'bg-blue-100', inactiveClass: 'bg-blue-100 text-blue-900 hover:bg-blue-200' },
       { id: 'analysis', label: 'Analysis', bgColor: 'bg-purple-100', inactiveClass: 'bg-purple-100 text-purple-900 hover:bg-purple-200' },
       { id: 'calculator', label: 'Calculator', bgColor: 'bg-green-100', inactiveClass: 'bg-green-100 text-green-900 hover:bg-green-200' },
@@ -813,6 +815,10 @@ const BudgetDashboard = () => {
       </StickyToolbar>
 
       <div className={`${activeTabConfig?.bgColor || 'bg-white'} min-h-screen`}>
+        {activeTab === 'cscShifts' && (
+          <CscShiftsTab searchQuery={searchQuery} />
+        )}
+
         {activeTab === 'dashboard' && (
           <DashboardTab
             state={state}

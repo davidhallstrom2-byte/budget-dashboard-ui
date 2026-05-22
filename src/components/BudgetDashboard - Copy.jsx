@@ -659,6 +659,8 @@ const BudgetDashboard = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                title={`Open ${tab.label} tab`}
+                aria-label={`Open ${tab.label} tab`}
                 className={`px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0 ${
                   activeTab === tab.id
                     ? 'bg-black text-white'
@@ -690,6 +692,8 @@ const BudgetDashboard = () => {
                 <button
                   onClick={() => setSearchQuery('')}
                   className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  title="Clear search"
+                  aria-label="Clear search"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -700,6 +704,7 @@ const BudgetDashboard = () => {
               onClick={() => setIsStatementScannerOpen(true)}
               className="p-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
               title="Scan Statement"
+              aria-label="Scan Statement"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -715,6 +720,7 @@ const BudgetDashboard = () => {
               onClick={() => setIsBudgetArchiveDrawerOpen(true)}
               className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1"
               title="Budget Archives"
+              aria-label="Open Budget Archives"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -731,6 +737,7 @@ const BudgetDashboard = () => {
               onClick={() => setShowExportDialog(true)}
               className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
               title="Export JSON"
+              aria-label="Export JSON"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -745,6 +752,7 @@ const BudgetDashboard = () => {
             <label
               className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors cursor-pointer"
               title="Import JSON"
+              aria-label="Import JSON"
             >
               <input
                 type="file"
@@ -771,6 +779,7 @@ const BudgetDashboard = () => {
                   : 'bg-blue-500 text-white hover:bg-blue-600'
               }`}
               title="Save Budget"
+              aria-label="Save Budget"
             >
               {isSaving ? (
                 <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
@@ -886,6 +895,7 @@ const BudgetDashboard = () => {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowExportDialog(false)}
+                title="Cancel export"
                 className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
               >
                 Cancel
@@ -893,6 +903,7 @@ const BudgetDashboard = () => {
 
               <button
                 onClick={handleExportJSON}
+                title="Export budget JSON file"
                 className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
               >
                 Export
