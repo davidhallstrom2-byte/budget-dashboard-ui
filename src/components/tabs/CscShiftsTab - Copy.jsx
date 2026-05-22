@@ -4,12 +4,12 @@ import {
   BriefcaseBusiness,
   Building2,
   CalendarDays,
+  CalendarPlus,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock,
-  Copy,
   DollarSign,
   Download,
   Eraser,
@@ -28,7 +28,7 @@ import {
   Sparkles,
   StickyNote,
   Trash2,
-  X,
+  X
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 
@@ -47,6 +47,8 @@ const CSC_COMPANY = {
   website: 'https://www.csc-usa.com',
   notes: 'Event staffing, crowd management, and event security company.',
 };
+
+const WISH_PORTAL_URL = 'https://ess.schedulingsite.com/login';
 
 const SHIFT_STATUS_OPTIONS = ['Scheduled', 'Confirmed', 'Cancelled', 'Done'];
 const PAID_STATUS_OPTIONS = ['Unpaid', 'Paid'];
@@ -375,7 +377,6 @@ const parseCsvLine = (line) => {
   values.push(current);
   return values;
 };
-
 
 const normalizeTimeValue = (value = '', marker = '') => {
   const timeText = String(value || '').trim();
@@ -710,7 +711,6 @@ const buildCsv = (shifts) => {
   ].join('\n');
 };
 
-
 const escapeHtml = (value) =>
   String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -843,6 +843,41 @@ const getMonthLabel = (monthKey) => {
   });
 };
 
+const toGoogleCalendarDateTime = (dateValue, timeValue) => {
+  if (!dateValue || !timeValue) return '';
+  return `${dateValue.replaceAll('-', '')}T${String(timeValue).replace(':', '')}00`;
+};
+
+const getGoogleCalendarUrl = (shift) => {
+  const startDateTime = toGoogleCalendarDateTime(shift.startDate, shift.startTime);
+  const finishDateTime = toGoogleCalendarDateTime(shift.finishDate, shift.finishTime);
+
+  if (!startDateTime || !finishDateTime) return '#';
+
+  const details = [
+    `CSC shift status: ${shift.shiftStatus || 'Scheduled'}`,
+    `Paid status: ${shift.paidStatus || 'Unpaid'}`,
+    `Hours: ${getShiftHours(shift).toFixed(1)}`,
+    `Hourly rate: ${formatCurrency(Number(shift.hourlyRate) || 0)}`,
+    `Estimated pay: ${formatCurrency(getEstimatedPay(shift))}`,
+    shift.jobName ? `Job: ${shift.jobName}` : '',
+    shift.parking ? `Parking: ${shift.parking}` : '',
+    shift.uniform ? `Uniform: ${shift.uniform}` : '',
+    shift.supervisor ? `Supervisor: ${shift.supervisor}` : '',
+    shift.notes ? `Notes: ${shift.notes}` : '',
+  ].filter(Boolean).join('\n');
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `CSC Shift - ${shift.venue || 'Shift'}${shift.event ? ` - ${shift.event}` : ''}`,
+    dates: `${startDateTime}/${finishDateTime}`,
+    location: [shift.venue, shift.address, shift.city].filter(Boolean).join(', '),
+    details,
+  });
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+};
+
 const CscShiftsTab = ({ searchQuery = '' }) => {
   const [shifts, setShifts] = useState(() => loadSavedShifts());
   const [localSearch, setLocalSearch] = useState('');
@@ -901,7 +936,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const normalizedNotes = String(notes || '').trim();
     if (!normalizedNotes) return false;
     const lineCount = normalizedNotes.split(/\r?\n/).length;
-    return lineCount > 2 || normalizedNotes.length > 145;
+    return lineCount > 2 || normalizedNotes.length > 112;
+  };
+
+  const getCollapsedNotesText = (notes = '') => {
+    const normalizedNotes = String(notes || '').replace(/\s+/g, ' ').trim();
+    if (normalizedNotes.length <= 112) return normalizedNotes;
+    return `${normalizedNotes.slice(0, 109).trimEnd()}...`;
   };
 
   const updateShift = (id, updates) => {
@@ -935,7 +976,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       })
     );
   };
-
 
   const handleAddShift = () => {
     const preparedShift = normalizeShift({
@@ -1006,24 +1046,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     });
     setMovingShiftId(null);
     setSaveMessage('CSC shift moved.');
-    setTimeout(() => setSaveMessage(''), 2500);
-  };
-
-  const handleDuplicateShift = (shift) => {
-    const duplicate = normalizeShift({
-      ...shift,
-      id: `csc-copy-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      jobName: shift.jobName ? `${shift.jobName} Copy` : 'CSC Shift Copy',
-      shiftStatus: 'Scheduled',
-      paidStatus: 'Unpaid',
-      paymentDate: '',
-    });
-
-    writeCscSafetySnapshot('Before CSC shift duplicate', shifts, archivedShifts);
-    setShifts((currentShifts) =>
-      [...currentShifts, duplicate].sort((a, b) => `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`))
-    );
-    setSaveMessage('CSC shift duplicated.');
     setTimeout(() => setSaveMessage(''), 2500);
   };
 
@@ -1453,18 +1475,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </select>
           <button
             type="button"
-            onClick={() => handleDuplicateShift(shift)}
-            className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-blue-600 text-white hover:bg-blue-700"
-            aria-label="Copy shift"
-            title="Copy shift"
-          >
-            <Copy className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-[34px_34px_42px] gap-2">
-          <button
-            type="button"
             onClick={() => handleArchiveShift(shift.id)}
             className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-purple-600 text-white hover:bg-purple-700"
             aria-label="Archive shift"
@@ -1472,6 +1482,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           >
             <Archive className="h-4 w-4" />
           </button>
+        </div>
+
+        <div className="grid grid-cols-[34px_42px_34px] gap-2">
           <button
             type="button"
             onClick={() => handleDeleteShift(shift.id)}
@@ -1490,6 +1503,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           >
             Clr
           </button>
+          <a
+            href={getGoogleCalendarUrl(shift)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-emerald-600 text-white hover:bg-emerald-700"
+            aria-label="Add shift to Google Calendar"
+            title="Add to Google Calendar"
+          >
+            <CalendarPlus className="h-4 w-4" />
+          </a>
         </div>
 
         <div className="grid grid-cols-[58px_34px_34px] gap-2">
@@ -1578,7 +1601,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 Import
                 <input type="file" accept=".csv,text/csv" onChange={handleImportCsv} className="hidden" />
               </label>
-
 
               <button
                 type="button"
@@ -1751,7 +1773,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </button>
           </div>
 
-
           <div className="overflow-hidden rounded-lg border-2 border-black">
             <div className="flex items-center justify-between gap-3 bg-black px-4 py-3 text-white">
               <div className="flex min-w-0 items-center gap-3">
@@ -1906,12 +1927,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
           ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-[1390px] table-fixed divide-y divide-slate-200 text-left text-sm">
+            <table className="min-w-[1090px] table-fixed divide-y divide-slate-200 text-left text-sm">
               <colgroup>
                 <col className="w-[125px]" />
                 <col className="w-[125px]" />
                 <col className="w-[235px]" />
-                <col className="w-[735px]" />
+                <col className="w-[435px]" />
                 <col className="w-[170px]" />
               </colgroup>
               <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
@@ -1940,49 +1961,42 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <div className="mt-1 text-xs text-slate-500">{shift.address || 'Address not shown'}</div>
                       <div className="mt-2 text-xs font-semibold text-slate-500">{shift.jobName}</div>
                     </td>
-                    <td className="min-w-0 whitespace-normal break-words px-4 py-3 align-top text-slate-900">
-                      <div className="whitespace-normal break-words font-semibold leading-snug">{shift.event}</div>
-                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
-                        <div><span className="font-bold text-slate-700">Hours:</span> {getShiftHours(shift).toFixed(1)}</div>
-                        <div><span className="font-bold text-slate-700">Rate:</span> {formatCurrency(Number(shift.hourlyRate) || 0)}</div>
-                        <div><span className="font-bold text-slate-700">Est. Pay:</span> {formatCurrency(getEstimatedPay(shift))}</div>
-                        <div><span className="font-bold text-slate-700">Status:</span> {shift.shiftStatus}</div>
-                        <div><span className="font-bold text-slate-700">Paid:</span> {shift.paidStatus}</div>
-                        {shift.paymentDate ? <div><span className="font-bold text-slate-700">Pay Date:</span> {formatDate(shift.paymentDate)}</div> : null}
-                        {shift.parking ? <div><span className="font-bold text-slate-700">Parking:</span> {shift.parking}</div> : null}
-                        {shift.uniform ? <div><span className="font-bold text-slate-700">Uniform:</span> {shift.uniform}</div> : null}
-                        {shift.supervisor ? <div><span className="font-bold text-slate-700">Supervisor:</span> {shift.supervisor}</div> : null}
+                    <td className="w-[435px] min-w-0 max-w-[435px] overflow-hidden whitespace-normal break-words px-4 py-3 align-top text-slate-900">
+                      <div className="max-w-full overflow-hidden whitespace-normal break-words font-semibold leading-snug">{shift.event}</div>
+                      <div className="mt-2 grid max-w-full grid-cols-2 gap-x-3 gap-y-1 overflow-hidden text-xs text-slate-600">
+                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Hours:</span> {getShiftHours(shift).toFixed(1)}</div>
+                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Rate:</span> {formatCurrency(Number(shift.hourlyRate) || 0)}</div>
+                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Est. Pay:</span> {formatCurrency(getEstimatedPay(shift))}</div>
+                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Status:</span> {shift.shiftStatus}</div>
+                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Paid:</span> {shift.paidStatus}</div>
+                        {shift.paymentDate ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Pay Date:</span> {formatDate(shift.paymentDate)}</div> : null}
+                        {shift.parking ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Parking:</span> {shift.parking}</div> : null}
+                        {shift.uniform ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Uniform:</span> {shift.uniform}</div> : null}
+                        {shift.supervisor ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Supervisor:</span> {shift.supervisor}</div> : null}
                       </div>
                       {shift.notes ? (
-                        <div className="mt-2 w-full max-w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs leading-relaxed text-slate-700">
+                        <div className="mt-2 box-border w-full max-w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs leading-relaxed text-slate-700">
                           <div
                             className="min-w-0 whitespace-normal break-words"
-                            style={
-                              expandedNoteIds.has(shift.id)
-                                ? { overflowWrap: 'anywhere', wordBreak: 'break-word' }
-                                : {
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 2,
-                                    WebkitBoxOrient: 'vertical',
-                                    overflow: 'hidden',
-                                    overflowWrap: 'anywhere',
-                                    wordBreak: 'break-word',
-                                  }
-                            }
+                            style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
                           >
-                            <span className="font-bold">Notes:</span> {shift.notes}
+                            <span className="font-bold">Notes:</span>{' '}
+                            {expandedNoteIds.has(shift.id) ? shift.notes : getCollapsedNotesText(shift.notes)}
+                            {shouldShowMoreNotes(shift.notes) ? (
+                              <>
+                                {' '}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleShiftNotes(shift.id)}
+                                  className="inline text-xs font-normal text-blue-700 underline decoration-1 underline-offset-2 hover:text-blue-900"
+                                  title={expandedNoteIds.has(shift.id) ? 'Show less notes' : 'Show more notes'}
+                                  aria-label={expandedNoteIds.has(shift.id) ? 'Show less notes' : 'Show more notes'}
+                                >
+                                  {expandedNoteIds.has(shift.id) ? 'less' : 'more'}
+                                </button>
+                              </>
+                            ) : null}
                           </div>
-                          {shouldShowMoreNotes(shift.notes) ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleShiftNotes(shift.id)}
-                              className="mt-1 text-xs font-extrabold text-blue-700 underline decoration-2 underline-offset-2 hover:text-blue-900"
-                              title={expandedNoteIds.has(shift.id) ? 'Show less notes' : 'Show more notes'}
-                              aria-label={expandedNoteIds.has(shift.id) ? 'Show less notes' : 'Show more notes'}
-                            >
-                              {expandedNoteIds.has(shift.id) ? 'less' : 'more'}
-                            </button>
-                          ) : null}
                         </div>
                       ) : null}
                     </td>
@@ -2126,18 +2140,27 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <Phone className="h-4 w-4" />
               {CSC_COMPANY.phone}
             </p>
-            <a
-              href={CSC_COMPANY.website}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-block font-bold text-blue-700 underline"
-            >
-              CSC website
-            </a>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <a
+                href={CSC_COMPANY.website}
+                target="_blank"
+                rel="noreferrer"
+                className="font-bold text-blue-700 underline"
+              >
+                CSC website
+              </a>
+              <a
+                href={WISH_PORTAL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-bold text-blue-700 underline"
+              >
+                WISH employee portal
+              </a>
+            </div>
           </div>
         </section>
       </div>
-
 
         {showPremiumOverlay && (
           <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/70 px-4 py-6 print:static print:overflow-visible print:bg-white print:p-0">
@@ -2297,7 +2320,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
           </div>
         )}
-
 
         {selectedDetailShift && (
           <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4">
