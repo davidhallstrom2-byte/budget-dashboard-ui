@@ -944,6 +944,8 @@ export default function TodoTab() {
   const [isArchiveDrawerOpen, setIsArchiveDrawerOpen] = useState(false);
   const [archivedTasks, setArchivedTasks] = useState(readStoredArchivedTasks);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [checkedTaskIds, setCheckedTaskIds] = useState([]);
+  const [bulkMoveType, setBulkMoveType] = useState(TASK_TYPES[0] || "General");
   const [followUpDrafts, setFollowUpDrafts] = useState({});
   const [editingFollowUpEntries, setEditingFollowUpEntries] = useState({});
   const [contacts, setContacts] = useState(readStoredContacts);
@@ -1647,6 +1649,126 @@ const addParsedTasks = () => {
 
   const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) || null, [selectedTaskId, tasks]);
 
+  const checkedTasks = useMemo(
+    () => checkedTaskIds.map((id) => tasks.find((task) => task.id === id)).filter(Boolean),
+    [checkedTaskIds, tasks]
+  );
+
+  const toggleCheckedTask = (id) => {
+    setCheckedTaskIds((current) =>
+      current.includes(id) ? current.filter((taskId) => taskId !== id) : [...current, id]
+    );
+  };
+
+  useEffect(() => {
+    setCheckedTaskIds((current) => current.filter((id) => tasks.some((task) => task.id === id)));
+  }, [tasks]);
+
+  const clearCheckedTasks = () => {
+    setCheckedTaskIds([]);
+  };
+
+  const markCheckedTasksDone = () => {
+    if (!checkedTaskIds.length) return;
+
+    writeSafetySnapshot("Before bulk mark done", tasks, archivedTasks);
+    setTasks((current) =>
+      current.map((task) =>
+        checkedTaskIds.includes(task.id)
+          ? addTaskHistory(
+              {
+                ...task,
+                completed: true,
+                completedAt: task.completedAt || new Date().toISOString(),
+              },
+              "Marked done",
+              "Bulk action"
+            )
+          : task
+      )
+    );
+    setCheckedTaskIds([]);
+  };
+
+  const moveCheckedTasks = () => {
+    if (!checkedTaskIds.length || !TASK_TYPES.includes(bulkMoveType)) return;
+
+    writeSafetySnapshot("Before bulk category move", tasks, archivedTasks);
+    setTasks((current) =>
+      current.map((task) =>
+        checkedTaskIds.includes(task.id)
+          ? addTaskHistory(
+              {
+                ...task,
+                type: bulkMoveType,
+                typeOverride: bulkMoveType,
+              },
+              "Category changed",
+              `Bulk moved to ${bulkMoveType}`
+            )
+          : task
+      )
+    );
+    setCheckedTaskIds([]);
+  };
+
+  const archiveCheckedTasks = () => {
+    if (!checkedTaskIds.length) return;
+
+    setTasks((current) => {
+      const checkedSet = new Set(checkedTaskIds);
+      const tasksToArchive = current.filter((task) => checkedSet.has(task.id));
+      if (!tasksToArchive.length) return current;
+
+      writeSafetySnapshot("Before bulk task archive", current, archivedTasks);
+
+      const archivedNow = tasksToArchive.map((task) =>
+        addTaskHistory(
+          {
+            ...task,
+            archivedAt: new Date().toISOString(),
+          },
+          "Archived",
+          "Bulk action"
+        )
+      );
+
+      const nextArchived = [
+        ...archivedNow,
+        ...archivedTasks.filter((task) => task?.id && !checkedSet.has(task.id)),
+      ];
+
+      setArchivedTasks(nextArchived);
+      writeStoredArchivedTasks(nextArchived);
+
+      return current
+        .filter((task) => !checkedSet.has(task.id))
+        .map((task) => (checkedSet.has(task.blockedBy) ? { ...task, blockedBy: "" } : task));
+    });
+
+    setCheckedTaskIds([]);
+    setMovingTaskId(null);
+  };
+
+  const deleteCheckedTasks = () => {
+    if (!checkedTaskIds.length) return;
+    const count = checkedTaskIds.length;
+    if (!window.confirm(`Delete ${count} selected task${count === 1 ? "" : "s"}? A safety snapshot will be saved first.`)) return;
+
+    writeSafetySnapshot("Before bulk task delete", tasks, archivedTasks);
+    setTasks((current) => {
+      const checkedSet = new Set(checkedTaskIds);
+      return current
+        .filter((task) => !checkedSet.has(task.id))
+        .map((task) => (checkedSet.has(task.blockedBy) ? { ...task, blockedBy: "" } : task));
+    });
+    setCheckedTaskIds([]);
+    setMovingTaskId(null);
+    if (checkedTaskIds.includes(selectedTaskId)) {
+      setSelectedTaskId(null);
+    }
+  };
+
 
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
@@ -1710,8 +1832,8 @@ const addParsedTasks = () => {
   };
 
   return (
-    <PageContainer className="space-y-6 py-6">
-      <div className="rounded-xl border-2 border-red-200 bg-gradient-to-r from-red-50 to-red-100 px-6 py-4">
+    <PageContainer className="space-y-6 bg-green-50 py-6">
+      <div className="rounded-xl border-2 border-green-200 bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">To-Do</h2>
@@ -1727,6 +1849,21 @@ const addParsedTasks = () => {
             >
               <FileText className="h-4 w-4" />
               Import
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setForm(createEmptyTask());
+                setEditingId(null);
+                setShowAdvanced(false);
+                setIsCreateOpen(true);
+              }}
+              title="Add task"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+            >
+              <Plus className="h-4 w-4" />
+              Add Task
             </button>
 
             <button
@@ -1752,14 +1889,14 @@ const addParsedTasks = () => {
         </div>
       </div>
 
-      <section className="rounded-xl border border-slate-300 bg-white p-4 shadow-md">
+      <section className="rounded-xl border border-green-200 bg-white p-4 shadow-md">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold text-slate-900">Active Tasks</h3>
             <p className="text-sm text-slate-600">Only categories with open tasks are shown here.</p>
           </div>
-          <div className="rounded-xl bg-blue-700 px-4 py-2 text-center text-white shadow-sm">
-            <div className="text-xs font-bold uppercase tracking-wide text-blue-100">Active</div>
+          <div className="rounded-xl bg-green-700 px-4 py-2 text-center text-white shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-wide text-green-100">Active</div>
             <div className="text-3xl font-black leading-none">{totalActiveTasks}</div>
           </div>
         </div>
@@ -1784,7 +1921,7 @@ const addParsedTasks = () => {
                       document.getElementById(getCategoryAnchorId(item.type))?.scrollIntoView({ behavior: "smooth", block: "start" });
                     });
                   }}
-                  className="group flex items-center justify-between gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-100"
+                  className="group flex items-center justify-between gap-3 rounded-xl border-2 border-green-200 bg-green-50 px-4 py-3 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-100"
                   title={`Go to ${item.type} active tasks`}
                   aria-label={`Go to ${item.type} active tasks`}
                 >
@@ -1883,8 +2020,83 @@ const addParsedTasks = () => {
           </div>
         </div>
 
+        {checkedTasks.length > 0 && (
+          <div className="rounded-xl border-2 border-green-300 bg-green-50 px-4 py-3 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-green-950">
+                  Selected: {checkedTasks.length} task{checkedTasks.length === 1 ? "" : "s"}
+                </p>
+                <p className="text-xs font-semibold text-slate-600">
+                  Choose one bulk action for the checked items.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={markCheckedTasksDone}
+                  className="inline-flex h-9 items-center gap-1 rounded-lg bg-green-600 px-3 text-sm font-bold text-white hover:bg-green-700"
+                  title="Mark selected tasks done"
+                >
+                  <Check className="h-4 w-4" />
+                  Done
+                </button>
+                <button
+                  type="button"
+                  onClick={archiveCheckedTasks}
+                  className="inline-flex h-9 items-center gap-1 rounded-lg bg-purple-600 px-3 text-sm font-bold text-white hover:bg-purple-700"
+                  title="Archive selected tasks"
+                >
+                  <Archive className="h-4 w-4" />
+                  Archive
+                </button>
+                <div className="inline-flex h-9 items-center overflow-hidden rounded-lg border border-amber-300 bg-white">
+                  <select
+                    value={bulkMoveType}
+                    onChange={(event) => setBulkMoveType(event.target.value)}
+                    className="h-full border-0 bg-white px-2 text-sm font-bold text-slate-900 focus:outline-none"
+                    title="Choose category for selected tasks"
+                  >
+                    {TASK_TYPES.map((categoryType) => (
+                      <option key={categoryType} value={categoryType}>
+                        {categoryType}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={moveCheckedTasks}
+                    className="h-full bg-orange-600 px-3 text-sm font-bold text-white hover:bg-orange-700"
+                    title="Move selected tasks to chosen category"
+                  >
+                    Move
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearCheckedTasks}
+                  className="inline-flex h-9 items-center rounded-lg bg-slate-500 px-3 text-sm font-bold text-white hover:bg-slate-600"
+                  title="Uncheck selected tasks"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteCheckedTasks}
+                  className="inline-flex h-9 items-center gap-1 rounded-lg bg-red-600 px-3 text-sm font-bold text-white hover:bg-red-700"
+                  title="Delete selected tasks"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {visibleCategoryTypes.length === 0 && (
-          <div className="rounded-lg border border-slate-300 bg-white px-4 py-6 text-sm font-semibold text-slate-600 shadow-md">
+          <div className="rounded-lg border border-green-200 bg-white px-4 py-6 text-sm font-semibold text-slate-600 shadow-md">
             No active tasks. Click Active Only again to show all categories.
           </div>
         )}
@@ -1905,7 +2117,7 @@ const addParsedTasks = () => {
               key={type}
               id={getCategoryAnchorId(type)}
               className={`scroll-mt-6 overflow-hidden rounded-lg border bg-white shadow-md ${
-                activeCount > 0 ? "border-blue-400 ring-1 ring-blue-100" : "border-slate-300 opacity-85"
+                activeCount > 0 ? "border-green-400 ring-1 ring-green-100" : "border-green-200 opacity-85"
               }`}
             >
               <div className="flex items-center justify-between gap-3 bg-black px-4 py-2 text-white">
@@ -2046,9 +2258,11 @@ const addParsedTasks = () => {
                                 <td className="align-top px-2 py-2">
                                   <input
                                     type="checkbox"
-                                    checked={Boolean(task.completed)}
-                                    onChange={() => toggleTask(task.id)}
+                                    checked={checkedTaskIds.includes(task.id)}
+                                    onChange={() => toggleCheckedTask(task.id)}
                                     className="h-4 w-4 cursor-pointer rounded border-slate-300"
+                                    title="Select task"
+                                    aria-label={`Select ${task.taskName || "task"}`}
                                   />
                                 </td>
                                 <td className="align-top px-2 py-2">
@@ -2486,6 +2700,91 @@ const addParsedTasks = () => {
         </div>
       )}
 
+      {checkedTasks.length > 0 && (
+        <div className="fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+          <div className="relative flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-green-300 bg-white px-4 py-3 pr-12 shadow-2xl">
+            <button
+              type="button"
+              onClick={clearCheckedTasks}
+              className="absolute right-2 top-2 rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              title="Close selected tasks bar"
+              aria-label="Close selected tasks bar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="mr-2">
+              <p className="text-sm font-black text-green-950">
+                {checkedTasks.length} selected
+              </p>
+              <p className="text-xs font-semibold text-slate-600">
+                Choose an action for the checked task{checkedTasks.length === 1 ? "" : "s"}, or close this bar.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={markCheckedTasksDone}
+                className="inline-flex h-9 items-center gap-1 rounded-lg bg-green-600 px-3 text-sm font-bold text-white hover:bg-green-700"
+                title="Mark checked tasks done"
+              >
+                <Check className="h-4 w-4" />
+                Done
+              </button>
+              <button
+                type="button"
+                onClick={archiveCheckedTasks}
+                className="inline-flex h-9 items-center gap-1 rounded-lg bg-purple-600 px-3 text-sm font-bold text-white hover:bg-purple-700"
+                title="Archive checked tasks"
+              >
+                <Archive className="h-4 w-4" />
+                Archive
+              </button>
+              <div className="inline-flex h-9 items-center overflow-hidden rounded-lg border border-amber-300 bg-white">
+                <select
+                  value={bulkMoveType}
+                  onChange={(event) => setBulkMoveType(event.target.value)}
+                  className="h-full border-0 bg-white px-2 text-sm font-bold text-slate-900 focus:outline-none"
+                  title="Choose category for checked tasks"
+                >
+                  {TASK_TYPES.map((categoryType) => (
+                    <option key={categoryType} value={categoryType}>
+                      {categoryType}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={moveCheckedTasks}
+                  className="h-full bg-orange-600 px-3 text-sm font-bold text-white hover:bg-orange-700"
+                  title="Move checked tasks to chosen category"
+                >
+                  Move
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={clearCheckedTasks}
+                className="inline-flex h-9 items-center rounded-lg bg-slate-500 px-3 text-sm font-bold text-white hover:bg-slate-600"
+                title="Uncheck selected tasks and close this bar"
+              >
+                Uncheck
+              </button>
+              <button
+                type="button"
+                onClick={deleteCheckedTasks}
+                className="inline-flex h-9 items-center gap-1 rounded-lg bg-red-600 px-3 text-sm font-bold text-white hover:bg-red-700"
+                title="Delete checked tasks"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/50 px-4 py-4 backdrop-blur-sm sm:px-6">
           <div className="flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
@@ -2582,7 +2881,7 @@ const addParsedTasks = () => {
 
             <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[340px_1fr]">
               <div className="overflow-y-auto border-r border-slate-200 px-4 py-5">
-                <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">
+                <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-3 text-sm font-semibold text-blue-900">
                   {contactApplyTarget === "selectedTask" && selectedTask
                     ? `Use applies to: ${selectedTask.taskName || "selected task"}`
                     : "Use applies to the Add Task form."}

@@ -35,6 +35,16 @@
                 "recurrence": "monthly"
             },
             {
+                "id": "transportation-1779461356144",
+                "category": "Car Insurance",
+                "estBudget": 150,
+                "actualCost": 0,
+                "dueDate": "2026-05-22",
+                "status": "pending",
+                "recurrence": "monthly",
+                "note": ""
+            },
+            {
                 "id": "transportation-1759334479510",
                 "category": "AAA (annual fee)",
                 "estBudget": 52,

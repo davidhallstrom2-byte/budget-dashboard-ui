@@ -1,5 +1,5 @@
 // src/components/tabs/DashboardTab.jsx
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, Plus, Minus, Archive } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
@@ -33,11 +33,51 @@ const DEFAULT_TITLES = {
   misc: 'Miscellaneous'
 };
 
+const CSC_STORAGE_KEY = 'cscShifts.v1';
+const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
+
+const loadCscBudgetShifts = () => {
+  try {
+    const saved = localStorage.getItem(CSC_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Failed to load CSC shifts for budget dashboard:', error);
+    return [];
+  }
+};
+
+const getCscShiftHours = (shift) => {
+  if (!shift?.startDate || !shift?.startTime || !shift?.finishDate || !shift?.finishTime) return 0;
+
+  const start = new Date(`${shift.startDate}T${shift.startTime}:00`);
+  const finish = new Date(`${shift.finishDate}T${shift.finishTime}:00`);
+  const diff = finish.getTime() - start.getTime();
+
+  if (!Number.isFinite(diff) || diff <= 0) return 0;
+
+  return Math.round((diff / (1000 * 60 * 60)) * 100) / 100;
+};
+
+const getCscEstimatedPay = (shift) => {
+  const hourlyRate = Number.parseFloat(shift?.hourlyRate);
+  if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) return 0;
+
+  return Math.round(getCscShiftHours(shift) * hourlyRate * 100) / 100;
+};
+
+const formatDashboardCurrency = (amount) =>
+  `$${(Number(amount) || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
 const DashboardTab = ({
   state,
   setState,
   saveBudget,
   searchQuery,
+  budgetSubnav = null,
   showUrgentAlert = false,
   onCloseUrgentAlert = () => {},
 }) => {
@@ -47,12 +87,25 @@ const DashboardTab = ({
   const [showAllOverdue, setShowAllOverdue] = useState(false);
   const [showBudgetOverview, setShowBudgetOverview] = useState(false);
   const [showPaymentAlerts, setShowPaymentAlerts] = useState(false);
+  const [cscShifts, setCscShifts] = useState(() => loadCscBudgetShifts());
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
     (state?.meta?.categoryOrder && state.meta.categoryOrder.length > 0)
       ? state.meta.categoryOrder
       : Object.keys(state?.buckets || {});
+
+  useEffect(() => {
+    const refreshCscShifts = () => setCscShifts(loadCscBudgetShifts());
+
+    window.addEventListener('storage', refreshCscShifts);
+    window.addEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShifts);
+
+    return () => {
+      window.removeEventListener('storage', refreshCscShifts);
+      window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShifts);
+    };
+  }, []);
 
   const toggleCategory = (category) => {
     setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
@@ -98,12 +151,56 @@ const DashboardTab = ({
     return counts;
   };
 
+  const cscIncome = useMemo(() => {
+    const activeShifts = cscShifts.filter((shift) => shift?.shiftStatus !== 'Cancelled');
+    const paidShifts = activeShifts.filter((shift) => shift?.paidStatus === 'Paid');
+    const unpaidShifts = activeShifts.filter((shift) => shift?.paidStatus !== 'Paid');
+    const doneShifts = activeShifts.filter((shift) => shift?.shiftStatus === 'Done');
+
+    const estimatedPay = activeShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const paidPay = paidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const unpaidPay = unpaidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const estimatedHours = activeShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0);
+    const workedHours = doneShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0);
+
+    return {
+      activeShiftCount: activeShifts.length,
+      paidShiftCount: paidShifts.length,
+      unpaidShiftCount: unpaidShifts.length,
+      estimatedPay,
+      paidPay,
+      unpaidPay,
+      estimatedHours,
+      workedHours,
+    };
+  }, [cscShifts]);
+
+  const cscIncomeItem = useMemo(() => ({
+    id: 'system-csc-shift-income',
+    category: 'CSC Shift Income',
+    estBudget: cscIncome.estimatedPay,
+    actualCost: cscIncome.paidPay,
+    dueDate: '',
+    status: cscIncome.unpaidPay > 0 ? 'pending' : 'paid',
+    note: `${cscIncome.activeShiftCount} active shifts · ${cscIncome.estimatedHours.toFixed(1)} estimated hours · unpaid ${formatDashboardCurrency(cscIncome.unpaidPay)}`,
+    isSystemItem: true,
+  }), [cscIncome]);
+
+  const getBudgetItemsForBucket = (bucketName) => {
+    const items = state?.buckets?.[bucketName] || [];
+    if (bucketName !== 'income') return items;
+    if (!cscIncome.activeShiftCount && !cscIncome.estimatedPay) return items;
+    return [...items, cscIncomeItem];
+  };
+
   const summary = useMemo(() => {
     const allItems = Object.values(state?.buckets || {}).flat();
 
-    const income = (state?.buckets?.income || []).reduce((sum, item) =>
+    const manualIncome = (state?.buckets?.income || []).reduce((sum, item) =>
       sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0
     );
+
+    const income = manualIncome + cscIncome.estimatedPay;
 
     const expenses = allItems
       .filter(item => {
@@ -122,15 +219,17 @@ const DashboardTab = ({
 
     return {
       income,
+      manualIncome,
+      cscIncome,
       expenses,
       netIncome: income - expenses,
       budgetVariance: totalActual - totalBudgeted
     };
-  }, [state?.buckets]);
+  }, [state?.buckets, cscIncome]);
 
 
   const budgetOverview = useMemo(() => {
-    const allItems = Object.values(state?.buckets || {}).flat();
+    const allItems = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName));
     const totalItems = allItems.length;
     const paidItems = allItems.filter((item) => item.status === 'paid').length;
     const pendingItems = allItems.filter((item) => item.status !== 'paid').length;
@@ -159,8 +258,9 @@ const DashboardTab = ({
 
   const alerts = useMemo(() => {
     const allItems = [];
-    Object.entries(state?.buckets || {}).forEach(([bucket, items]) => {
+    categoryOrder.forEach((bucket) => {
       if (bucket === 'income') return;
+      const items = getBudgetItemsForBucket(bucket);
       items.forEach(item => {
         allItems.push({ ...item, bucket });
       });
@@ -182,7 +282,7 @@ const DashboardTab = ({
     const allItems = [];
     
     categoryOrder.forEach(bucketName => {
-      const items = state.buckets[bucketName] || [];
+      const items = getBudgetItemsForBucket(bucketName);
       items.forEach(item => {
         allItems.push({
           ...item,
@@ -225,7 +325,7 @@ const DashboardTab = ({
     const rows = [];
 
     categoryOrder.forEach(bucketName => {
-      const items = state.buckets[bucketName] || [];
+      const items = getBudgetItemsForBucket(bucketName);
       const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
 
       items.forEach(item => {
@@ -261,7 +361,7 @@ const DashboardTab = ({
     const allItems = [];
 
     categoryOrder.forEach(bucketName => {
-      const items = state.buckets[bucketName] || [];
+      const items = getBudgetItemsForBucket(bucketName);
       const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
       allItems.push({ category: displayTitle, items });
     });
@@ -290,7 +390,10 @@ const DashboardTab = ({
 
         <div class="summary">
           <div class="summary-card">
-            <strong>Income:</strong> $${summary.income.toFixed(2)}
+            <strong>Income:</strong> ${formatDashboardCurrency(summary.income)}
+          </div>
+          <div class="summary-card">
+            <strong>CSC Shift Income:</strong> ${formatDashboardCurrency(cscIncome.estimatedPay)}
           </div>
           <div class="summary-card">
             <strong>Expenses:</strong> $${summary.expenses.toFixed(2)}
@@ -454,35 +557,25 @@ const DashboardTab = ({
 );
       })()}
 
-      <section className="mb-6 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
+      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border border-blue-200 bg-blue-50 shadow-sm">
+        <div className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Budget Overview</h2>
+            <p className="mt-1 text-sm font-medium text-slate-600">Budget status, due dates, saved items, and spending totals.</p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {budgetSubnav}
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={() => setShowBudgetOverview((prev) => !prev)}
-          className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-blue-50"
-          aria-expanded={showBudgetOverview}
+          className="flex w-full items-center gap-2 border-t border-blue-100 bg-blue-100/60 px-6 py-2 text-left text-sm font-medium text-slate-600 hover:bg-blue-100 transition-colors"
         >
-          <div>
-            <h2 className="text-xl font-extrabold text-slate-900">Budget Overview</h2>
-            <p className="text-sm text-slate-600">Budget status, due dates, saved items, and spending totals.</p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="hidden flex-wrap items-center gap-2 sm:flex">
-              <span className="rounded-full border border-blue-300 bg-blue-100 px-3 py-1 text-sm font-bold text-blue-800">
-                {budgetOverview.totalItems} items
-              </span>
-              {budgetOverview.overdueItems > 0 && (
-                <span className="rounded-full bg-red-500 px-3 py-1 text-sm font-bold text-white">
-                  {budgetOverview.overdueItems} overdue
-                </span>
-              )}
-            </div>
-            {showBudgetOverview ? (
-              <ChevronDown className="h-5 w-5 text-slate-700" />
-            ) : (
-              <ChevronRight className="h-5 w-5 text-slate-700" />
-            )}
-          </div>
+          {showBudgetOverview ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          {showBudgetOverview ? 'Hide Stats' : 'Show Stats'}
         </button>
 
         {showBudgetOverview && (
@@ -492,7 +585,10 @@ const DashboardTab = ({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-green-700">Income</p>
-                    <p className="mt-1 text-2xl font-extrabold">${summary.income.toFixed(2)}</p>
+                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(summary.income)}</p>
+                    <p className="mt-1 text-xs font-semibold text-green-800">
+                      Budget: {formatDashboardCurrency(summary.manualIncome)} · CSC: {formatDashboardCurrency(cscIncome.estimatedPay)}
+                    </p>
                   </div>
                   <DollarSign className="h-8 w-8 text-green-600 opacity-80" />
                 </div>
@@ -542,6 +638,19 @@ const DashboardTab = ({
                     </p>
                   </div>
                   <CreditCard className="h-8 w-8 opacity-80" />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-yellow-300 bg-yellow-50 p-4 text-yellow-950 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold">CSC Shift Income</p>
+                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(cscIncome.estimatedPay)}</p>
+                    <p className="mt-1 text-xs opacity-80">
+                      {cscIncome.activeShiftCount} shifts · {cscIncome.estimatedHours.toFixed(1)} hrs · paid {formatDashboardCurrency(cscIncome.paidPay)}
+                    </p>
+                  </div>
+                  <DollarSign className="h-8 w-8 opacity-80" />
                 </div>
               </div>
 
@@ -603,7 +712,7 @@ const DashboardTab = ({
         )}
       </section>
 
-      <section className="mb-6 overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
+      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <button
           type="button"
           onClick={() => setShowPaymentAlerts(prev => !prev)}
@@ -690,7 +799,7 @@ const DashboardTab = ({
         )}
       </section>
 
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
+      <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <h3 className="text-lg font-bold whitespace-nowrap">Budget List</h3>
@@ -828,7 +937,7 @@ const DashboardTab = ({
 
         {/* GROUPED VIEW - shown when no filter or "All Items" */}
         {viewMode === 'grouped' && categoryOrder.map(bucketName => {
-          const items = state.buckets[bucketName] || [];
+          const items = getBudgetItemsForBucket(bucketName);
           const filteredItems = getFilteredItems(items);
           if (filteredItems.length === 0 && (searchQuery || statusFilter !== 'all')) return null;
 
@@ -928,19 +1037,25 @@ const DashboardTab = ({
                               <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
                               <td className="px-3 py-2">{getStatusBadge(item)}</td>
                               <td className="px-3 py-2">
-                            <input
-                              type="text"
-                              value={item.note || ''}
-                              onChange={(e) => {
-                                const updatedBucket = state.buckets[bucketName].map(i =>
-                                  i.id === item.id ? { ...i, note: e.target.value } : i
-                                );
-                                setState({ ...state, buckets: { ...state.buckets, [bucketName]: updatedBucket } });
-                              }}
-                              onBlur={saveBudget}
-                              placeholder="Add note..."
-                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                            />
+                            {item.isSystemItem ? (
+                              <div className="rounded border border-yellow-200 bg-yellow-50 px-2 py-1 text-xs font-semibold text-yellow-900">
+                                {item.note || 'Auto-calculated from CSC Shifts.'}
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                value={item.note || ''}
+                                onChange={(e) => {
+                                  const updatedBucket = state.buckets[bucketName].map(i =>
+                                    i.id === item.id ? { ...i, note: e.target.value } : i
+                                  );
+                                  setState({ ...state, buckets: { ...state.buckets, [bucketName]: updatedBucket } });
+                                }}
+                                onBlur={saveBudget}
+                                placeholder="Add note..."
+                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                              />
+                            )}
                               </td>
                             </>
                           )}
@@ -976,7 +1091,7 @@ const DashboardTab = ({
       </div>
 
       {/* Grand Totals */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
+      <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3">
           <h3 className="text-lg font-bold">GRAND TOTALS</h3>
         </div>
@@ -985,26 +1100,26 @@ const DashboardTab = ({
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Items</p>
               <p className="text-2xl font-bold text-gray-900">
-                {Object.values(state.buckets).flat().length}
+                {categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).length}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Est. Budget</p>
               <p className="text-2xl font-bold text-blue-900">
-                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
+                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Actual Cost</p>
               <p className="text-2xl font-bold text-purple-900">
-                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
+                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Variance</p>
               {(() => {
-                const totalBudget = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
-                const totalActual = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+                const totalBudget = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+                const totalActual = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
                 const variance = totalActual - totalBudget;
                 return (
                   <p className={`text-2xl font-bold ${variance > 0 ? 'text-red-600' : variance < 0 ? 'text-green-600' : 'text-gray-600'}`}>

@@ -34,7 +34,10 @@ import PageContainer from '../common/PageContainer.jsx';
 
 const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
+const CSC_DELETED_SEED_STORAGE_KEY = 'cscShifts.deletedSeedIds.v1';
 const CSC_SNAPSHOT_STORAGE_KEY = 'cscShifts.safetySnapshot.v1';
+const CSC_CALENDAR_ADDED_STORAGE_KEY = 'cscShifts.googleCalendarAdded.v1';
+const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
 const DEFAULT_HOURLY_RATE = '20.50';
 const OLD_DEFAULT_HOURLY_RATE = '15.50';
 
@@ -51,6 +54,20 @@ const CSC_COMPANY = {
 const WISH_PORTAL_URL = 'https://ess.schedulingsite.com/login';
 
 const SHIFT_STATUS_OPTIONS = ['Scheduled', 'Confirmed', 'Cancelled', 'Done'];
+
+const getShiftStatusColorClass = (status) => {
+  if (status === 'Done') return 'bg-green-600 hover:bg-green-700';
+  if (status === 'Confirmed') return 'bg-blue-600 hover:bg-blue-700';
+  if (status === 'Cancelled') return 'bg-red-600 hover:bg-red-700';
+  return 'bg-slate-600 hover:bg-slate-700';
+};
+
+const getShiftStatusOptionStyle = (status) => {
+  if (status === 'Done') return { backgroundColor: '#16a34a', color: '#ffffff' };
+  if (status === 'Confirmed') return { backgroundColor: '#2563eb', color: '#ffffff' };
+  if (status === 'Cancelled') return { backgroundColor: '#dc2626', color: '#ffffff' };
+  return { backgroundColor: '#475569', color: '#ffffff' };
+};
 const PAID_STATUS_OPTIONS = ['Unpaid', 'Paid'];
 
 const BASE_CSC_SHIFTS = [
@@ -294,6 +311,41 @@ const getEstimatedPay = (shift) => {
   return Math.round(getShiftHours(shift) * rate * 100) / 100;
 };
 
+const getDeletedSeedShiftIds = () => {
+  try {
+    const saved = localStorage.getItem(CSC_DELETED_SEED_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch (error) {
+    console.error('Failed to load deleted CSC seed shift ids:', error);
+    return new Set();
+  }
+};
+
+const saveDeletedSeedShiftId = (id) => {
+  if (!id) return;
+
+  try {
+    const deletedIds = getDeletedSeedShiftIds();
+    deletedIds.add(id);
+    localStorage.setItem(CSC_DELETED_SEED_STORAGE_KEY, JSON.stringify(Array.from(deletedIds)));
+  } catch (error) {
+    console.error('Failed to save deleted CSC seed shift id:', error);
+  }
+};
+
+const removeDeletedSeedShiftId = (id) => {
+  if (!id) return;
+
+  try {
+    const deletedIds = getDeletedSeedShiftIds();
+    deletedIds.delete(id);
+    localStorage.setItem(CSC_DELETED_SEED_STORAGE_KEY, JSON.stringify(Array.from(deletedIds)));
+  } catch (error) {
+    console.error('Failed to remove deleted CSC seed shift id:', error);
+  }
+};
+
 const loadSavedShifts = () => {
   try {
     const saved = localStorage.getItem(CSC_STORAGE_KEY);
@@ -301,8 +353,11 @@ const loadSavedShifts = () => {
 
     if (!Array.isArray(parsed)) return seedShifts;
 
+    const deletedSeedIds = getDeletedSeedShiftIds();
     const savedById = new Map(parsed.map((shift) => [shift.id, normalizeShift(shift)]));
-    const mergedSeeds = seedShifts.map((shift) => ({ ...shift, ...(savedById.get(shift.id) || {}) }));
+    const mergedSeeds = seedShifts
+      .filter((shift) => !deletedSeedIds.has(shift.id))
+      .map((shift) => ({ ...shift, ...(savedById.get(shift.id) || {}) }));
     const seedIds = new Set(seedShifts.map((shift) => shift.id));
     const imported = parsed.filter((shift) => shift?.id && !seedIds.has(shift.id)).map(normalizeShift);
 
@@ -880,6 +935,17 @@ const getGoogleCalendarUrl = (shift) => {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 };
 
+const loadCalendarAddedIds = () => {
+  try {
+    const saved = localStorage.getItem(CSC_CALENDAR_ADDED_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Failed to load CSC Google Calendar added ids:', error);
+    return [];
+  }
+};
+
 const CscShiftsTab = ({ searchQuery = '' }) => {
   const [shifts, setShifts] = useState(() => loadSavedShifts());
   const [localSearch, setLocalSearch] = useState('');
@@ -906,10 +972,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [movingShiftId, setMovingShiftId] = useState(null);
   const [expandedNoteIds, setExpandedNoteIds] = useState(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [calendarAddedIds, setCalendarAddedIds] = useState(() => new Set(loadCalendarAddedIds()));
 
   useEffect(() => {
     try {
       localStorage.setItem(CSC_STORAGE_KEY, JSON.stringify(shifts));
+      window.dispatchEvent(new CustomEvent(CSC_SHIFT_UPDATE_EVENT, { detail: { shifts } }));
     } catch (error) {
       console.error('Failed to save CSC shifts:', error);
     }
@@ -922,6 +990,24 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       console.error('Failed to save archived CSC shifts:', error);
     }
   }, [archivedShifts]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CSC_CALENDAR_ADDED_STORAGE_KEY, JSON.stringify(Array.from(calendarAddedIds)));
+    } catch (error) {
+      console.error('Failed to save CSC Google Calendar added ids:', error);
+    }
+  }, [calendarAddedIds]);
+
+  const handleGoogleCalendarClick = (id) => {
+    setCalendarAddedIds((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
+    setSaveMessage('Google Calendar opened. Shift marked as calendar added.');
+    setTimeout(() => setSaveMessage(''), 2500);
+  };
 
   const toggleShiftNotes = (id) => {
     setExpandedNoteIds((current) => {
@@ -939,13 +1025,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const normalizedNotes = String(notes || '').trim();
     if (!normalizedNotes) return false;
     const lineCount = normalizedNotes.split(/\r?\n/).length;
-    return lineCount > 2 || normalizedNotes.length > 88;
+    return lineCount > 2 || normalizedNotes.length > 76;
   };
 
   const getCollapsedNotesText = (notes = '') => {
     const normalizedNotes = String(notes || '').replace(/\s+/g, ' ').trim();
-    if (normalizedNotes.length <= 88) return normalizedNotes;
-    return `${normalizedNotes.slice(0, 82).trimEnd()}...`;
+    if (normalizedNotes.length <= 76) return normalizedNotes;
+    return `${normalizedNotes.slice(0, 70).trimEnd()}...`;
   };
 
   const updateShift = (id, updates) => {
@@ -1099,6 +1185,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       const nextArchived = [archivedShift, ...currentArchived.filter((item) => item.id !== id)];
       return nextArchived.sort((a, b) => String(b.archivedAt || '').localeCompare(String(a.archivedAt || '')));
     });
+    if (seedShifts.some((seedShift) => seedShift.id === id)) {
+      saveDeletedSeedShiftId(id);
+    }
     setShifts((currentShifts) => currentShifts.filter((item) => item.id !== id));
     setSaveMessage('CSC shift archived.');
     setTimeout(() => setSaveMessage(''), 2500);
@@ -1114,6 +1203,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
     writeCscSafetySnapshot('Before CSC shift restore', shifts, archivedShifts);
 
+    removeDeletedSeedShiftId(id);
     setShifts((currentShifts) => {
       const currentById = new Map(currentShifts.map((item) => [item.id, item]));
       currentById.set(id, normalizeShift(restoredShift));
@@ -1172,7 +1262,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     }
 
     writeCscSafetySnapshot('Before CSC shift delete', shifts, archivedShifts);
+    if (seedShifts.some((seedShift) => seedShift.id === deleteConfirm.id)) {
+      saveDeletedSeedShiftId(deleteConfirm.id);
+    }
     setShifts((currentShifts) => currentShifts.filter((item) => item.id !== deleteConfirm.id));
+    setCalendarAddedIds((current) => {
+      const next = new Set(current);
+      next.delete(deleteConfirm.id);
+      return next;
+    });
     if (selectedDetailShiftId === deleteConfirm.id) {
       setSelectedDetailShiftId(null);
     }
@@ -1482,20 +1580,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <select
             value={shift.shiftStatus}
             onChange={(event) => updateShift(shift.id, { shiftStatus: event.target.value })}
-            className={`h-[30px] w-[110px] rounded px-2 py-1 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-yellow-300 ${
-              shift.shiftStatus === 'Done'
-                ? 'bg-green-600 hover:bg-green-700'
-                : shift.shiftStatus === 'Confirmed'
-                  ? 'bg-blue-600 hover:bg-blue-700'
-                  : shift.shiftStatus === 'Cancelled'
-                    ? 'bg-red-600 hover:bg-red-700'
-                    : 'bg-slate-600 hover:bg-slate-700'
-            }`}
+            className={`h-[30px] w-[110px] rounded px-2 py-1 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-yellow-300 ${getShiftStatusColorClass(shift.shiftStatus)}`}
             title="Update shift status"
             aria-label="Update shift status"
           >
             {SHIFT_STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
+              <option key={status} value={status} style={getShiftStatusOptionStyle(status)}>
                 {status}
               </option>
             ))}
@@ -1534,11 +1624,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             href={getGoogleCalendarUrl(shift)}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-emerald-600 text-white hover:bg-emerald-700"
-            aria-label="Add shift to Google Calendar"
-            title="Add to Google Calendar"
+            onClick={() => handleGoogleCalendarClick(shift.id)}
+            className={`inline-flex h-[30px] w-[34px] items-center justify-center rounded text-white ${
+              calendarAddedIds.has(shift.id)
+                ? 'bg-green-700 ring-2 ring-green-200 hover:bg-green-800'
+                : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
+            aria-label={calendarAddedIds.has(shift.id) ? 'Google Calendar opened for this shift' : 'Add shift to Google Calendar'}
+            title={calendarAddedIds.has(shift.id) ? 'Google Calendar opened for this shift' : 'Add to Google Calendar'}
           >
-            <CalendarPlus className="h-4 w-4" />
+            {calendarAddedIds.has(shift.id) ? <CheckCircle2 className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
           </a>
         </div>
 
@@ -1954,19 +2049,19 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
           ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-[1090px] table-fixed divide-y divide-slate-200 text-left text-sm">
+            <table className="min-w-[1000px] table-fixed divide-y divide-slate-200 text-left text-sm">
               <colgroup>
-                <col className="w-[125px]" />
-                <col className="w-[125px]" />
                 <col className="w-[235px]" />
-                <col className="w-[435px]" />
+                <col className="w-[125px]" />
+                <col className="w-[125px]" />
+                <col className="w-[345px]" />
                 <col className="w-[170px]" />
               </colgroup>
               <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
                 <tr>
+                  <th className="px-4 py-3 font-extrabold">Shift</th>
                   <th className="px-4 py-3 font-extrabold">Start</th>
                   <th className="px-4 py-3 font-extrabold">Finish</th>
-                  <th className="px-4 py-3 font-extrabold">Shift</th>
                   <th className="px-4 py-3 font-extrabold">Details</th>
                   <th className="sticky right-0 z-10 w-[170px] min-w-[170px] border-l border-slate-200 bg-slate-100 px-3 py-3 font-extrabold shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">Actions</th>
                 </tr>
@@ -1974,6 +2069,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <tbody className="divide-y divide-slate-200 bg-white">
                 {filteredShifts.map((shift) => (
                   <tr key={shift.id} className="hover:bg-yellow-50/60">
+                    <td className="px-3 py-3 align-top">
+                      <div className="font-bold text-slate-950">{shift.venue}</div>
+                      <div className="text-slate-600">{shift.city}</div>
+                      <div className="mt-1 text-xs text-slate-500">{shift.address || 'Address not shown'}</div>
+                      <div className="mt-2 text-xs font-semibold text-slate-500">{shift.jobName}</div>
+                    </td>
                     <td className="whitespace-nowrap px-3 py-3 align-top font-bold text-blue-700">
                       <div>{formatDate(shift.startDate)}</div>
                       <div>{formatTime(shift.startTime)}</div>
@@ -1982,13 +2083,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <div>{formatDate(shift.finishDate)}</div>
                       <div>{formatTime(shift.finishTime)}</div>
                     </td>
-                    <td className="px-3 py-3 align-top">
-                      <div className="font-bold text-slate-950">{shift.venue}</div>
-                      <div className="text-slate-600">{shift.city}</div>
-                      <div className="mt-1 text-xs text-slate-500">{shift.address || 'Address not shown'}</div>
-                      <div className="mt-2 text-xs font-semibold text-slate-500">{shift.jobName}</div>
-                    </td>
-                    <td className="w-[435px] min-w-0 max-w-[435px] overflow-hidden whitespace-normal break-words px-4 py-3 align-top text-slate-900">
+                    <td className="w-[345px] min-w-0 max-w-[345px] overflow-hidden whitespace-normal break-words px-4 py-3 align-top text-slate-900">
                       <div className="max-w-full overflow-hidden whitespace-normal break-words font-semibold leading-snug">{shift.event}</div>
                       <div className="mt-2 grid max-w-full grid-cols-2 gap-x-3 gap-y-1 overflow-hidden text-xs text-slate-600">
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Hours:</span> {getShiftHours(shift).toFixed(1)}</div>
@@ -1996,13 +2091,18 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Est. Pay:</span> {formatCurrency(getEstimatedPay(shift))}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Status:</span> {shift.shiftStatus}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Paid:</span> {shift.paidStatus}</div>
+                        {calendarAddedIds.has(shift.id) ? (
+                          <div className="min-w-0 break-words text-green-700">
+                            <span className="font-bold">Calendar:</span> Added
+                          </div>
+                        ) : null}
                         {shift.paymentDate ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Pay Date:</span> {formatDate(shift.paymentDate)}</div> : null}
                         {shift.parking ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Parking:</span> {shift.parking}</div> : null}
                         {shift.uniform ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Uniform:</span> {shift.uniform}</div> : null}
                         {shift.supervisor ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Supervisor:</span> {shift.supervisor}</div> : null}
                       </div>
                       {shift.notes ? (
-                        <div className="mt-2 box-border w-[360px] max-w-[360px] overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs leading-relaxed text-slate-700">
+                        <div className="mt-2 box-border w-[315px] max-w-[315px] overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs leading-relaxed text-slate-700">
                           <div
                             className="min-w-0 whitespace-normal break-words"
                             style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeState, saveToServer } from '../utils/state.js';
 import LoadingGate from './common/LoadingGate';
+import PageContainer from './common/PageContainer';
 import DashboardTab from './tabs/DashboardTab';
 import AnalysisTab from './tabs/AnalysisTab';
 import CalculatorTab from './tabs/CalculatorTab';
@@ -159,8 +160,6 @@ const readTodoTasks = () => {
     return [];
   }
 };
-
-
 
 const readTodoArchivedTasks = () => {
   try {
@@ -431,6 +430,7 @@ const DashboardOverviewStrip = ({ state, onNavigateToTab }) => {
 const BudgetDashboard = () => {
   const [state, setState] = useState(null);
   const [activeTab, setActiveTab] = useState('todo');
+  const [activeBudgetTab, setActiveBudgetTab] = useState('overview');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null);
@@ -475,15 +475,21 @@ const BudgetDashboard = () => {
     };
   }, []);
 
-
   const tabs = useMemo(
     () => [
-      { id: 'todo', label: 'To-Do', bgColor: 'bg-red-100', inactiveClass: 'bg-red-100 text-red-900 hover:bg-red-200' },
+      { id: 'todo', label: 'To-Do', bgColor: 'bg-green-50', inactiveClass: 'bg-green-100 text-green-900 hover:bg-green-200' },
       { id: 'cscShifts', label: 'CSC Shifts', bgColor: 'bg-yellow-100', inactiveClass: 'bg-yellow-100 text-yellow-900 hover:bg-yellow-200' },
-      { id: 'dashboard', label: 'Budget', bgColor: 'bg-blue-100', inactiveClass: 'bg-blue-100 text-blue-900 hover:bg-blue-200' },
-      { id: 'analysis', label: 'Analysis', bgColor: 'bg-purple-100', inactiveClass: 'bg-purple-100 text-purple-900 hover:bg-purple-200' },
-      { id: 'calculator', label: 'Calculator', bgColor: 'bg-green-100', inactiveClass: 'bg-green-100 text-green-900 hover:bg-green-200' },
-      { id: 'editor', label: 'Editor', bgColor: 'bg-orange-100', inactiveClass: 'bg-orange-100 text-orange-900 hover:bg-orange-200' },
+      { id: 'budget', label: 'Budget', bgColor: 'bg-blue-100', inactiveClass: 'bg-blue-100 text-blue-900 hover:bg-blue-200' },
+    ],
+    []
+  );
+
+  const budgetTabs = useMemo(
+    () => [
+      { id: 'overview', label: 'Overview', inactiveClass: 'bg-blue-50 text-blue-900 hover:bg-blue-100' },
+      { id: 'editor', label: 'Editor', inactiveClass: 'bg-orange-50 text-orange-900 hover:bg-orange-100' },
+      { id: 'analysis', label: 'Analysis', inactiveClass: 'bg-purple-50 text-purple-900 hover:bg-purple-100' },
+      { id: 'calculator', label: 'Calculator', inactiveClass: 'bg-green-50 text-green-900 hover:bg-green-100' },
     ],
     []
   );
@@ -491,6 +497,46 @@ const BudgetDashboard = () => {
   const activeTabConfig = useMemo(
     () => tabs.find((t) => t.id === activeTab),
     [tabs, activeTab]
+  );
+
+  const renderBudgetSubnav = () => (
+    <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-white/80 p-2 shadow-sm">
+      {budgetTabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => setActiveBudgetTab(tab.id)}
+          title={`Open Budget ${tab.label}`}
+          aria-label={`Open Budget ${tab.label}`}
+          className={`rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+            activeBudgetTab === tab.id
+              ? 'bg-blue-700 text-white shadow-sm'
+              : tab.inactiveClass
+          }`}
+          aria-pressed={activeBudgetTab === tab.id}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // FIX: Use PageContainer (max-w-6xl) instead of budget-fixed-width (1360px hardcoded)
+  // so all subnav headers match the width of the Overview tab which uses PageContainer.
+  const renderBudgetToolHeader = (title, description) => (
+    <PageContainer className="mb-6">
+      <section className="rounded-xl border border-blue-200 bg-blue-50 px-6 py-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
+            {description && (
+              <p className="mt-1 text-sm font-medium text-slate-600">{description}</p>
+            )}
+          </div>
+          {renderBudgetSubnav()}
+        </div>
+      </section>
+    </PageContainer>
   );
 
   const saveBudget = async (customState = null, customMessage = null) => {
@@ -516,6 +562,11 @@ const BudgetDashboard = () => {
         setTimeout(() => setSaveStatus(null), 3000);
       }
     }
+  };
+
+  const openBudgetTool = (toolId = 'overview') => {
+    setActiveTab('budget');
+    setActiveBudgetTab(toolId);
   };
 
   const handleStatementImport = (budgetItems) => {
@@ -660,7 +711,12 @@ const BudgetDashboard = () => {
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id === 'budget') {
+                    setActiveBudgetTab((current) => current || 'overview');
+                  }
+                }}
                 title={`Open ${tab.label} tab`}
                 aria-label={`Open ${tab.label} tab`}
                 className={`px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0 ${
@@ -819,33 +875,6 @@ const BudgetDashboard = () => {
           <CscShiftsTab searchQuery={searchQuery} />
         )}
 
-        {activeTab === 'dashboard' && (
-          <DashboardTab
-            state={state}
-            setState={setState}
-            saveBudget={saveBudget}
-            searchQuery={searchQuery}
-          />
-        )}
-
-        {activeTab === 'analysis' && (
-          <AnalysisTab
-            state={state}
-            setState={setState}
-            saveBudget={saveBudget}
-            searchQuery={searchQuery}
-          />
-        )}
-
-        {activeTab === 'calculator' && (
-          <CalculatorTab
-            state={state}
-            setState={setState}
-            saveBudget={saveBudget}
-            searchQuery={searchQuery}
-          />
-        )}
-
         {activeTab === 'todo' && (
           <TodoTab
             editTaskId={todoEditTaskId}
@@ -853,13 +882,54 @@ const BudgetDashboard = () => {
           />
         )}
 
-        {activeTab === 'editor' && (
-          <EditorTab
-            state={state}
-            setState={setState}
-            saveBudget={saveBudget}
-            searchQuery={searchQuery}
-          />
+        {activeTab === 'budget' && (
+          <div className="min-h-screen">
+            {activeBudgetTab === 'overview' && (
+              <DashboardTab
+                state={state}
+                setState={setState}
+                saveBudget={saveBudget}
+                searchQuery={searchQuery}
+                budgetSubnav={renderBudgetSubnav()}
+              />
+            )}
+
+            {activeBudgetTab === 'editor' && (
+              <div className="pt-4">
+                {renderBudgetToolHeader('Budget Editor', 'Edit budget items, categories, amounts, due dates, notes, and payment details.')}
+                <EditorTab
+                  state={state}
+                  setState={setState}
+                  saveBudget={saveBudget}
+                  searchQuery={searchQuery}
+                />
+              </div>
+            )}
+
+            {activeBudgetTab === 'analysis' && (
+              <div className="pt-4">
+                {renderBudgetToolHeader('Budget Analysis', 'Review budget trends, spending patterns, category totals, and variance insights.')}
+                <AnalysisTab
+                  state={state}
+                  setState={setState}
+                  saveBudget={saveBudget}
+                  searchQuery={searchQuery}
+                />
+              </div>
+            )}
+
+            {activeBudgetTab === 'calculator' && (
+              <div className="pt-4">
+                {renderBudgetToolHeader('Budget Calculator', 'Calculate payment scenarios, totals, savings targets, and budget adjustments.')}
+                <CalculatorTab
+                  state={state}
+                  setState={setState}
+                  saveBudget={saveBudget}
+                  searchQuery={searchQuery}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
 

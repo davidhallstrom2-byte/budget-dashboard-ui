@@ -36,6 +36,7 @@ const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
 const CSC_SNAPSHOT_STORAGE_KEY = 'cscShifts.safetySnapshot.v1';
 const CSC_CALENDAR_ADDED_STORAGE_KEY = 'cscShifts.googleCalendarAdded.v1';
+const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
 const DEFAULT_HOURLY_RATE = '20.50';
 const OLD_DEFAULT_HOURLY_RATE = '15.50';
 
@@ -874,6 +875,8 @@ const getGoogleCalendarUrl = (shift) => {
     dates: `${startDateTime}/${finishDateTime}`,
     location: [shift.venue, shift.address, shift.city].filter(Boolean).join(', '),
     details,
+    ctz: 'America/Los_Angeles',
+    color: '#F4B400',
   });
 
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
@@ -921,6 +924,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   useEffect(() => {
     try {
       localStorage.setItem(CSC_STORAGE_KEY, JSON.stringify(shifts));
+      window.dispatchEvent(new CustomEvent(CSC_SHIFT_UPDATE_EVENT, { detail: { shifts } }));
     } catch (error) {
       console.error('Failed to save CSC shifts:', error);
     }
@@ -968,13 +972,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const normalizedNotes = String(notes || '').trim();
     if (!normalizedNotes) return false;
     const lineCount = normalizedNotes.split(/\r?\n/).length;
-    return lineCount > 2 || normalizedNotes.length > 88;
+    return lineCount > 2 || normalizedNotes.length > 76;
   };
 
   const getCollapsedNotesText = (notes = '') => {
     const normalizedNotes = String(notes || '').replace(/\s+/g, ' ').trim();
-    if (normalizedNotes.length <= 88) return normalizedNotes;
-    return `${normalizedNotes.slice(0, 82).trimEnd()}...`;
+    if (normalizedNotes.length <= 76) return normalizedNotes;
+    return `${normalizedNotes.slice(0, 70).trimEnd()}...`;
   };
 
   const updateShift = (id, updates) => {
@@ -1993,12 +1997,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
           ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-[1090px] table-fixed divide-y divide-slate-200 text-left text-sm">
+            <table className="min-w-[1000px] table-fixed divide-y divide-slate-200 text-left text-sm">
               <colgroup>
                 <col className="w-[125px]" />
                 <col className="w-[125px]" />
                 <col className="w-[235px]" />
-                <col className="w-[435px]" />
+                <col className="w-[345px]" />
                 <col className="w-[170px]" />
               </colgroup>
               <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
@@ -2027,7 +2031,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <div className="mt-1 text-xs text-slate-500">{shift.address || 'Address not shown'}</div>
                       <div className="mt-2 text-xs font-semibold text-slate-500">{shift.jobName}</div>
                     </td>
-                    <td className="w-[435px] min-w-0 max-w-[435px] overflow-hidden whitespace-normal break-words px-4 py-3 align-top text-slate-900">
+                    <td className="w-[345px] min-w-0 max-w-[345px] overflow-hidden whitespace-normal break-words px-4 py-3 align-top text-slate-900">
                       <div className="max-w-full overflow-hidden whitespace-normal break-words font-semibold leading-snug">{shift.event}</div>
                       <div className="mt-2 grid max-w-full grid-cols-2 gap-x-3 gap-y-1 overflow-hidden text-xs text-slate-600">
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Hours:</span> {getShiftHours(shift).toFixed(1)}</div>
@@ -2046,7 +2050,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         {shift.supervisor ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Supervisor:</span> {shift.supervisor}</div> : null}
                       </div>
                       {shift.notes ? (
-                        <div className="mt-2 box-border w-[360px] max-w-[360px] overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs leading-relaxed text-slate-700">
+                        <div className="mt-2 box-border w-[315px] max-w-[315px] overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs leading-relaxed text-slate-700">
                           <div
                             className="min-w-0 whitespace-normal break-words"
                             style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}

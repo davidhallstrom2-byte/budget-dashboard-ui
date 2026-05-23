@@ -1,5 +1,5 @@
 // src/components/tabs/DashboardTab.jsx
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, Plus, Minus, Archive } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
@@ -33,11 +33,51 @@ const DEFAULT_TITLES = {
   misc: 'Miscellaneous'
 };
 
+const CSC_STORAGE_KEY = 'cscShifts.v1';
+const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
+
+const loadCscBudgetShifts = () => {
+  try {
+    const saved = localStorage.getItem(CSC_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Failed to load CSC shifts for budget dashboard:', error);
+    return [];
+  }
+};
+
+const getCscShiftHours = (shift) => {
+  if (!shift?.startDate || !shift?.startTime || !shift?.finishDate || !shift?.finishTime) return 0;
+
+  const start = new Date(`${shift.startDate}T${shift.startTime}:00`);
+  const finish = new Date(`${shift.finishDate}T${shift.finishTime}:00`);
+  const diff = finish.getTime() - start.getTime();
+
+  if (!Number.isFinite(diff) || diff <= 0) return 0;
+
+  return Math.round((diff / (1000 * 60 * 60)) * 100) / 100;
+};
+
+const getCscEstimatedPay = (shift) => {
+  const hourlyRate = Number.parseFloat(shift?.hourlyRate);
+  if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) return 0;
+
+  return Math.round(getCscShiftHours(shift) * hourlyRate * 100) / 100;
+};
+
+const formatDashboardCurrency = (amount) =>
+  `$${(Number(amount) || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
 const DashboardTab = ({
   state,
   setState,
   saveBudget,
   searchQuery,
+  budgetSubnav = null,
   showUrgentAlert = false,
   onCloseUrgentAlert = () => {},
 }) => {
@@ -46,12 +86,26 @@ const DashboardTab = ({
   const [viewMode, setViewMode] = useState('grouped'); // 'grouped' or 'flat'
   const [showAllOverdue, setShowAllOverdue] = useState(false);
   const [showBudgetOverview, setShowBudgetOverview] = useState(false);
+  const [showPaymentAlerts, setShowPaymentAlerts] = useState(false);
+  const [cscShifts, setCscShifts] = useState(() => loadCscBudgetShifts());
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
     (state?.meta?.categoryOrder && state.meta.categoryOrder.length > 0)
       ? state.meta.categoryOrder
       : Object.keys(state?.buckets || {});
+
+  useEffect(() => {
+    const refreshCscShifts = () => setCscShifts(loadCscBudgetShifts());
+
+    window.addEventListener('storage', refreshCscShifts);
+    window.addEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShifts);
+
+    return () => {
+      window.removeEventListener('storage', refreshCscShifts);
+      window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShifts);
+    };
+  }, []);
 
   const toggleCategory = (category) => {
     setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
@@ -97,12 +151,56 @@ const DashboardTab = ({
     return counts;
   };
 
+  const cscIncome = useMemo(() => {
+    const activeShifts = cscShifts.filter((shift) => shift?.shiftStatus !== 'Cancelled');
+    const paidShifts = activeShifts.filter((shift) => shift?.paidStatus === 'Paid');
+    const unpaidShifts = activeShifts.filter((shift) => shift?.paidStatus !== 'Paid');
+    const doneShifts = activeShifts.filter((shift) => shift?.shiftStatus === 'Done');
+
+    const estimatedPay = activeShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const paidPay = paidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const unpaidPay = unpaidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const estimatedHours = activeShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0);
+    const workedHours = doneShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0);
+
+    return {
+      activeShiftCount: activeShifts.length,
+      paidShiftCount: paidShifts.length,
+      unpaidShiftCount: unpaidShifts.length,
+      estimatedPay,
+      paidPay,
+      unpaidPay,
+      estimatedHours,
+      workedHours,
+    };
+  }, [cscShifts]);
+
+  const cscIncomeItem = useMemo(() => ({
+    id: 'system-csc-shift-income',
+    category: 'CSC Shift Income',
+    estBudget: cscIncome.estimatedPay,
+    actualCost: cscIncome.paidPay,
+    dueDate: '',
+    status: cscIncome.unpaidPay > 0 ? 'pending' : 'paid',
+    note: `${cscIncome.activeShiftCount} active shifts · ${cscIncome.estimatedHours.toFixed(1)} estimated hours · unpaid ${formatDashboardCurrency(cscIncome.unpaidPay)}`,
+    isSystemItem: true,
+  }), [cscIncome]);
+
+  const getBudgetItemsForBucket = (bucketName) => {
+    const items = state?.buckets?.[bucketName] || [];
+    if (bucketName !== 'income') return items;
+    if (!cscIncome.activeShiftCount && !cscIncome.estimatedPay) return items;
+    return [...items, cscIncomeItem];
+  };
+
   const summary = useMemo(() => {
     const allItems = Object.values(state?.buckets || {}).flat();
 
-    const income = (state?.buckets?.income || []).reduce((sum, item) =>
+    const manualIncome = (state?.buckets?.income || []).reduce((sum, item) =>
       sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0
     );
+
+    const income = manualIncome + cscIncome.estimatedPay;
 
     const expenses = allItems
       .filter(item => {
@@ -121,15 +219,17 @@ const DashboardTab = ({
 
     return {
       income,
+      manualIncome,
+      cscIncome,
       expenses,
       netIncome: income - expenses,
       budgetVariance: totalActual - totalBudgeted
     };
-  }, [state?.buckets]);
+  }, [state?.buckets, cscIncome]);
 
 
   const budgetOverview = useMemo(() => {
-    const allItems = Object.values(state?.buckets || {}).flat();
+    const allItems = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName));
     const totalItems = allItems.length;
     const paidItems = allItems.filter((item) => item.status === 'paid').length;
     const pendingItems = allItems.filter((item) => item.status !== 'paid').length;
@@ -158,8 +258,9 @@ const DashboardTab = ({
 
   const alerts = useMemo(() => {
     const allItems = [];
-    Object.entries(state?.buckets || {}).forEach(([bucket, items]) => {
+    categoryOrder.forEach((bucket) => {
       if (bucket === 'income') return;
+      const items = getBudgetItemsForBucket(bucket);
       items.forEach(item => {
         allItems.push({ ...item, bucket });
       });
@@ -181,7 +282,7 @@ const DashboardTab = ({
     const allItems = [];
     
     categoryOrder.forEach(bucketName => {
-      const items = state.buckets[bucketName] || [];
+      const items = getBudgetItemsForBucket(bucketName);
       items.forEach(item => {
         allItems.push({
           ...item,
@@ -224,7 +325,7 @@ const DashboardTab = ({
     const rows = [];
 
     categoryOrder.forEach(bucketName => {
-      const items = state.buckets[bucketName] || [];
+      const items = getBudgetItemsForBucket(bucketName);
       const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
 
       items.forEach(item => {
@@ -260,7 +361,7 @@ const DashboardTab = ({
     const allItems = [];
 
     categoryOrder.forEach(bucketName => {
-      const items = state.buckets[bucketName] || [];
+      const items = getBudgetItemsForBucket(bucketName);
       const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
       allItems.push({ category: displayTitle, items });
     });
@@ -289,7 +390,10 @@ const DashboardTab = ({
 
         <div class="summary">
           <div class="summary-card">
-            <strong>Income:</strong> $${summary.income.toFixed(2)}
+            <strong>Income:</strong> ${formatDashboardCurrency(summary.income)}
+          </div>
+          <div class="summary-card">
+            <strong>CSC Shift Income:</strong> ${formatDashboardCurrency(cscIncome.estimatedPay)}
           </div>
           <div class="summary-card">
             <strong>Expenses:</strong> $${summary.expenses.toFixed(2)}
@@ -453,29 +557,21 @@ const DashboardTab = ({
 );
       })()}
 
-      <section className="mb-6 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
+      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border border-blue-200 bg-blue-50 shadow-sm">
         <button
           type="button"
           onClick={() => setShowBudgetOverview((prev) => !prev)}
-          className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-blue-50"
+          className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left hover:bg-blue-100"
           aria-expanded={showBudgetOverview}
         >
           <div>
-            <h2 className="text-xl font-extrabold text-slate-900">Budget Overview</h2>
-            <p className="text-sm text-slate-600">Budget status, due dates, saved items, and spending totals.</p>
+            <h2 className="text-2xl font-bold text-slate-900">Budget Overview</h2>
+            <p className="mt-1 text-sm font-medium text-slate-600">Budget status, due dates, saved items, and spending totals.</p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden flex-wrap items-center gap-2 sm:flex">
-              <span className="rounded-full border border-blue-300 bg-blue-100 px-3 py-1 text-sm font-bold text-blue-800">
-                {budgetOverview.totalItems} items
-              </span>
-              {budgetOverview.overdueItems > 0 && (
-                <span className="rounded-full bg-red-500 px-3 py-1 text-sm font-bold text-white">
-                  {budgetOverview.overdueItems} overdue
-                </span>
-              )}
-            </div>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {budgetSubnav}
+
             {showBudgetOverview ? (
               <ChevronDown className="h-5 w-5 text-slate-700" />
             ) : (
@@ -491,7 +587,10 @@ const DashboardTab = ({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-green-700">Income</p>
-                    <p className="mt-1 text-2xl font-extrabold">${summary.income.toFixed(2)}</p>
+                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(summary.income)}</p>
+                    <p className="mt-1 text-xs font-semibold text-green-800">
+                      Budget: {formatDashboardCurrency(summary.manualIncome)} · CSC: {formatDashboardCurrency(cscIncome.estimatedPay)}
+                    </p>
                   </div>
                   <DollarSign className="h-8 w-8 text-green-600 opacity-80" />
                 </div>
@@ -541,6 +640,19 @@ const DashboardTab = ({
                     </p>
                   </div>
                   <CreditCard className="h-8 w-8 opacity-80" />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-yellow-300 bg-yellow-50 p-4 text-yellow-950 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold">CSC Shift Income</p>
+                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(cscIncome.estimatedPay)}</p>
+                    <p className="mt-1 text-xs opacity-80">
+                      {cscIncome.activeShiftCount} shifts · {cscIncome.estimatedHours.toFixed(1)} hrs · paid {formatDashboardCurrency(cscIncome.paidPay)}
+                    </p>
+                  </div>
+                  <DollarSign className="h-8 w-8 opacity-80" />
                 </div>
               </div>
 
@@ -602,69 +714,94 @@ const DashboardTab = ({
         )}
       </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden">
-          <div className="bg-red-600 text-white px-4 py-3 flex items-center gap-2">
-            <AlertCircle className="w-5 h-5" />
-            <h3 className="text-lg font-bold">Overdue Items ({alerts.overdue.length})</h3>
+      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
+        <button
+          type="button"
+          onClick={() => setShowPaymentAlerts(prev => !prev)}
+          className="flex w-full items-center justify-between gap-4 bg-slate-950 px-4 py-3 text-left text-white hover:bg-slate-900"
+          title={showPaymentAlerts ? 'Collapse overdue and due soon items' : 'Expand overdue and due soon items'}
+        >
+          <div className="flex items-center gap-2">
+            {showPaymentAlerts ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+            <AlertCircle className="h-5 w-5 text-red-300" />
+            <h3 className="text-lg font-bold">Payment Alerts</h3>
+            <span className="rounded-full bg-red-600 px-2 py-1 text-xs font-extrabold text-white">
+              Overdue {alerts.overdue.length}
+            </span>
+            <span className="rounded-full bg-yellow-500 px-2 py-1 text-xs font-extrabold text-white">
+              Due Soon {alerts.upcoming.length}
+            </span>
           </div>
-          <div className="bg-white p-4">
-            {alerts.overdue.length > 0 ? (
-              <div className="space-y-2">
-                {(showAllOverdue ? alerts.overdue : alerts.overdue.slice(0, 5)).map(item => (
-                  <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center text-sm py-2 border-b border-gray-100 last:border-b-0">
-                    <span className="text-gray-800 truncate font-medium">{item.category}</span>
-                    <span className="text-gray-600 text-xs whitespace-nowrap">{item.dueDate}</span>
-                    <span className="text-red-600 font-bold text-right whitespace-nowrap">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
-                  </div>
-                ))}
-                {alerts.overdue.length > 5 && (
-  <button
-    type="button"
-    onClick={() => setShowAllOverdue(prev => !prev)}
-    title={showAllOverdue ? "Show fewer overdue items" : "Show all overdue items"}
-    className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
-  >
-    {showAllOverdue
-      ? "Show fewer overdue items"
-      : `+ ${alerts.overdue.length - 5} more overdue items`}
-  </button>
+          <span className="text-sm font-semibold text-slate-200">
+            {showPaymentAlerts ? 'Collapse' : 'Expand'}
+          </span>
+        </button>
 
+        {showPaymentAlerts && (
+          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
+            <div className="overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50">
+              <div className="flex items-center gap-2 bg-red-600 px-4 py-3 text-white">
+                <AlertCircle className="h-5 w-5" />
+                <h3 className="text-lg font-bold">Overdue Items ({alerts.overdue.length})</h3>
+              </div>
+              <div className="bg-white p-4">
+                {alerts.overdue.length > 0 ? (
+                  <div className="space-y-2">
+                    {(showAllOverdue ? alerts.overdue : alerts.overdue.slice(0, 5)).map(item => (
+                      <div key={item.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-gray-100 py-2 text-sm last:border-b-0">
+                        <span className="truncate font-medium text-gray-800">{item.category}</span>
+                        <span className="whitespace-nowrap text-xs text-gray-600">{item.dueDate}</span>
+                        <span className="whitespace-nowrap text-right font-bold text-red-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                    {alerts.overdue.length > 5 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllOverdue(prev => !prev)}
+                        title={showAllOverdue ? 'Show fewer overdue items' : 'Show all overdue items'}
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+                      >
+                        {showAllOverdue
+                          ? 'Show fewer overdue items'
+                          : `+ ${alerts.overdue.length - 5} more overdue items`}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="py-2 text-center text-sm text-gray-500">No overdue items</p>
                 )}
               </div>
-            ) : (
-              <p className="text-sm text-gray-500 text-center py-2">No overdue items</p>
-            )}
-          </div>
-        </div>
+            </div>
 
-        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden">
-          <div className="bg-yellow-500 text-white px-4 py-3 flex items-center gap-2">
-            <Clock className="w-5 h-5" />
-            <h3 className="text-lg font-bold">Due Soon ({alerts.upcoming.length})</h3>
-          </div>
-          <div className="bg-white p-4">
-            {alerts.upcoming.length > 0 ? (
-              <div className="space-y-2">
-                {alerts.upcoming.slice(0, 5).map(item => (
-                  <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center text-sm py-2 border-b border-gray-100 last:border-b-0">
-                    <span className="text-gray-800 truncate font-medium">{item.category}</span>
-                    <span className="text-gray-600 text-xs whitespace-nowrap">{item.dueDate}</span>
-                    <span className="text-yellow-600 font-bold text-right whitespace-nowrap">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+            <div className="overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50">
+              <div className="flex items-center gap-2 bg-yellow-500 px-4 py-3 text-white">
+                <Clock className="h-5 w-5" />
+                <h3 className="text-lg font-bold">Due Soon ({alerts.upcoming.length})</h3>
+              </div>
+              <div className="bg-white p-4">
+                {alerts.upcoming.length > 0 ? (
+                  <div className="space-y-2">
+                    {alerts.upcoming.slice(0, 5).map(item => (
+                      <div key={item.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-gray-100 py-2 text-sm last:border-b-0">
+                        <span className="truncate font-medium text-gray-800">{item.category}</span>
+                        <span className="whitespace-nowrap text-xs text-gray-600">{item.dueDate}</span>
+                        <span className="whitespace-nowrap text-right font-bold text-yellow-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                    {alerts.upcoming.length > 5 && (
+                      <p className="pt-2 text-xs text-gray-600">+ {alerts.upcoming.length - 5} more upcoming items</p>
+                    )}
                   </div>
-                ))}
-                {alerts.upcoming.length > 5 && (
-                  <p className="text-xs text-gray-600 pt-2">+ {alerts.upcoming.length - 5} more upcoming items</p>
+                ) : (
+                  <p className="py-2 text-center text-sm text-gray-500">No items due within 5 days</p>
                 )}
               </div>
-            ) : (
-              <p className="text-sm text-gray-500 text-center py-2">No items due within 5 days</p>
-            )}
+            </div>
           </div>
-        </div>
-      </div>
+        )}
+      </section>
 
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
+      <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <h3 className="text-lg font-bold whitespace-nowrap">Budget List</h3>
@@ -802,7 +939,7 @@ const DashboardTab = ({
 
         {/* GROUPED VIEW - shown when no filter or "All Items" */}
         {viewMode === 'grouped' && categoryOrder.map(bucketName => {
-          const items = state.buckets[bucketName] || [];
+          const items = getBudgetItemsForBucket(bucketName);
           const filteredItems = getFilteredItems(items);
           if (filteredItems.length === 0 && (searchQuery || statusFilter !== 'all')) return null;
 
@@ -902,19 +1039,25 @@ const DashboardTab = ({
                               <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
                               <td className="px-3 py-2">{getStatusBadge(item)}</td>
                               <td className="px-3 py-2">
-                            <input
-                              type="text"
-                              value={item.note || ''}
-                              onChange={(e) => {
-                                const updatedBucket = state.buckets[bucketName].map(i =>
-                                  i.id === item.id ? { ...i, note: e.target.value } : i
-                                );
-                                setState({ ...state, buckets: { ...state.buckets, [bucketName]: updatedBucket } });
-                              }}
-                              onBlur={saveBudget}
-                              placeholder="Add note..."
-                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                            />
+                            {item.isSystemItem ? (
+                              <div className="rounded border border-yellow-200 bg-yellow-50 px-2 py-1 text-xs font-semibold text-yellow-900">
+                                {item.note || 'Auto-calculated from CSC Shifts.'}
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                value={item.note || ''}
+                                onChange={(e) => {
+                                  const updatedBucket = state.buckets[bucketName].map(i =>
+                                    i.id === item.id ? { ...i, note: e.target.value } : i
+                                  );
+                                  setState({ ...state, buckets: { ...state.buckets, [bucketName]: updatedBucket } });
+                                }}
+                                onBlur={saveBudget}
+                                placeholder="Add note..."
+                                className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                              />
+                            )}
                               </td>
                             </>
                           )}
@@ -950,7 +1093,7 @@ const DashboardTab = ({
       </div>
 
       {/* Grand Totals */}
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden mb-6">
+      <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3">
           <h3 className="text-lg font-bold">GRAND TOTALS</h3>
         </div>
@@ -959,26 +1102,26 @@ const DashboardTab = ({
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Items</p>
               <p className="text-2xl font-bold text-gray-900">
-                {Object.values(state.buckets).flat().length}
+                {categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).length}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Est. Budget</p>
               <p className="text-2xl font-bold text-blue-900">
-                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
+                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Actual Cost</p>
               <p className="text-2xl font-bold text-purple-900">
-                ${Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
+                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Variance</p>
               {(() => {
-                const totalBudget = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
-                const totalActual = Object.values(state.buckets).flat().reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+                const totalBudget = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+                const totalActual = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
                 const variance = totalActual - totalBudget;
                 return (
                   <p className={`text-2xl font-bold ${variance > 0 ? 'text-red-600' : variance < 0 ? 'text-green-600' : 'text-gray-600'}`}>

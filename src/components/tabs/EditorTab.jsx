@@ -1253,18 +1253,6 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
   return (
     <PageContainer className="py-6">
-      <div className="bg-gradient-to-r from-orange-50 to-orange-100 border-2 border-orange-200 rounded-xl px-6 py-4 mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <h2 className="text-2xl font-bold text-slate-800">Budget Editor</h2>
-          {isSaving && (
-            <div className="flex items-center gap-2 text-orange-600 animate-pulse">
-              <div className="w-2 h-2 bg-orange-600 rounded-full animate-bounce"></div>
-              <span className="text-sm font-medium">Saving...</span>
-            </div>
-          )}
-        </div>
-      </div>
-
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-gray-700 whitespace-nowrap hidden md:inline">Filter by Status:</span>

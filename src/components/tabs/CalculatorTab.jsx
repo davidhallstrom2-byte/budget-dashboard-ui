@@ -106,11 +106,7 @@ export default function CalculatorTab({ state, searchQuery }) {
   const anchorStyle = { scrollMarginTop: `${STICKY_OFFSET}px` };
 
   return (
-    <PageContainer className="py-6">
-      <div className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-200 rounded-xl px-6 py-4 mb-6">
-        <h2 className="text-2xl font-bold text-slate-800">Budget Calculator</h2>
-      </div>
-
+    <div className="max-w-6xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
       <div className="mb-6 flex items-center gap-3">
         <span className="text-sm font-medium text-gray-700">Filter by Status:</span>
         <div className="flex flex-wrap gap-2">
@@ -403,6 +399,6 @@ export default function CalculatorTab({ state, searchQuery }) {
           </div>
         </div>
       </div>
-    </PageContainer>
+    </div>
   );
 }

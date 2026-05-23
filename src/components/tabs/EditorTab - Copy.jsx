@@ -134,36 +134,9 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!state?.buckets?.income) return;
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth();
-
-    const thisMonthIncome = state.buckets.income.filter(item => {
-      const itemDate = new Date(item.dueDate);
-      return itemDate.getMonth() === currentMonth && itemDate.getFullYear() === currentYear;
-    });
-    if (thisMonthIncome.length >= 4) return;
-
-    const fridays = getFridaysInMonth(currentYear, currentMonth);
-    const newEntries = fridays.slice(0, 4).map((friday, idx) => ({
-      id: `income-${Date.now()}-${idx}`,
-      category: `CSC - Week ${idx + 1}`,
-      estBudget: 200,
-      actualCost: 0,
-      dueDate: friday.toISOString().split('T')[0],
-      status: 'pending'
-    }));
-
-    const updatedBuckets = {
-      ...state.buckets,
-      income: [...state.buckets.income, ...newEntries]
-    };
-    const updatedState = { ...state, buckets: updatedBuckets };
-    setState(updatedState);
-    setTimeout(() => saveBudgetWithIndicator(updatedState, false), 100);
-  }, [state?.buckets?.income?.length]);
+  // CSC AUTO-GENERATION DISABLED
+  // The useEffect that was here has been removed to prevent automatic regeneration of CSC weekly income entries
+  // Users can now delete CSC rows without them reappearing
 
   const saveBudgetWithIndicator = async (customState = null, customMessage = null) => {
     setIsSaving(true);
@@ -288,19 +261,26 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
 
   const handleDeleteClick = (bucket, id) => {
-    const item = state.buckets[bucket].find(x => x.id === id);
-    if (!item) return;
+    setState(prevState => {
+      const item = prevState.buckets[bucket].find(x => x.id === id);
+      if (!item) return prevState;
 
-    const updatedBuckets = { ...state.buckets, [bucket]: state.buckets[bucket].filter(x => x.id !== id) };
-    const updatedState = { ...state, buckets: updatedBuckets };
-    setState(updatedState);
+      const updatedBuckets = { 
+        ...prevState.buckets, 
+        [bucket]: prevState.buckets[bucket].filter(x => x.id !== id) 
+      };
+      const updatedState = { ...prevState, buckets: updatedBuckets };
 
-    if (undoTimerId) clearTimeout(undoTimerId);
-    setRecentlyDeleted({ bucket, item });
-    const tid = setTimeout(() => setRecentlyDeleted(null), 10000);
-    setUndoTimerId(tid);
+      if (undoTimerId) clearTimeout(undoTimerId);
+      setRecentlyDeleted({ bucket, item });
+      const tid = setTimeout(() => setRecentlyDeleted(null), 10000);
+      setUndoTimerId(tid);
 
-    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Item deleted successfully!'), 100);
+      // Save immediately without setTimeout to prevent race conditions
+      saveBudgetWithIndicator(updatedState, 'Item deleted successfully!');
+      
+      return updatedState;
+    });
   };
   const handleClearStatus = (bucket, id) => {
     const item = state.buckets[bucket].find(x => x.id === id);
@@ -648,21 +628,30 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     if (selectedItems.size === 0) return;
     if (!confirm(`Delete ${selectedItems.size} selected items?`)) return;
 
+    const count = selectedItems.size;
+    
+    // Calculate the new state
     const updatedBuckets = { ...state.buckets };
     selectedItems.forEach(key => {
       const [bucket, id] = key.split(':');
       updatedBuckets[bucket] = updatedBuckets[bucket].filter(x => x.id !== id);
     });
-
     const updatedState = { ...state, buckets: updatedBuckets };
+    
+    // Update state and clear selection
     setState(updatedState);
     setSelectedItems(new Set());
-    setTimeout(() => saveBudgetWithIndicator(updatedState, `${selectedItems.size} items deleted!`), 100);
+    
+    // Save with the exact state we just calculated
+    saveBudgetWithIndicator(updatedState, `${count} items deleted!`);
   };
 
   const bulkArchive = () => {
     if (selectedItems.size === 0) return;
 
+    const count = selectedItems.size;
+    
+    // Calculate the new state
     const updatedBuckets = { ...state.buckets };
     const newArchived = [...(state.archived || [])];
 
@@ -674,16 +663,20 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         updatedBuckets[bucket] = updatedBuckets[bucket].filter(x => x.id !== id);
       }
     });
-
     const updatedState = { ...state, buckets: updatedBuckets, archived: newArchived };
+    
+    // Update state and clear selection
     setState(updatedState);
     setSelectedItems(new Set());
-    setTimeout(() => saveBudgetWithIndicator(updatedState, `${selectedItems.size} items archived!`), 100);
+    
+    // Save with the exact state we just calculated
+    saveBudgetWithIndicator(updatedState, `${count} items archived!`);
   };
 
   const bulkRollForward = () => {
     if (selectedItems.size === 0) return;
 
+    // Calculate the new state
     const updatedBuckets = { ...state.buckets };
     let rolledCount = 0;
 
@@ -711,14 +704,9 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           case 'quarterly':
             nextDate.setMonth(nextDate.getMonth() + 3);
             break;
-          case 'annual':
+          case 'yearly':
             nextDate.setFullYear(nextDate.getFullYear() + 1);
             break;
-          case 'varies':
-            nextDate.setMonth(nextDate.getMonth() + 1);
-            break;
-          default:
-            nextDate.setMonth(nextDate.getMonth() + 1);
         }
 
         updatedBuckets[bucket][itemIndex] = {
@@ -731,11 +719,14 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         rolledCount++;
       }
     });
-
     const updatedState = { ...state, buckets: updatedBuckets };
+    
+    // Update state and clear selection
     setState(updatedState);
     setSelectedItems(new Set());
-    setTimeout(() => saveBudgetWithIndicator(updatedState, `${rolledCount} items rolled forward!`), 100);
+    
+    // Save with the exact state we just calculated
+    saveBudgetWithIndicator(updatedState, `${rolledCount} items rolled forward!`);
   };
 
   const addFromTemplate = (template) => {
@@ -1262,18 +1253,6 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
   return (
     <PageContainer className="py-6">
-      <div className="bg-gradient-to-r from-orange-50 to-orange-100 border-2 border-orange-200 rounded-xl px-6 py-4 mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <h2 className="text-2xl font-bold text-slate-800">Budget Editor</h2>
-          {isSaving && (
-            <div className="flex items-center gap-2 text-orange-600 animate-pulse">
-              <div className="w-2 h-2 bg-orange-600 rounded-full animate-bounce"></div>
-              <span className="text-sm font-medium">Saving...</span>
-            </div>
-          )}
-        </div>
-      </div>
-
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-gray-700 whitespace-nowrap hidden md:inline">Filter by Status:</span>

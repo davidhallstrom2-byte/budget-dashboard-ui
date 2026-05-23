@@ -63,7 +63,7 @@ export default function AnalysisTab({ state, searchQuery }) {
   const insights = getSpendingInsights();
 
   return (
-    <div className="max-w-6xl mx-auto py-6 px-4 sm:px-6 lg:px-8 space-y-6">
+    <PageContainer className="py-6 space-y-6">
       {/* Navigation Pills */}
       <div className="mb-6 flex items-center gap-3">
         <span className="text-sm font-medium text-gray-700">Jump to Section:</span>
@@ -267,6 +267,6 @@ export default function AnalysisTab({ state, searchQuery }) {
           </div>
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 }
