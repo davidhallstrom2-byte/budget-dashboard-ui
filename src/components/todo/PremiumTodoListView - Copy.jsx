@@ -75,6 +75,15 @@ const escapeHtml = (value = "") =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
+const cleanDisplayValue = (value = "") =>
+  String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
 const formatDateForFile = () => {
   const now = new Date();
   return now.toISOString().slice(0, 10);
@@ -97,14 +106,14 @@ const buildPrintableHtml = (tasks) => {
 
       const taskCards = items
         .map((task) => {
-          const fields = FIELD_ORDER.filter((field) => task[field]);
+          const fields = FIELD_ORDER.filter((field) => cleanDisplayValue(task[field]));
 
           const fieldRows = fields
             .map(
               (field) => `
                 <div class="field-row">
                   <div class="field-label">${escapeHtml(FIELD_LABELS[field] || field)}</div>
-                  <div class="field-value">${escapeHtml(task[field]).replaceAll("\n", "<br>")}</div>
+                  <div class="field-value">${escapeHtml(cleanDisplayValue(task[field])).replaceAll("\n", "<br>")}</div>
                 </div>
               `
             )
@@ -410,12 +419,12 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
 
                 <div className="space-y-3">
                   {items.map((task) => {
-                    const fields = FIELD_ORDER.filter((field) => task[field]);
+                    const fields = FIELD_ORDER.filter((field) => cleanDisplayValue(task[field]));
 
                     return (
                       <article
                         key={task.id || task.taskName}
-                        className="break-inside-avoid rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                        className="break-inside-avoid rounded-2xl border border-slate-200 bg-white px-4 py-3"
                       >
                         <div className="mb-3 flex items-start gap-3">
                           <span className="text-lg leading-tight">☐</span>
@@ -428,13 +437,13 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
                           {fields.map((field) => (
                             <div
                               key={field}
-                              className="grid grid-cols-[145px_1fr] gap-3 py-1.5 text-[13.5px]"
+                              className="grid grid-cols-[145px_1fr] gap-3 py-1 text-[13.5px]"
                             >
                               <div className="font-extrabold text-slate-700">
                                 {FIELD_LABELS[field] || field}
                               </div>
                               <div className="whitespace-pre-wrap leading-snug text-slate-900">
-                                {task[field]}
+                                {cleanDisplayValue(task[field])}
                               </div>
                             </div>
                           ))}

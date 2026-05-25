@@ -25,7 +25,6 @@ import {
 
 const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
 const TODO_ARCHIVE_STORAGE_KEY = 'todoTab.tasks.archived.v1';
-const TODO_CONTACTS_STORAGE_KEY = 'todoTab.contacts.v1';
 
 const getTodoTaskType = (task = {}) => task.typeOverride || task.type || '';
 
@@ -208,48 +207,6 @@ const writeTodoTasks = (tasks) => {
     localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(normalized.tasks));
   } catch (error) {
     console.error('Failed to save to-do tasks:', error);
-  }
-};
-
-const normalizeScannerContact = (contact = {}) => {
-  const now = new Date().toISOString();
-  const name = String(contact.name || contact.organization || contact.company || contact.person || 'Scanned Card').trim();
-
-  return {
-    id: contact.id || createTodoId('contact'),
-    name: name || 'Scanned Card',
-    category: contact.category || 'General',
-    phone: contact.phone || '',
-    directPhone: contact.directPhone || '',
-    website: contact.website || '',
-    address: contact.address || '',
-    organization: contact.organization || '',
-    company: contact.company || contact.organization || '',
-    person: contact.person || '',
-    notes: contact.notes || '',
-    createdAt: contact.createdAt || now,
-    updatedAt: now,
-  };
-};
-
-const readTodoContacts = () => {
-  try {
-    const saved = localStorage.getItem(TODO_CONTACTS_STORAGE_KEY);
-    const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const writeTodoContacts = (contacts) => {
-  try {
-    localStorage.setItem(
-      TODO_CONTACTS_STORAGE_KEY,
-      JSON.stringify(Array.isArray(contacts) ? contacts.map(normalizeScannerContact) : [])
-    );
-  } catch (error) {
-    console.error('Failed to save to-do contacts:', error);
   }
 };
 
@@ -479,7 +436,6 @@ const BudgetDashboard = () => {
   const [saveStatus, setSaveStatus] = useState(null);
   const [isBudgetArchiveDrawerOpen, setIsBudgetArchiveDrawerOpen] = useState(false);
   const [isStatementScannerOpen, setIsStatementScannerOpen] = useState(false);
-  const [todoRefreshKey, setTodoRefreshKey] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportFilename, setExportFilename] = useState('budget-data');
@@ -627,75 +583,6 @@ const BudgetDashboard = () => {
     const updatedState = { ...state, buckets: updatedBuckets };
     setState(updatedState);
     saveBudget(updatedState, `Successfully imported ${budgetItems.length} transactions!`);
-  };
-
-
-  const handleScannerTodoCreate = (taskData = {}) => {
-    const now = new Date().toISOString();
-    const taskType = taskData.typeOverride || taskData.type || 'General';
-    const scannedTask = {
-      id: createTodoId('scan'),
-      taskName: taskData.taskName || 'Review Scanned Document',
-      details: taskData.details || '',
-      type: taskType,
-      typeOverride: taskType,
-      date: taskData.date || now.slice(0, 10),
-      phone: taskData.phone || '',
-      address: taskData.address || '',
-      deadline: taskData.deadline || '',
-      blockedBy: taskData.blockedBy || '',
-      person: taskData.person || '',
-      organization: taskData.organization || '',
-      website: taskData.website || '',
-      plate: taskData.plate || '',
-      vin: taskData.vin || '',
-      policyNumber: taskData.policyNumber || '',
-      caseNumber: taskData.caseNumber || '',
-      amount: taskData.amount || '',
-      documents: taskData.documents || '',
-      questions: taskData.questions || '',
-      outcome: taskData.outcome || '',
-      fileName: taskData.fileName || '',
-      notes: taskData.notes || '',
-      followUpNotes: taskData.followUpNotes || '',
-      company: taskData.company || '',
-      vehicle: taskData.vehicle || '',
-      policyStatus: taskData.policyStatus || '',
-      effectiveDate: taskData.effectiveDate || '',
-      impact: taskData.impact || '',
-      requiredAction: taskData.requiredAction || '',
-      systemLink: taskData.systemLink || '',
-      completed: false,
-      completedAt: '',
-      createdAt: now,
-      history: [
-        {
-          id: createTodoId('history'),
-          action: 'Task created from scanner',
-          detail: taskData.documents || '',
-          createdAt: now,
-        },
-      ],
-    };
-
-    const updatedTasks = [scannedTask, ...readTodoTasks()];
-    writeTodoTasks(updatedTasks);
-    setTodoRefreshKey((current) => current + 1);
-    setActiveTab('todo');
-    setSaveStatus({ type: 'success', message: 'Scanned document added to To-Do.' });
-    setTimeout(() => setSaveStatus(null), 3000);
-  };
-
-  const handleScannerContactSave = (contactData = {}) => {
-    const contact = normalizeScannerContact(contactData);
-    const existingContacts = readTodoContacts();
-    const updatedContacts = [contact, ...existingContacts.filter((item) => item?.id !== contact.id)];
-
-    writeTodoContacts(updatedContacts);
-    setTodoRefreshKey((current) => current + 1);
-    setActiveTab('todo');
-    setSaveStatus({ type: 'success', message: 'Scanned card saved to Manage Contacts.' });
-    setTimeout(() => setSaveStatus(null), 3000);
   };
 
   const handleRestoreArchived = (id) => {
@@ -990,7 +877,6 @@ const BudgetDashboard = () => {
 
         {activeTab === 'todo' && (
           <TodoTab
-            key={todoRefreshKey}
             editTaskId={todoEditTaskId}
             onEditTaskLoaded={() => setTodoEditTaskId('')}
           />
@@ -1061,8 +947,6 @@ const BudgetDashboard = () => {
         isOpen={isStatementScannerOpen}
         onClose={() => setIsStatementScannerOpen(false)}
         onImport={handleStatementImport}
-        onCreateTodo={handleScannerTodoCreate}
-        onSaveContact={handleScannerContactSave}
       />
 
       {showExportDialog && (

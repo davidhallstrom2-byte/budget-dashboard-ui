@@ -306,6 +306,8 @@ const REQUIRED_FIELDS_BY_TYPE = {
 };
 
 const MULTILINE_FIELDS = new Set(["details", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
+const FORMATTED_TEXT_FIELDS = new Set(["notes", "followUpNotes"]);
+const shouldUseFormattingToolbar = (field) => FORMATTED_TEXT_FIELDS.has(field);
 
 const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => {
   const text = String(value || "");
@@ -338,6 +340,172 @@ const formatDateTime = (value) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const escapeFormattedHtml = (value = "") =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+const renderInlineFormatting = (value = "") => {
+  let html = escapeFormattedHtml(value);
+
+  html = html.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_match, label, url) => `<a href="${url}" target="_blank" rel="noreferrer" class="font-bold text-blue-700 underline">${label}</a>`
+  );
+
+  html = html
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<u>$1</u>")
+    .replace(/~~([^~]+)~~/g, "<s>$1</s>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+
+  return html;
+};
+
+const formatTextToHtml = (value = "") => {
+  const lines = String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const html = [];
+  let listType = "";
+
+  const closeList = () => {
+    if (listType) {
+      html.push(`</${listType}>`);
+      listType = "";
+    }
+  };
+
+  lines.forEach((line) => {
+    const bulletMatch = line.match(/^\s*[-*]\s+(.+)$/);
+    const numberMatch = line.match(/^\s*\d+[.)]\s+(.+)$/);
+
+    if (!line.trim()) {
+      closeList();
+      html.push('<div class="h-2"></div>');
+      return;
+    }
+
+    if (bulletMatch) {
+      if (listType !== "ul") {
+        closeList();
+        html.push('<ul class="list-disc space-y-1 pl-5">');
+        listType = "ul";
+      }
+      html.push(`<li>${renderInlineFormatting(bulletMatch[1])}</li>`);
+      return;
+    }
+
+    if (numberMatch) {
+      if (listType !== "ol") {
+        closeList();
+        html.push('<ol class="list-decimal space-y-1 pl-5">');
+        listType = "ol";
+      }
+      html.push(`<li>${renderInlineFormatting(numberMatch[1])}</li>`);
+      return;
+    }
+
+    closeList();
+    html.push(`<p>${renderInlineFormatting(line)}</p>`);
+  });
+
+  closeList();
+  return html.join("");
+};
+
+const hasFormattingMarkup = (value = "") => /\*\*[^*]+\*\*|\*[^*\n]+\*|__[^_]+__|~~[^~]+~~|^\s*[-*]\s+|^\s*\d+[.)]\s+|\[[^\]]+\]\(https?:\/\/[^\s)]+\)/m.test(String(value ?? ""));
+
+const applyTextFormatting = (format, value, onChange, textarea) => {
+  const currentValue = String(value ?? "");
+  const start = textarea?.selectionStart ?? currentValue.length;
+  const end = textarea?.selectionEnd ?? currentValue.length;
+  const selected = currentValue.slice(start, end);
+
+  const wrapSelection = (prefix, suffix, placeholder) => {
+    const inner = selected || placeholder;
+    return {
+      nextValue: `${currentValue.slice(0, start)}${prefix}${inner}${suffix}${currentValue.slice(end)}`,
+      nextStart: start + prefix.length,
+      nextEnd: start + prefix.length + inner.length,
+    };
+  };
+
+  const prefixLines = (prefix, placeholder) => {
+    const inner = selected || placeholder;
+    const formatted = inner
+      .split(/\r?\n/)
+      .map((line, index) => `${typeof prefix === "function" ? prefix(index) : prefix}${line || placeholder}`)
+      .join("\n");
+
+    return {
+      nextValue: `${currentValue.slice(0, start)}${formatted}${currentValue.slice(end)}`,
+      nextStart: start,
+      nextEnd: start + formatted.length,
+    };
+  };
+
+  const formats = {
+    bold: () => wrapSelection("**", "**", "bold text"),
+    italic: () => wrapSelection("*", "*", "italic text"),
+    underline: () => wrapSelection("__", "__", "underlined text"),
+    strike: () => wrapSelection("~~", "~~", "struck text"),
+    bullet: () => prefixLines("- ", "List item"),
+    numbered: () => prefixLines((index) => `${index + 1}. `, "List item"),
+    link: () => wrapSelection("[", "](https://example.com)", "link text"),
+  };
+
+  const result = formats[format]?.();
+  if (!result) return;
+
+  onChange(result.nextValue);
+  window.requestAnimationFrame(() => {
+    textarea?.focus();
+    textarea?.setSelectionRange(result.nextStart, result.nextEnd);
+  });
+};
+
+const FormattedText = ({ value, className = "" }) => {
+  const html = formatTextToHtml(value);
+  if (!html) return null;
+  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+};
+
+const FormattingToolbar = ({ onFormat }) => {
+  const buttonClass = "rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 hover:bg-slate-100";
+
+  return (
+    <div className="mb-1 flex flex-wrap items-center gap-1">
+      <button type="button" onClick={() => onFormat("bold")} className={buttonClass} title="Bold selected text">B</button>
+      <button type="button" onClick={() => onFormat("italic")} className={`${buttonClass} italic`} title="Italic selected text">I</button>
+      <button type="button" onClick={() => onFormat("underline")} className={`${buttonClass} underline`} title="Underline selected text">U</button>
+      <button type="button" onClick={() => onFormat("strike")} className={`${buttonClass} line-through`} title="Strikethrough selected text">S</button>
+      <button type="button" onClick={() => onFormat("bullet")} className={buttonClass} title="Make selected lines bullets">• List</button>
+      <button type="button" onClick={() => onFormat("numbered")} className={buttonClass} title="Make selected lines numbered">1. List</button>
+      <button type="button" onClick={() => onFormat("link")} className={buttonClass} title="Add link formatting">Link</button>
+    </div>
+  );
+};
+
+const FormattingTextarea = ({ value, onChange, rows, className = "", ...props }) => {
+  const textareaRef = useRef(null);
+
+  return (
+    <div>
+      <FormattingToolbar onFormat={(format) => applyTextFormatting(format, value, onChange, textareaRef.current)} />
+      <textarea
+        ref={textareaRef}
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value)}
+        rows={rows}
+        className={className}
+        {...props}
+      />
+    </div>
+  );
 };
 
 
@@ -955,9 +1123,99 @@ export default function TodoTab() {
   const [editingContactId, setEditingContactId] = useState(null);
   const [replaceExistingContactFields, setReplaceExistingContactFields] = useState(false);
   const [contactApplyTarget, setContactApplyTarget] = useState("form");
+  const [completionCelebration, setCompletionCelebration] = useState(null);
+  const completionCelebrationTimeoutRef = useRef(null);
+  const previousTaskCompletionRef = useRef(new Map(tasks.map((task) => [task.id, Boolean(task.completed)])));
 
   useEffect(() => {
     hasHydrated.current = true;
+  }, []);
+
+  const playCompletionSound = () => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+
+      const audioContext = new AudioContext();
+      const now = audioContext.currentTime;
+      const masterGain = audioContext.createGain();
+
+      masterGain.gain.setValueAtTime(0.0001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.12, now + 0.03);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.15);
+      masterGain.connect(audioContext.destination);
+
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((frequency, index) => {
+        const oscillator = audioContext.createOscillator();
+        const noteGain = audioContext.createGain();
+        const start = now + index * 0.1;
+        const stop = start + 0.22;
+
+        oscillator.type = "triangle";
+        oscillator.frequency.setValueAtTime(frequency, start);
+        oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.08, stop);
+        noteGain.gain.setValueAtTime(0.0001, start);
+        noteGain.gain.exponentialRampToValueAtTime(0.35, start + 0.025);
+        noteGain.gain.exponentialRampToValueAtTime(0.0001, stop);
+        oscillator.connect(noteGain);
+        noteGain.connect(masterGain);
+        oscillator.start(start);
+        oscillator.stop(stop + 0.03);
+      });
+
+      window.setTimeout(() => {
+        audioContext.close().catch(() => {});
+      }, 1500);
+    } catch {}
+  };
+
+  const showCompletionCelebration = (count = 1, taskName = "") => {
+    if (completionCelebrationTimeoutRef.current) {
+      window.clearTimeout(completionCelebrationTimeoutRef.current);
+      completionCelebrationTimeoutRef.current = null;
+    }
+
+    playCompletionSound();
+
+    setCompletionCelebration({
+      id: Date.now(),
+      count,
+      taskName: String(taskName ?? "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim(),
+    });
+  };
+
+
+
+  useEffect(() => {
+    const previousTaskCompletion = previousTaskCompletionRef.current;
+    const newlyCompletedTasks = tasks.filter((task) => {
+      const wasCompleted = previousTaskCompletion.get(task.id);
+      return wasCompleted === false && task.completed === true;
+    });
+
+    previousTaskCompletionRef.current = new Map(tasks.map((task) => [task.id, Boolean(task.completed)]));
+
+    if (!newlyCompletedTasks.length) return;
+
+    showCompletionCelebration(
+      newlyCompletedTasks.length,
+      newlyCompletedTasks.length === 1 ? newlyCompletedTasks[0].taskName : ""
+    );
+  }, [tasks]);
+
+  useEffect(() => {
+    return () => {
+      if (completionCelebrationTimeoutRef.current) {
+        window.clearTimeout(completionCelebrationTimeoutRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1122,6 +1380,9 @@ const addParsedTasks = () => {
   };
 
   const toggleTask = (id) => {
+    const taskToToggle = tasks.find((task) => task.id === id);
+    const shouldCelebrate = Boolean(taskToToggle && !taskToToggle.completed);
+
     setTasks((current) =>
       current.map((task) => {
         if (task.id !== id) return task;
@@ -1136,6 +1397,10 @@ const addParsedTasks = () => {
         );
       })
     );
+
+    if (shouldCelebrate) {
+      showCompletionCelebration(1, taskToToggle.taskName);
+    }
   };
 
   const updateTaskField = (id, field, value) => {
@@ -1559,9 +1824,9 @@ const addParsedTasks = () => {
     if (task.completed) return "bg-green-50 border-green-200";
     if (isBlocked) return "bg-amber-50 border-amber-200";
     const status = getTaskStatus(task);
-    if (status === "overdue") return "bg-slate-50 border-red-200";
-    if (status === "dueSoon") return "bg-slate-50 border-yellow-200";
-    return "bg-slate-50 border-slate-200";
+    if (status === "overdue") return "bg-green-50 border-red-200";
+    if (status === "dueSoon") return "bg-green-50 border-yellow-200";
+    return "bg-green-50 border-green-200";
   };
 
   const getStatusLabel = (task, isBlocked) => {
@@ -1671,6 +1936,8 @@ const addParsedTasks = () => {
   const markCheckedTasksDone = () => {
     if (!checkedTaskIds.length) return;
 
+    const tasksToCelebrate = tasks.filter((task) => checkedTaskIds.includes(task.id) && !task.completed);
+
     writeSafetySnapshot("Before bulk mark done", tasks, archivedTasks);
     setTasks((current) =>
       current.map((task) =>
@@ -1688,6 +1955,13 @@ const addParsedTasks = () => {
       )
     );
     setCheckedTaskIds([]);
+
+    if (tasksToCelebrate.length > 0) {
+      showCompletionCelebration(
+        tasksToCelebrate.length,
+        tasksToCelebrate.length === 1 ? tasksToCelebrate[0].taskName : ""
+      );
+    }
   };
 
   const moveCheckedTasks = () => {
@@ -1812,6 +2086,17 @@ const addParsedTasks = () => {
 
   const renderInput = (field, value, onChange) => {
     if (MULTILINE_FIELDS.has(field)) {
+      if (shouldUseFormattingToolbar(field)) {
+        return (
+          <FormattingTextarea
+            value={value || ""}
+            onChange={onChange}
+            rows={getTextareaRows(value, 1, 8)}
+            className="min-h-[38px] w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        );
+      }
+
       return (
         <textarea
           value={value || ""}
@@ -1833,6 +2118,94 @@ const addParsedTasks = () => {
 
   return (
     <PageContainer className="space-y-6 bg-green-50 py-6">
+      {completionCelebration && (
+        <div
+          key={completionCelebration.id}
+          className="fixed inset-0 z-[9999] flex cursor-pointer items-center justify-center overflow-hidden bg-slate-950/20 px-4"
+          aria-live="polite"
+          aria-atomic="true"
+          role="button"
+          tabIndex={0}
+          onClick={() => setCompletionCelebration(null)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setCompletionCelebration(null);
+            }
+          }}
+        >
+          <div className="absolute inset-0 overflow-hidden">
+            {Array.from({ length: 36 }).map((_, index) => {
+              const angle = (index * 137.5) % 360;
+              const distance = 120 + (index % 6) * 34;
+              const delay = (index % 9) * 70;
+              const size = 7 + (index % 4) * 3;
+              const colors = ["#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ef4444", "#06b6d4"];
+              const color = colors[index % colors.length];
+
+              return (
+                <span
+                  key={`firework-${index}`}
+                  className="absolute left-1/2 top-1/2 rounded-full shadow-lg animate-[todo-firework_1450ms_ease-out_forwards]"
+                  style={{
+                    width: `${size}px`,
+                    height: `${size}px`,
+                    backgroundColor: color,
+                    boxShadow: `0 0 18px ${color}`,
+                    animationDelay: `${delay}ms`,
+                    "--todo-firework-x": `${Math.cos((angle * Math.PI) / 180) * distance}px`,
+                    "--todo-firework-y": `${Math.sin((angle * Math.PI) / 180) * distance}px`,
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          <div className="relative animate-[todo-complete-pop_650ms_ease-out_forwards] rounded-[2rem] border border-green-200 bg-white px-12 py-10 text-center shadow-2xl ring-4 ring-green-200/70">
+            <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-emerald-700 text-white shadow-2xl animate-[todo-complete-pulse_1100ms_ease-out_1]">
+              <Check className="h-14 w-14" />
+            </div>
+            <div className="text-4xl font-black tracking-tight text-slate-900">Task complete!</div>
+            {completionCelebration.count > 1 ? (
+              <div className="mt-4 rounded-2xl border border-purple-200 bg-purple-50 px-6 py-4 text-xl font-black text-purple-800 shadow-inner">
+                {completionCelebration.count} tasks marked done
+              </div>
+            ) : completionCelebration.taskName ? (
+              <div className="mt-4 max-w-xl rounded-2xl border border-green-200 bg-green-50 px-6 py-4 shadow-inner">
+                <div className="break-words text-2xl font-black leading-snug text-slate-900">
+                  {completionCelebration.taskName}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 max-w-md text-lg font-bold text-slate-600">Nice work.</div>
+            )}
+            <div className="mt-5 text-3xl animate-[todo-sparkle-pop_1500ms_ease-in-out_infinite]">✦ ✨ ✦</div>
+          </div>
+          <style>{`
+            @keyframes todo-complete-pop {
+              0% { opacity: 0; transform: translateY(28px) scale(0.72) rotate(-2deg); }
+              55% { opacity: 1; transform: translateY(0) scale(1.12) rotate(1deg); }
+              100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+            }
+            @keyframes todo-complete-pulse {
+              0% { transform: scale(0.55); }
+              50% { transform: scale(1.18); }
+              100% { transform: scale(1); }
+            }
+            @keyframes todo-firework {
+              0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+              12% { opacity: 1; }
+              78% { opacity: 1; transform: translate(calc(-50% + var(--todo-firework-x)), calc(-50% + var(--todo-firework-y))) scale(1); }
+              100% { opacity: 0; transform: translate(calc(-50% + var(--todo-firework-x)), calc(-50% + var(--todo-firework-y) + 36px)) scale(0.25); }
+            }
+            @keyframes todo-sparkle-pop {
+              0%, 100% { opacity: 0.55; transform: scale(0.92); }
+              50% { opacity: 1; transform: scale(1.08); }
+            }
+          `}</style>
+        </div>
+      )}
+
       <div className="rounded-xl border-2 border-green-200 bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -1889,7 +2262,7 @@ const addParsedTasks = () => {
         </div>
       </div>
 
-      <section className="rounded-xl border border-green-200 bg-white p-4 shadow-md">
+      <section className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 p-4 shadow-md">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold text-slate-900">Active Tasks</h3>
@@ -1921,7 +2294,7 @@ const addParsedTasks = () => {
                       document.getElementById(getCategoryAnchorId(item.type))?.scrollIntoView({ behavior: "smooth", block: "start" });
                     });
                   }}
-                  className="group flex items-center justify-between gap-3 rounded-xl border-2 border-green-200 bg-green-50 px-4 py-3 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-100"
+                  className="group flex items-center justify-between gap-3 rounded-xl border border-green-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-green-400 hover:bg-green-100"
                   title={`Go to ${item.type} active tasks`}
                   aria-label={`Go to ${item.type} active tasks`}
                 >
@@ -1951,16 +2324,15 @@ const addParsedTasks = () => {
             })}
           </div>
         ) : (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">
+          <div className="mt-4 rounded-lg border border-green-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
             No active tasks.
           </div>
         )}
       </section>
 
       <section className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-2xl font-bold text-slate-900">Manage Categories & Tasks</h3>
-          <div className="flex flex-wrap gap-2">
+        <div className="flex items-start justify-end gap-3">
+          <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
               onClick={() => {
@@ -1968,7 +2340,7 @@ const addParsedTasks = () => {
                 alert("Safety snapshot saved.");
               }}
               title="Save a manual safety snapshot of active and archived To-Do tasks"
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800"
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800"
             >
               <History size={16} />
               Safety Snapshot
@@ -1981,7 +2353,7 @@ const addParsedTasks = () => {
               }}
               title={`Open archive drawer with ${archivedTasks.length} archived task${archivedTasks.length === 1 ? "" : "s"}`}
               aria-label={`Open archive drawer with ${archivedTasks.length} archived task${archivedTasks.length === 1 ? "" : "s"}`}
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-violet-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-violet-800"
+              className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-800"
             >
               <Archive size={16} />
               Archive Drawer
@@ -1992,7 +2364,7 @@ const addParsedTasks = () => {
               onClick={() => setShowActiveOnly((current) => !current)}
               title={showActiveOnly ? "Show all task categories" : "Show only categories with active tasks and hide completed tasks"}
               aria-pressed={showActiveOnly}
-              className={`inline-flex h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white shadow-sm ${
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm ${
                 showActiveOnly ? "bg-blue-700 hover:bg-blue-800" : "bg-slate-600 hover:bg-slate-700"
               }`}
             >
@@ -2003,7 +2375,7 @@ const addParsedTasks = () => {
               type="button"
               onClick={() => setCollapsedCategories(TASK_TYPES.reduce((map, type) => ({ ...map, [type]: true }), {}))}
               title="Collapse all categories"
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-slate-600 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-600 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
             >
               <ChevronDown size={16} />
               Collapse All
@@ -2012,7 +2384,7 @@ const addParsedTasks = () => {
               type="button"
               onClick={() => setCollapsedCategories({})}
               title="Expand all visible categories"
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-slate-600 px-4 text-sm font-semibold text-white hover:bg-slate-700"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-600 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
             >
               <ChevronRight size={16} />
               Expand All
@@ -2096,7 +2468,7 @@ const addParsedTasks = () => {
         )}
 
         {visibleCategoryTypes.length === 0 && (
-          <div className="rounded-lg border border-green-200 bg-white px-4 py-6 text-sm font-semibold text-slate-600 shadow-md">
+          <div className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 px-4 py-6 text-sm font-semibold text-slate-700 shadow-md">
             No active tasks. Click Active Only again to show all categories.
           </div>
         )}
@@ -2116,17 +2488,17 @@ const addParsedTasks = () => {
             <div
               key={type}
               id={getCategoryAnchorId(type)}
-              className={`scroll-mt-6 overflow-hidden rounded-lg border bg-white shadow-md ${
-                activeCount > 0 ? "border-green-400 ring-1 ring-green-100" : "border-green-200 opacity-85"
+              className={`scroll-mt-6 overflow-hidden rounded-xl border-2 bg-gradient-to-r from-green-50 to-green-100 shadow-md ${
+                activeCount > 0 ? "border-green-300 ring-1 ring-green-100" : "border-green-200 opacity-85"
               }`}
             >
-              <div className="flex items-center justify-between gap-3 bg-black px-4 py-2 text-white">
+              <div className="flex items-center justify-between gap-3 bg-green-700 px-4 py-2 text-white">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <GripVertical className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" aria-hidden="true" title="Category section" />
                   <button
                     type="button"
                     onClick={() => toggleCategory(type)}
-                    className="shrink-0 rounded p-1 text-white transition-colors hover:bg-slate-800"
+                    className="shrink-0 rounded p-1 text-white transition-colors hover:bg-green-800"
                     aria-label={isCollapsed ? `Expand ${type}` : `Collapse ${type}`}
                     title={isCollapsed ? `Expand ${type}` : `Collapse ${type}`}
                   >
@@ -2179,7 +2551,7 @@ const addParsedTasks = () => {
                   <button
                     type="button"
                     onClick={() => exportCategoryText(type, categoryTasks)}
-                    className="rounded p-1.5 text-white transition-colors hover:bg-slate-800"
+                    className="rounded p-1.5 text-white transition-colors hover:bg-green-800"
                     aria-label={`Download ${type}`}
                     title={`Download ${type} tasks`}
                   >
@@ -2188,7 +2560,7 @@ const addParsedTasks = () => {
                   <button
                     type="button"
                     onClick={() => addTaskToCategory(type)}
-                    className="rounded p-1.5 text-white transition-colors hover:bg-slate-800"
+                    className="rounded p-1.5 text-white transition-colors hover:bg-green-800"
                     aria-label={`Edit ${type}`}
                     title={`Edit ${type} category`}
                   >
@@ -2198,10 +2570,10 @@ const addParsedTasks = () => {
               </div>
 
               {!isCollapsed && (
-                <div className="rounded-b-lg border-2 border-black bg-white">
+                <div className="rounded-b-xl border-2 border-green-700 bg-green-50">
                   <table className="w-full table-fixed text-sm">
-                    <thead className="bg-slate-50 text-slate-800">
-                      <tr className="border-b-2 border-black">
+                    <thead className="bg-green-100 text-green-950">
+                      <tr className="border-b-2 border-green-700">
                         <th className="w-8 px-1 py-2 text-left font-medium text-gray-700"></th>
                         <th className="w-[25%] px-2 py-2 text-left font-medium text-gray-700">Task</th>
                         <th className="w-[14%] px-2 py-2 text-left font-medium text-gray-700">Due Date</th>
@@ -2406,12 +2778,21 @@ const addParsedTasks = () => {
                                             {getFieldLabel(task, field)}
                                             <div className="mt-1">
                                               {MULTILINE_FIELDS.has(field) ? (
-                                                <textarea
-                                                  value={task[field] || ""}
-                                                  onChange={(event) => updateTaskField(task.id, field, event.target.value)}
-                                                  rows={getTextareaRows(task[field], 1, 8, 48)}
-                                                  className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                                />
+                                                shouldUseFormattingToolbar(field) ? (
+                                                  <FormattingTextarea
+                                                    value={task[field] || ""}
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    rows={getTextareaRows(task[field], 1, 8, 48)}
+                                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                ) : (
+                                                  <textarea
+                                                    value={task[field] || ""}
+                                                    onChange={(event) => updateTaskField(task.id, field, event.target.value)}
+                                                    rows={getTextareaRows(task[field], 1, 8, 48)}
+                                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                )
                                               ) : (
                                                 <input
                                                   value={task[field] || ""}
@@ -2428,13 +2809,15 @@ const addParsedTasks = () => {
                                     <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
                                       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Notes</div>
                                       <div className="flex gap-2">
-                                        <textarea
-                                          value={followUpDrafts[task.id] || ""}
-                                          onChange={(event) => setFollowUpDrafts((current) => ({ ...current, [task.id]: event.target.value }))}
-                                          rows={2}
-                                          placeholder="Add a follow-up note..."
-                                          className="min-h-[44px] flex-1 resize-y rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                        />
+                                        <div className="flex-1">
+                                          <FormattingTextarea
+                                            value={followUpDrafts[task.id] || ""}
+                                            onChange={(value) => setFollowUpDrafts((current) => ({ ...current, [task.id]: value }))}
+                                            rows={2}
+                                            placeholder="Add a follow-up note..."
+                                            className="min-h-[44px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                          />
+                                        </div>
                                         <button
                                           type="button"
                                           onClick={() => addFollowUpEntry(task.id)}
@@ -2506,19 +2889,19 @@ const addParsedTasks = () => {
                                                 </div>
 
                                                 {isEditingEntry ? (
-                                                  <textarea
+                                                  <FormattingTextarea
                                                     value={editingFollowUpEntries[editKey] || ""}
-                                                    onChange={(event) =>
+                                                    onChange={(value) =>
                                                       setEditingFollowUpEntries((current) => ({
                                                         ...current,
-                                                        [editKey]: event.target.value,
+                                                        [editKey]: value,
                                                       }))
                                                     }
                                                     rows={getTextareaRows(editingFollowUpEntries[editKey], 2, 10, 80)}
                                                     className="mt-2 min-h-[54px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
                                                   />
                                                 ) : (
-                                                  <div className="mt-1 whitespace-pre-wrap text-slate-900">{entry.text}</div>
+                                                  <FormattedText value={entry.text} className="mt-1 space-y-1 text-slate-900" />
                                                 )}
                                               </div>
                                             );
@@ -2630,7 +3013,12 @@ const addParsedTasks = () => {
 
                 <label className="text-sm font-medium md:col-span-2">
                   Details
-                  <textarea value={form.details} onChange={(event) => updateForm("details", event.target.value)} rows={4} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <textarea
+                    value={form.details || ""}
+                    onChange={(event) => updateForm("details", event.target.value)}
+                    rows={4}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
                 </label>
 
                 {visibleFormFields.map((field) => (
@@ -2702,13 +3090,23 @@ const addParsedTasks = () => {
 
       {checkedTasks.length > 0 && (
         <div className="fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
-          <div className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-blue-300 bg-white px-4 py-3 shadow-2xl">
+          <div className="relative flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-green-300 bg-white px-4 py-3 pr-12 shadow-2xl">
+            <button
+              type="button"
+              onClick={clearCheckedTasks}
+              className="absolute right-2 top-2 rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              title="Close selected tasks bar"
+              aria-label="Close selected tasks bar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
             <div className="mr-2">
               <p className="text-sm font-black text-green-950">
                 {checkedTasks.length} selected
               </p>
               <p className="text-xs font-semibold text-slate-600">
-                Choose an action for the checked task{checkedTasks.length === 1 ? "" : "s"}.
+                Choose an action for the checked task{checkedTasks.length === 1 ? "" : "s"}, or close this bar.
               </p>
             </div>
 
@@ -2757,9 +3155,9 @@ const addParsedTasks = () => {
                 type="button"
                 onClick={clearCheckedTasks}
                 className="inline-flex h-9 items-center rounded-lg bg-slate-500 px-3 text-sm font-bold text-white hover:bg-slate-600"
-                title="Uncheck selected tasks"
+                title="Uncheck selected tasks and close this bar"
               >
-                Clear
+                Uncheck
               </button>
               <button
                 type="button"
@@ -2808,7 +3206,12 @@ const addParsedTasks = () => {
                 </label>
                 <label className="text-sm font-semibold md:col-span-2">
                   Details
-                  <textarea value={selectedTask.details || ""} onChange={(event) => updateTaskField(selectedTask.id, "details", event.target.value)} rows={getTextareaRows(selectedTask.details, 3, 12, 90)} className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <textarea
+                    value={selectedTask.details || ""}
+                    onChange={(event) => updateTaskField(selectedTask.id, "details", event.target.value)}
+                    rows={getTextareaRows(selectedTask.details, 3, 12, 90)}
+                    className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
                 </label>
 
                 {Array.from(new Set([...(TYPE_FIELDS[selectedTask.type] || []), ...Object.keys(DEFAULT_FORM).filter((field) => selectedTask[field])]))
@@ -2818,7 +3221,11 @@ const addParsedTasks = () => {
                       {getFieldLabel(selectedTask, field)}
                       <div className="mt-1">
                         {MULTILINE_FIELDS.has(field) ? (
-                          <textarea value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                          shouldUseFormattingToolbar(field) ? (
+                            <FormattingTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                          ) : (
+                            <textarea value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                          )
                         ) : (
                           <input value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                         )}

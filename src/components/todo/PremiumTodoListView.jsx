@@ -75,6 +75,79 @@ const escapeHtml = (value = "") =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
+const renderInlineFormatting = (value = "") => {
+  let html = escapeHtml(value);
+
+  html = html.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_match, label, url) => `<a href="${url}" target="_blank" rel="noreferrer">${label}</a>`
+  );
+
+  html = html
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<u>$1</u>")
+    .replace(/~~([^~]+)~~/g, "<s>$1</s>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+
+  return html;
+};
+
+const formatTextToHtml = (value = "") => {
+  const lines = String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const html = [];
+  let listType = "";
+
+  const closeList = () => {
+    if (listType) {
+      html.push(`</${listType}>`);
+      listType = "";
+    }
+  };
+
+  lines.forEach((line) => {
+    const bulletMatch = line.match(/^\s*[-*]\s+(.+)$/);
+    const numberMatch = line.match(/^\s*\d+[.)]\s+(.+)$/);
+
+    if (!line.trim()) {
+      closeList();
+      html.push('<div class="formatted-spacer"></div>');
+      return;
+    }
+
+    if (bulletMatch) {
+      if (listType !== "ul") {
+        closeList();
+        html.push("<ul>");
+        listType = "ul";
+      }
+      html.push(`<li>${renderInlineFormatting(bulletMatch[1])}</li>`);
+      return;
+    }
+
+    if (numberMatch) {
+      if (listType !== "ol") {
+        closeList();
+        html.push("<ol>");
+        listType = "ol";
+      }
+      html.push(`<li>${renderInlineFormatting(numberMatch[1])}</li>`);
+      return;
+    }
+
+    closeList();
+    html.push(`<p>${renderInlineFormatting(line)}</p>`);
+  });
+
+  closeList();
+  return html.join("");
+};
+
+const FormattedText = ({ value, className = "" }) => {
+  const html = formatTextToHtml(value);
+  if (!html) return null;
+  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+};
+
 const cleanDisplayValue = (value = "") =>
   String(value ?? "")
     .replace(/\r\n/g, "\n")
@@ -113,7 +186,7 @@ const buildPrintableHtml = (tasks) => {
               (field) => `
                 <div class="field-row">
                   <div class="field-label">${escapeHtml(FIELD_LABELS[field] || field)}</div>
-                  <div class="field-value">${escapeHtml(cleanDisplayValue(task[field])).replaceAll("\n", "<br>")}</div>
+                  <div class="field-value">${formatTextToHtml(cleanDisplayValue(task[field]))}</div>
                 </div>
               `
             )
@@ -259,6 +332,30 @@ const buildPrintableHtml = (tasks) => {
       line-height: 1.35;
     }
 
+    .field-value p {
+      margin: 0 0 4px;
+    }
+
+    .field-value ul,
+    .field-value ol {
+      margin: 0 0 4px 20px;
+      padding: 0;
+    }
+
+    .field-value li {
+      margin: 0 0 3px;
+    }
+
+    .field-value a {
+      color: #1d4ed8;
+      font-weight: 700;
+      text-decoration: underline;
+    }
+
+    .formatted-spacer {
+      height: 8px;
+    }
+
     @media print {
       body {
         background: #ffffff;
@@ -331,6 +428,30 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 px-4 py-6 print:static print:bg-white print:p-0">
       <style>
         {`
+          .formatted-task-text p {
+            margin: 0 0 4px;
+          }
+
+          .formatted-task-text ul,
+          .formatted-task-text ol {
+            margin: 0 0 4px 20px;
+            padding: 0;
+          }
+
+          .formatted-task-text li {
+            margin: 0 0 3px;
+          }
+
+          .formatted-task-text a {
+            color: #1d4ed8;
+            font-weight: 700;
+            text-decoration: underline;
+          }
+
+          .formatted-spacer {
+            height: 8px;
+          }
+
           @media print {
             body * {
               visibility: hidden !important;
@@ -442,9 +563,10 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
                               <div className="font-extrabold text-slate-700">
                                 {FIELD_LABELS[field] || field}
                               </div>
-                              <div className="whitespace-pre-wrap leading-snug text-slate-900">
-                                {cleanDisplayValue(task[field])}
-                              </div>
+                              <FormattedText
+                                value={cleanDisplayValue(task[field])}
+                                className="formatted-task-text leading-snug text-slate-900"
+                              />
                             </div>
                           ))}
                         </div>

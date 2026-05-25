@@ -1,22 +1,21 @@
 // C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\utils\ocr\index.jsx
 /* eslint-disable no-console */
 /**
- * Client-side OCR adapter (images via Tesseract.js; PDFs via PDF.js).
+ * Client-side OCR adapter (images via tesseract.js; PDFs via pdfjs-dist).
  * Exports:
  *   - detectAvailable(): Promise<boolean>
- *   - extractTextFromFile(file, options): Promise<{ text: string, source: string }>
  *   - extractFromFile(file): Promise<{ items: NormalizedItem[] }>
  *   - providerLabel: string
  *   - OCR_AVAILABLE: boolean
  */
 
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
-import PdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
-
-GlobalWorkerOptions.workerPort = new PdfjsWorker();
-
 export const providerLabel = "Tesseract.js + PDF.js";
 export const OCR_AVAILABLE = true;
+
+// PDF.js worker for Vite
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import PdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
+GlobalWorkerOptions.workerPort = new PdfjsWorker();
 
 const CATEGORY_LABEL = {
   income: "Income",
@@ -73,14 +72,16 @@ function pickVendor(text = "", filename = "") {
       return titleCase(hit);
     }
   }
-  const cap = (text || "").match(/\b([A-Z][A-Z&.\- ]{2,})\b/);
+  const cap = (text || "").match(/\b([A-Z][A-Z&\.\- ]{2,})\b/);
   if (cap) return titleCase(cap[1].toLowerCase());
   return "Scanned Item";
 }
 
+// Improved amount parser - supports $12, 12.00, 1,234.56, (12.34), USD 12.34
 function parseAmount(text = "", filename = "") {
   const source = `${filename}\n${text}`;
-  const moneyRe = /(?:USD|US\$)?\s*\$?\s*(\(?-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?-?|-?\d+(?:\.\d{2})?)\)?/g;
+  const moneyRe =
+    /(?:USD|US\$)?\s*\$?\s*(\(?-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?-?|-?\d+(?:\.\d{2})?)\)?/g;
   const hits = [...source.matchAll(moneyRe)];
   if (!hits.length) return 0;
   const nums = hits
@@ -97,114 +98,96 @@ function parseAmount(text = "", filename = "") {
   return Math.max(...nums);
 }
 
+// Improved date parser - supports 2025-09-10, 09/10/2025, Sep 10 2025, September 10, 2025
 function parseISODate(text = "", filename = "") {
   const source = `${filename}\n${text}`;
 
-  let m = source.match(/\b(20[0-9]{2})[-_/.](0[1-9]|1[0-2])[-_/.](0[1-9]|[12][0-9]|3[01])\b/);
+  // yyyy-mm-dd
+  let m =
+    source.match(/\b(20[0-9]{2})[-_/\.](0[1-9]|1[0-2])[-_/\.](0[1-9]|[12][0-9]|3[01])\b/);
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
 
-  m = source.match(/\b(0[1-9]|1[0-2])[-_/.](0[1-9]|[12][0-9]|3[01])[-_/.](20[0-9]{2})\b/);
+  // mm-dd-yyyy or mm/dd/yyyy
+  m = source.match(
+    /\b(0[1-9]|1[0-2])[-_/\.](0[1-9]|[12][0-9]|3[01])[-_/\.](20[0-9]{2})\b/
+  );
   if (m) return `${m[3]}-${m[1]}-${m[2]}`;
 
-  const months = "(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)";
-  const nameRe = new RegExp(`\\b${months}\\s+([0-3]?\\d)(?:st|nd|rd|th)?(?:,)?\\s+(20\\d{2})\\b`, "i");
+  // Month name dd, yyyy
+  const months =
+    "(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)";
+  const nameRe = new RegExp(
+    `\\b${months}\\s+([0-3]?\\d)(?:st|nd|rd|th)?(?:,)?\\s+(20\\d{2})\\b`,
+    "i"
+  );
   m = source.match(nameRe);
   if (m) {
     const monthNames = {
-      jan: "01", january: "01", feb: "02", february: "02", mar: "03", march: "03",
-      apr: "04", april: "04", may: "05", jun: "06", june: "06", jul: "07", july: "07",
-      aug: "08", august: "08", sep: "09", sept: "09", september: "09", oct: "10",
-      october: "10", nov: "11", november: "11", dec: "12", december: "12",
+      jan: "01",
+      january: "01",
+      feb: "02",
+      february: "02",
+      mar: "03",
+      march: "03",
+      apr: "04",
+      april: "04",
+      may: "05",
+      jun: "06",
+      june: "06",
+      jul: "07",
+      july: "07",
+      aug: "08",
+      august: "08",
+      sep: "09",
+      sept: "09",
+      september: "09",
+      oct: "10",
+      october: "10",
+      nov: "11",
+      november: "11",
+      dec: "12",
+      december: "12",
     };
     const mm = monthNames[m[1].toLowerCase()];
     const dd = String(m[2]).padStart(2, "0");
     return `${m[3]}-${mm}-${dd}`;
   }
 
+  // fallback today
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
   return `${now.getFullYear()}-${mm}-${dd}`;
 }
 
-function cleanOcrText(text = "") {
-  return String(text || "")
-    .replace(/\r/g, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-async function loadTesseract() {
-  const mod = await import("tesseract.js");
-  return mod.default || mod;
-}
-
-async function ocrCanvasToText(canvas, options = {}) {
-  const tesseract = await loadTesseract();
-  const { data } = await tesseract.recognize(canvas, "eng", {
-    logger: (m) => {
-      if (!options.onProgress) return;
-      if (m?.status) {
-        const pct = typeof m.progress === "number" ? ` ${Math.round(m.progress * 100)}%` : "";
-        options.onProgress(`${m.status}${pct}`);
-      }
-    },
-  });
-  return data?.text || "";
-}
-
-async function ocrImageToText(file, options = {}) {
-  const tesseract = await loadTesseract();
-  const { data } = await tesseract.recognize(file, "eng", {
-    logger: (m) => {
-      if (!options.onProgress) return;
-      if (m?.status) {
-        const pct = typeof m.progress === "number" ? ` ${Math.round(m.progress * 100)}%` : "";
-        options.onProgress(`${m.status}${pct}`);
-      }
-    },
-  });
-  return data?.text || "";
-}
-
-async function renderPdfPageToCanvas(page, scale = 2) {
-  const viewport = page.getViewport({ scale });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(viewport.width);
-  canvas.height = Math.round(viewport.height);
-  const ctx = canvas.getContext("2d");
-  await page.render({ canvasContext: ctx, viewport }).promise;
-  return canvas;
-}
-
-async function pdfToText(file, options = {}) {
-  const buf = await file.arrayBuffer();
-  const task = getDocument({ data: buf });
-  const pdf = await task.promise;
-  const maxPages = Math.min(pdf.numPages || 1, options.maxPages || 6);
-
-  let textLayerOutput = "";
-  for (let p = 1; p <= maxPages; p++) {
-    options.onProgress?.(`Reading PDF text layer, page ${p} of ${maxPages}`);
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    textLayerOutput += "\n" + content.items.map((it) => it.str).join(" ");
+async function ocrImageToText(file) {
+  try {
+    const tesseract = await import("tesseract.js");
+    const { data } = await tesseract.recognize(file, "eng");
+    return data?.text || "";
+  } catch (err) {
+    console.warn("[ocr] tesseract recognize failed:", err);
+    return "";
   }
+}
 
-  const cleanedTextLayer = cleanOcrText(textLayerOutput);
-  if (cleanedTextLayer.length >= 40) return cleanedTextLayer;
-
-  let ocrOutput = "";
-  for (let p = 1; p <= maxPages; p++) {
-    options.onProgress?.(`OCR scanning PDF page ${p} of ${maxPages}`);
-    const page = await pdf.getPage(p);
-    const canvas = await renderPdfPageToCanvas(page, options.scale || 2);
-    ocrOutput += "\n" + await ocrCanvasToText(canvas, options);
+async function pdfToText(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const task = getDocument({ data: buf });
+    const pdf = await task.promise;
+    let out = "";
+    const clamps = Math.min(pdf.numPages || 1, 3);
+    for (let p = 1; p <= clamps; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      out += " " + content.items.map((it) => it.str).join(" ");
+    }
+    return out;
+  } catch (err) {
+    console.warn("[ocr] pdf extraction failed:", err);
+    return "";
   }
-
-  return cleanOcrText(ocrOutput || cleanedTextLayer);
 }
 
 export async function detectAvailable() {
@@ -216,32 +199,15 @@ export async function detectAvailable() {
   }
 }
 
-export async function extractTextFromFile(file, options = {}) {
-  if (!file) return { text: "", source: "none" };
-
-  const isPDF = (file.type || "").includes("pdf") || /\.pdf$/i.test(file.name || "");
-  options.onProgress?.(isPDF ? "Reading PDF..." : "Running image OCR...");
-
-  try {
-    const text = isPDF ? await pdfToText(file, options) : await ocrImageToText(file, options);
-    return {
-      text: cleanOcrText(text),
-      source: isPDF ? "pdf" : "image",
-    };
-  } catch (err) {
-    console.warn("[ocr] extractTextFromFile failed:", err);
-    return {
-      text: "",
-      source: isPDF ? "pdf" : "image",
-      error: err?.message || String(err),
-    };
-  }
-}
-
 export async function extractFromFile(file) {
   if (!file) return { items: [] };
   const nameOnly = (file.name || "").replace(/\.[a-zA-Z0-9]+$/, "");
-  const { text } = await extractTextFromFile(file);
+  const isPDF =
+    (file.type || "").includes("pdf") || /\.pdf$/i.test(file.name || "");
+
+  let text = "";
+  if (isPDF) text = await pdfToText(file);
+  else text = await ocrImageToText(file);
 
   const src = `${text}\n${nameOnly}`;
   const categoryKey = guessCategory(src);
@@ -258,13 +224,12 @@ export async function extractFromFile(file) {
     bankSource: "Pending",
   };
 
-  return { items: [item], text };
+  return { items: [item] };
 }
 
 export default {
   providerLabel,
   OCR_AVAILABLE,
   detectAvailable,
-  extractTextFromFile,
   extractFromFile,
 };
