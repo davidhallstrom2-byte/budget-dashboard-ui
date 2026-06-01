@@ -4,6 +4,7 @@ import {
   AlertCircle,
   BriefcaseBusiness,
   Car,
+  CalendarPlus,
   Check,
   Clock,
   ChevronDown,
@@ -32,11 +33,13 @@ import {
 import PageContainer from "../common/PageContainer";
 import PremiumTodoListView from "../todo/PremiumTodoListView";
 import ArchivedDrawer from "../ui/ArchivedDrawer";
+import { createGoogleCalendarEvent } from "../../utils/googleCalendarApi";
 
 const STORAGE_KEY = "todoTab.tasks.v1";
 const STORAGE_BACKUP_KEY = "todoTab.tasks.backup.v1";
 const ARCHIVE_STORAGE_KEY = "todoTab.tasks.archived.v1";
 const SAFETY_SNAPSHOT_STORAGE_KEY = "todoTab.tasks.safetySnapshots.v1";
+const TODO_CALENDAR_ADDED_STORAGE_KEY = "todoTab.googleCalendar.addedIds.v1";
 const MAX_SAFETY_SNAPSHOTS = 30;
 
 const CONTACTS_STORAGE_KEY = "todoTab.contacts.v1";
@@ -320,6 +323,55 @@ const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => 
   return Math.max(minRows, Math.min(maxRows, estimatedRows));
 };
 
+
+const compactMultilineText = (value) =>
+  String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const AutoResizeTextarea = ({
+  value,
+  onChange,
+  className = "",
+  minRows = 1,
+  maxRows = 8,
+  charsPerRow = 72,
+  compactOnChange = false,
+  ...props
+}) => {
+  const textareaRef = useRef(null);
+  const displayValue = compactOnChange ? compactMultilineText(value) : String(value || "");
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const lineHeight = 20;
+    const verticalPadding = 10;
+    const minHeight = Math.max(34, minRows * lineHeight + verticalPadding);
+    const maxHeight = Math.max(minHeight, maxRows * lineHeight + verticalPadding);
+
+    el.style.height = "auto";
+    const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [displayValue, minRows, maxRows]);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={displayValue}
+      onChange={(event) => onChange(compactOnChange ? compactMultilineText(event.target.value) : event.target.value)}
+      rows={getTextareaRows(displayValue, minRows, maxRows, charsPerRow)}
+      className={`${className} resize-none`}
+      {...props}
+    />
+  );
+};
+
 const safeJsonParse = (value, fallback) => {
   try {
     const parsed = JSON.parse(value || "");
@@ -356,6 +408,11 @@ const renderInlineFormatting = (value = "") => {
   html = html.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     (_match, label, url) => `<a href="${url}" target="_blank" rel="noreferrer" class="font-bold text-blue-700 underline">${label}</a>`
+  );
+
+  html = html.replace(
+    /\[color:(#[0-9a-fA-F]{6})\]([\s\S]+?)\[\/color\]/g,
+    (_match, color, text) => `<span style="color: ${color};">${text}</span>`
   );
 
   html = html
@@ -417,9 +474,84 @@ const formatTextToHtml = (value = "") => {
   return html.join("");
 };
 
-const hasFormattingMarkup = (value = "") => /\*\*[^*]+\*\*|\*[^*\n]+\*|__[^_]+__|~~[^~]+~~|^\s*[-*]\s+|^\s*\d+[.)]\s+|\[[^\]]+\]\(https?:\/\/[^\s)]+\)/m.test(String(value ?? ""));
+const hasFormattingMarkup = (value = "") => /\*\*[^*]+\*\*|\*[^*\n]+\*|__[^_]+__|~~[^~]+~~|\[color:#[0-9a-fA-F]{6}\][\s\S]+?\[\/color\]|^\s*[-*]\s+|^\s*\d+[.)]\s+|\[[^\]]+\]\(https?:\/\/[^\s)]+\)/m.test(String(value ?? ""));
 
-const applyTextFormatting = (format, value, onChange, textarea) => {
+const TEXT_COLOR_OPTIONS = [
+  { label: "Black", value: "#111827" },
+  { label: "Red", value: "#dc2626" },
+  { label: "Orange", value: "#ea580c" },
+  { label: "Yellow", value: "#ca8a04" },
+  { label: "Green", value: "#16a34a" },
+  { label: "Blue", value: "#2563eb" },
+  { label: "Purple", value: "#7c3aed" },
+];
+
+const looksLikeHtmlNote = (value = "") => /<(p|div|span|strong|em|u|s|ul|ol|li|a|br)\b/i.test(String(value ?? ""));
+
+const sanitizeFormattedHtml = (value = "") => {
+  if (typeof document === "undefined") return escapeFormattedHtml(value);
+
+  const template = document.createElement("template");
+  template.innerHTML = String(value ?? "");
+
+  const allowedTags = new Set(["P", "DIV", "SPAN", "STRONG", "B", "EM", "I", "U", "S", "UL", "OL", "LI", "A", "BR", "FONT"]);
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
+  const nodes = [];
+
+  while (walker.nextNode()) {
+    nodes.push(walker.currentNode);
+  }
+
+  nodes.forEach((node) => {
+    if (!allowedTags.has(node.tagName)) {
+      node.replaceWith(document.createTextNode(node.textContent || ""));
+      return;
+    }
+
+    if (node.tagName === "FONT") {
+      const color = node.getAttribute("color");
+      const span = document.createElement("span");
+      if (color) span.setAttribute("style", `color: ${color};`);
+      span.innerHTML = node.innerHTML;
+      node.replaceWith(span);
+      return;
+    }
+
+    [...node.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const valueText = attribute.value || "";
+
+      if (name.startsWith("on")) {
+        node.removeAttribute(attribute.name);
+        return;
+      }
+
+      if (name === "style") {
+        const colorMatch = valueText.match(/color\s*:\s*(#[0-9a-fA-F]{3,6}|rgb\([^)]*\)|[a-zA-Z]+)/);
+        if (colorMatch) {
+          node.setAttribute("style", `color: ${colorMatch[1]};`);
+        } else {
+          node.removeAttribute("style");
+        }
+        return;
+      }
+
+      if (node.tagName === "A" && name === "href" && /^https?:\/\//i.test(valueText)) {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noreferrer");
+        return;
+      }
+
+      if (name !== "target" && name !== "rel") {
+        node.removeAttribute(attribute.name);
+      }
+    });
+  });
+
+  return template.innerHTML;
+};
+
+const applyTextFormatting = (format, value, onChange, textarea, option = {}) => {
   const currentValue = String(value ?? "");
   const start = textarea?.selectionStart ?? currentValue.length;
   const end = textarea?.selectionEnd ?? currentValue.length;
@@ -456,6 +588,7 @@ const applyTextFormatting = (format, value, onChange, textarea) => {
     bullet: () => prefixLines("- ", "List item"),
     numbered: () => prefixLines((index) => `${index + 1}. `, "List item"),
     link: () => wrapSelection("[", "](https://example.com)", "link text"),
+    color: () => wrapSelection(`[color:${option.color || "#2563eb"}]`, "[/color]", "colored text"),
   };
 
   const result = formats[format]?.();
@@ -469,45 +602,194 @@ const applyTextFormatting = (format, value, onChange, textarea) => {
 };
 
 const FormattedText = ({ value, className = "" }) => {
-  const html = formatTextToHtml(value);
+  const rawValue = String(value ?? "");
+  const html = looksLikeHtmlNote(rawValue) ? sanitizeFormattedHtml(rawValue) : formatTextToHtml(rawValue);
   if (!html) return null;
   return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
-const FormattingToolbar = ({ onFormat }) => {
+const getEditorHtml = (value = "") => {
+  const rawValue = String(value ?? "");
+  if (!rawValue.trim()) return "";
+  return looksLikeHtmlNote(rawValue) ? sanitizeFormattedHtml(rawValue) : formatTextToHtml(rawValue);
+};
+
+const FormattingToolbar = ({ editorRef, selectionRef, colorValue, setColorValue }) => {
+  const [showColorMenu, setShowColorMenu] = useState(false);
   const buttonClass = "rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 hover:bg-slate-100";
 
+  const focusEditor = () => {
+    editorRef.current?.focus({ preventScroll: true });
+  };
+
+  const restoreSelection = () => {
+    const editor = editorRef.current;
+    const savedRange = selectionRef?.current;
+
+    if (!editor || !savedRange) return false;
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(savedRange);
+    return true;
+  };
+
+  const focusAndRestoreSelection = () => {
+    focusEditor();
+    return restoreSelection();
+  };
+
+  const saveCurrentSelection = () => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range.cloneRange();
+    }
+  };
+
+  const runCommand = (command, value = null) => {
+    focusAndRestoreSelection();
+    if (command === "createLink") {
+      const url = window.prompt("Enter link URL:", "https://");
+      if (!url || !/^https?:\/\//i.test(url)) return;
+      document.execCommand(command, false, url);
+      saveCurrentSelection();
+      return;
+    }
+    document.execCommand(command, false, value);
+    saveCurrentSelection();
+  };
+
+  const applyColor = (color) => {
+    const nextColor = color || "#111827";
+    setColorValue(nextColor);
+    setShowColorMenu(false);
+    focusAndRestoreSelection();
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand("foreColor", false, nextColor);
+    saveCurrentSelection();
+  };
+
   return (
-    <div className="mb-1 flex flex-wrap items-center gap-1">
-      <button type="button" onClick={() => onFormat("bold")} className={buttonClass} title="Bold selected text">B</button>
-      <button type="button" onClick={() => onFormat("italic")} className={`${buttonClass} italic`} title="Italic selected text">I</button>
-      <button type="button" onClick={() => onFormat("underline")} className={`${buttonClass} underline`} title="Underline selected text">U</button>
-      <button type="button" onClick={() => onFormat("strike")} className={`${buttonClass} line-through`} title="Strikethrough selected text">S</button>
-      <button type="button" onClick={() => onFormat("bullet")} className={buttonClass} title="Make selected lines bullets">• List</button>
-      <button type="button" onClick={() => onFormat("numbered")} className={buttonClass} title="Make selected lines numbered">1. List</button>
-      <button type="button" onClick={() => onFormat("link")} className={buttonClass} title="Add link formatting">Link</button>
+    <div className="relative mb-1 flex flex-wrap items-center gap-1">
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")} className={buttonClass} title="Bold selected text">B</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("italic")} className={`${buttonClass} italic`} title="Italic selected text">I</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("underline")} className={`${buttonClass} underline`} title="Underline selected text">U</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("strikeThrough")} className={`${buttonClass} line-through`} title="Strikethrough selected text">S</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertUnorderedList")} className={buttonClass} title="Make selected lines bullets">• List</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertOrderedList")} className={buttonClass} title="Make selected lines numbered">1. List</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("createLink")} className={buttonClass} title="Add link">Link</button>
+      <div className="relative">
+        <button
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            restoreSelection();
+          }}
+          onClick={() => setShowColorMenu((current) => !current)}
+          className="flex h-[30px] w-14 items-center justify-center gap-1 rounded border border-slate-300 bg-white px-1 hover:bg-slate-100"
+          title="Text color"
+          aria-label="Text color"
+        >
+          <span className="h-3 w-3 rounded-sm border border-slate-300" style={{ backgroundColor: colorValue }} />
+          <span className="text-xs text-slate-600">⌄</span>
+        </button>
+        {showColorMenu && (
+          <div className="absolute left-0 top-8 z-50 grid grid-cols-7 gap-1 rounded border border-slate-300 bg-white p-1 shadow-lg">
+            {TEXT_COLOR_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applyColor(option.value);
+                }}
+                className="h-6 w-6 rounded border border-slate-300 hover:ring-2 hover:ring-slate-400"
+                style={{ backgroundColor: option.value }}
+                title={option.label}
+                aria-label={option.label}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
-const FormattingTextarea = ({ value, onChange, rows, className = "", ...props }) => {
-  const textareaRef = useRef(null);
+const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeholder = "", ...props }) => {
+  const editorRef = useRef(null);
+  const selectionRef = useRef(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const [colorValue, setColorValue] = useState("#111827");
+
+  useEffect(() => {
+    if (!editorRef.current || isFocused) return;
+    editorRef.current.innerHTML = getEditorHtml(value);
+  }, [value, isFocused]);
+
+  const saveSelection = () => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range.cloneRange();
+    }
+  };
+
+  const updateValueFromEditor = () => {
+    saveSelection();
+    const nextHtml = sanitizeFormattedHtml(editorRef.current?.innerHTML || "").trim();
+    onChange(nextHtml);
+  };
 
   return (
     <div>
-      <FormattingToolbar onFormat={(format) => applyTextFormatting(format, value, onChange, textareaRef.current)} />
-      <textarea
-        ref={textareaRef}
-        value={value || ""}
-        onChange={(event) => onChange(event.target.value)}
-        rows={rows}
-        className={className}
+      <FormattingToolbar editorRef={editorRef} selectionRef={selectionRef} colorValue={colorValue} setColorValue={setColorValue} />
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onFocus={() => {
+          setIsFocused(true);
+          window.requestAnimationFrame(saveSelection);
+        }}
+        onBlur={() => {
+          setIsFocused(false);
+          updateValueFromEditor();
+        }}
+        onInput={updateValueFromEditor}
+        onMouseUp={saveSelection}
+        onKeyUp={saveSelection}
+        data-placeholder={placeholder}
+        className={`${className} rich-note-editor`}
+        style={{ minHeight: `${Math.max(44, rows * 24)}px` }}
         {...props}
       />
+      <style>{`
+        .rich-note-editor:empty::before {
+          content: attr(data-placeholder);
+          color: #94a3b8;
+          pointer-events: none;
+        }
+        .rich-note-editor p {
+          margin: 0 0 0.25rem 0;
+        }
+        .rich-note-editor ul,
+        .rich-note-editor ol {
+          margin: 0.25rem 0 0.25rem 1.25rem;
+        }
+      `}</style>
     </div>
   );
 };
-
 
 const normalizeContact = (contact = {}) => ({
   ...EMPTY_CONTACT_FORM,
@@ -1094,6 +1376,161 @@ const sortTasks = (tasks) => {
   });
 };
 
+const readStoredTodoCalendarAddedIds = () => {
+  const parsed = safeJsonParse(localStorage.getItem(TODO_CALENDAR_ADDED_STORAGE_KEY), []);
+  return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+};
+
+const writeStoredTodoCalendarAddedIds = (ids) => {
+  localStorage.setItem(TODO_CALENDAR_ADDED_STORAGE_KEY, JSON.stringify(Array.from(new Set(ids.filter(Boolean)))));
+};
+
+const stripHtmlForCalendar = (value = "") => {
+  if (typeof document === "undefined") {
+    return String(value || "").replace(/<[^>]+>/g, "");
+  }
+
+  const element = document.createElement("div");
+  element.innerHTML = String(value || "");
+  return element.textContent || element.innerText || "";
+};
+
+const formatCalendarDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatCalendarDateTime = (date) => {
+  const datePart = formatCalendarDate(date);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${datePart}T${hours}:${minutes}:00`;
+};
+
+const addCalendarDays = (date, days) => {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+};
+
+const parseTodoCalendarDate = (value = "") => {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const numericMatch = text.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+  if (numericMatch) {
+    const month = Number(numericMatch[1]);
+    const day = Number(numericMatch[2]);
+    const year = Number(numericMatch[3].length === 2 ? `20${numericMatch[3]}` : numericMatch[3]);
+    const parsedDate = new Date(year, month - 1, day);
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+  }
+
+  const namedMonthMatch = text.match(/(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?[,]?\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?[,]?\s+(\d{4})/i);
+  if (namedMonthMatch) {
+    const parsedDate = new Date(`${namedMonthMatch[1]} ${namedMonthMatch[2]}, ${namedMonthMatch[3]}`);
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+  }
+
+  const parsedDate = new Date(text);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
+const parseTodoCalendarTime = (value = "") => {
+  const text = String(value || "");
+  const timeMatch = text.match(/(?:^|\b)(\d{1,2})(?::(\d{2}))?\s*(AM|PM|A\.M\.|P\.M\.)\b/i);
+  if (!timeMatch) return null;
+
+  let hours = Number(timeMatch[1]);
+  const minutes = Number(timeMatch[2] || 0);
+  const meridiem = timeMatch[3].toLowerCase();
+
+  if (meridiem.startsWith("p") && hours < 12) hours += 12;
+  if (meridiem.startsWith("a") && hours === 12) hours = 0;
+
+  return { hours, minutes };
+};
+
+const getTaskFollowUpTextForCalendar = (task = {}) => {
+  return getFollowUpEntries(task)
+    .map((entry) => stripHtmlForCalendar(entry?.text || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+const buildTodoCalendarEventPayload = (task = {}) => {
+  const detailText = stripHtmlForCalendar(task.details || "");
+  const questionText = stripHtmlForCalendar(task.questions || "");
+  const noteText = stripHtmlForCalendar(task.notes || "");
+  const followUpText = getTaskFollowUpTextForCalendar(task);
+  const searchableText = [
+    task.taskName,
+    task.title,
+    task.date,
+    task.deadline,
+    task.effectiveDate,
+    detailText,
+    questionText,
+    noteText,
+    followUpText,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const explicitDate = parseTodoCalendarDate(searchableText);
+  const taskDate = explicitDate || parseTodoCalendarDate(task.deadline || task.date || task.effectiveDate || "");
+
+  if (!taskDate) {
+    throw new Error("Add a task date or due date before creating a Google Calendar event.");
+  }
+
+  const timeValue = parseTodoCalendarTime(searchableText);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles";
+
+  const descriptionLines = [
+    detailText,
+    task.person ? `Person: ${task.person}` : "",
+    task.organization ? `Organization: ${task.organization}` : "",
+    task.company ? `Company: ${task.company}` : "",
+    task.phone ? `Phone: ${task.phone}` : "",
+    task.address ? `Address: ${task.address}` : "",
+    task.caseNumber ? `Case #: ${task.caseNumber}` : "",
+    task.citationNumber ? `Citation #: ${task.citationNumber}` : "",
+    task.policyNumber ? `Policy #: ${task.policyNumber}` : "",
+    task.plate ? `Plate: ${task.plate}` : "",
+    task.vin ? `VIN: ${task.vin}` : "",
+    task.amount ? `Amount: ${task.amount}` : "",
+    task.website ? `Website: ${task.website}` : "",
+    task.systemLink ? `System link: ${task.systemLink}` : "",
+    questionText ? `Questions:\n${questionText}` : "",
+    noteText ? `Notes:\n${noteText}` : "",
+    followUpText ? `Follow-up notes:\n${followUpText}` : "",
+  ].filter(Boolean);
+
+  const payload = {
+    summary: task.taskName || task.title || "To-Do Task",
+    location: task.address || "",
+    description: descriptionLines.join("\n\n"),
+  };
+
+  if (timeValue) {
+    const startDate = new Date(taskDate);
+    startDate.setHours(timeValue.hours, timeValue.minutes, 0, 0);
+    const endDate = new Date(startDate);
+    endDate.setHours(endDate.getHours() + 1);
+
+    payload.start = { dateTime: formatCalendarDateTime(startDate), timeZone: timezone };
+    payload.end = { dateTime: formatCalendarDateTime(endDate), timeZone: timezone };
+  } else {
+    payload.start = { date: formatCalendarDate(taskDate) };
+    payload.end = { date: formatCalendarDate(addCalendarDays(taskDate, 1)) };
+  }
+
+  return payload;
+};
+
 export default function TodoTab() {
   const hasHydrated = useRef(false);
   const [tasks, setTasks] = useState(readStoredTasks);
@@ -1124,6 +1561,8 @@ export default function TodoTab() {
   const [replaceExistingContactFields, setReplaceExistingContactFields] = useState(false);
   const [contactApplyTarget, setContactApplyTarget] = useState("form");
   const [completionCelebration, setCompletionCelebration] = useState(null);
+  const [calendarAddedIds, setCalendarAddedIds] = useState(readStoredTodoCalendarAddedIds);
+  const [calendarAddingTaskId, setCalendarAddingTaskId] = useState("");
   const completionCelebrationTimeoutRef = useRef(null);
   const previousTaskCompletionRef = useRef(new Map(tasks.map((task) => [task.id, Boolean(task.completed)])));
 
@@ -1788,6 +2227,40 @@ const addParsedTasks = () => {
     cancelEditingFollowUpEntry(taskId, entryId);
   };
 
+  const createTaskCalendarEvent = async (task) => {
+    if (!task?.id || calendarAddingTaskId) return;
+
+    try {
+      setCalendarAddingTaskId(task.id);
+      const eventPayload = buildTodoCalendarEventPayload(task);
+      await createGoogleCalendarEvent(eventPayload);
+
+      setCalendarAddedIds((current) => {
+        const nextIds = Array.from(new Set([...current, task.id]));
+        writeStoredTodoCalendarAddedIds(nextIds);
+        return nextIds;
+      });
+
+      setTasks((current) =>
+        current.map((item) =>
+          item.id === task.id
+            ? addTaskHistory(
+                {
+                  ...item,
+                  calendarAddedAt: new Date().toISOString(),
+                },
+                "Google Calendar event added"
+              )
+            : item
+        )
+      );
+    } catch (error) {
+      window.alert(error?.message || "Could not add this task to Google Calendar.");
+    } finally {
+      setCalendarAddingTaskId("");
+    }
+  };
+
   const toggleCategory = (type) => {
     setCollapsedCategories((current) => ({ ...current, [type]: !current[type] }));
   };
@@ -2092,7 +2565,7 @@ const addParsedTasks = () => {
             value={value || ""}
             onChange={onChange}
             rows={getTextareaRows(value, 1, 8)}
-            className="min-h-[38px] w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-h-[38px] w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
         );
       }
@@ -2102,7 +2575,7 @@ const addParsedTasks = () => {
           value={value || ""}
           onChange={(event) => onChange(event.target.value)}
           rows={getTextareaRows(value, 1, 8)}
-          className="min-h-[38px] w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="min-h-[38px] w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
       );
     }
@@ -2206,7 +2679,7 @@ const addParsedTasks = () => {
         </div>
       )}
 
-      <div className="rounded-xl border-2 border-green-200 bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
+      <div className="rounded-xl border-2 border-black bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">To-Do</h2>
@@ -2265,8 +2738,12 @@ const addParsedTasks = () => {
       <section className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 p-3 shadow-md">
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-[220px] shrink-0">
-            <h3 className="text-lg font-bold text-slate-900">Active Tasks</h3>
-            <p className="text-sm text-slate-600">Only categories with open tasks are shown here.</p>
+            <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+              <span>Active Tasks</span>
+              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-blue-700 px-2 text-xs font-bold leading-none text-white shadow-sm">
+                {totalActiveTasks}
+              </span>
+            </h3>
           </div>
 
           <div className="flex min-w-[280px] flex-1 flex-wrap items-center gap-2">
@@ -2289,21 +2766,18 @@ const addParsedTasks = () => {
                         document.getElementById(getCategoryAnchorId(item.type))?.scrollIntoView({ behavior: "smooth", block: "start" });
                       });
                     }}
-                    className="group inline-flex min-h-[46px] min-w-[190px] flex-1 items-center justify-between gap-3 rounded-xl border border-green-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-green-400 hover:bg-green-100 lg:max-w-[260px]"
+                    className="group inline-flex items-center justify-between gap-2 rounded-lg border border-black bg-white px-4 py-2 text-left text-sm font-semibold shadow-sm transition hover:bg-green-100"
                     title={`Go to ${item.type} active tasks`}
                     aria-label={`Go to ${item.type} active tasks`}
                   >
                     <div className="flex min-w-0 items-center gap-2">
-                      <Icon className={`h-5 w-5 shrink-0 ${iconColor}`} aria-hidden="true" />
+                      <Icon className={`h-4 w-4 shrink-0 ${iconColor}`} aria-hidden="true" />
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-slate-900">{item.type}</div>
-                        <div className="text-xs font-semibold text-slate-600">
-                          {item.overdueCount > 0 ? `${item.overdueCount} overdue` : item.dueSoonCount > 0 ? `${item.dueSoonCount} due soon` : "Open"}
-                        </div>
+                        <div className="truncate text-sm font-semibold text-slate-900">{item.type}</div>
                       </div>
                     </div>
                     <div
-                      className={`rounded-full px-3 py-1 text-base font-black leading-none text-white shadow-sm ${
+                      className={`flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-bold leading-none text-white shadow-sm ${
                         item.overdueCount > 0 ? "bg-red-600 group-hover:bg-red-700" : "bg-blue-700 group-hover:bg-blue-800"
                       }`}
                       title={
@@ -2322,11 +2796,6 @@ const addParsedTasks = () => {
                 No active tasks.
               </div>
             )}
-          </div>
-
-          <div className="ml-auto rounded-xl bg-green-700 px-4 py-2 text-center text-white shadow-sm">
-            <div className="text-xs font-bold uppercase tracking-wide text-green-100">Active</div>
-            <div className="text-3xl font-black leading-none">{totalActiveTasks}</div>
           </div>
         </div>
       </section>
@@ -2664,11 +3133,14 @@ const addParsedTasks = () => {
                                   <span className={`inline-flex rounded px-2 py-1 text-xs font-bold ${statusClass}`}>{statusLabel}</span>
                                 </td>
                                 <td className="align-top px-2 py-2">
-                                  <textarea
+                                  <AutoResizeTextarea
                                     value={task.details || ""}
-                                    onChange={(event) => updateTaskField(task.id, "details", event.target.value)}
-                                    rows={getTextareaRows(task.details, 1, 8, 55)}
-                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm"
+                                    onChange={(value) => updateTaskField(task.id, "details", value)}
+                                    minRows={1}
+                                    maxRows={8}
+                                    charsPerRow={55}
+                                    compactOnChange
+                                    className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                   />
                                 </td>
                                 <td className="align-top px-2 py-2">
@@ -2731,6 +3203,24 @@ const addParsedTasks = () => {
                                     </button>
                                     <button
                                       type="button"
+                                      onClick={() => createTaskCalendarEvent(task)}
+                                      disabled={calendarAddingTaskId === task.id}
+                                      className={`inline-flex items-center justify-center rounded px-2 py-1 text-white ${
+                                        calendarAddedIds.includes(task.id) || task.calendarAddedAt
+                                          ? "bg-green-700 hover:bg-green-800"
+                                          : "bg-emerald-700 hover:bg-emerald-800"
+                                      } disabled:cursor-wait disabled:opacity-60`}
+                                      aria-label="Add task to Google Calendar"
+                                      title={calendarAddedIds.includes(task.id) || task.calendarAddedAt ? "Google Calendar event added" : "Add task to Google Calendar"}
+                                    >
+                                      {calendarAddedIds.includes(task.id) || task.calendarAddedAt ? (
+                                        <Check className="h-4 w-4" />
+                                      ) : (
+                                        <CalendarPlus className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
                                       onClick={() => setSelectedTaskId(task.id)}
                                       className="inline-flex items-center justify-center rounded bg-cyan-700 px-2 py-1 text-white hover:bg-cyan-800"
                                       aria-label="Open task detail drawer"
@@ -2784,14 +3274,17 @@ const addParsedTasks = () => {
                                                     value={task[field] || ""}
                                                     onChange={(value) => updateTaskField(task.id, field, value)}
                                                     rows={getTextareaRows(task[field], 1, 8, 48)}
-                                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                    className="min-h-[34px] w-full resize-none rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
                                                   />
                                                 ) : (
-                                                  <textarea
+                                                  <AutoResizeTextarea
                                                     value={task[field] || ""}
-                                                    onChange={(event) => updateTaskField(task.id, field, event.target.value)}
-                                                    rows={getTextareaRows(task[field], 1, 8, 48)}
-                                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    minRows={1}
+                                                    maxRows={8}
+                                                    charsPerRow={48}
+                                                    compactOnChange
+                                                    className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
                                                   />
                                                 )
                                               ) : (
@@ -2809,28 +3302,9 @@ const addParsedTasks = () => {
 
                                     <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
                                       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Notes</div>
-                                      <div className="flex gap-2">
-                                        <div className="flex-1">
-                                          <FormattingTextarea
-                                            value={followUpDrafts[task.id] || ""}
-                                            onChange={(value) => setFollowUpDrafts((current) => ({ ...current, [task.id]: value }))}
-                                            rows={2}
-                                            placeholder="Add a follow-up note..."
-                                            className="min-h-[44px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                          />
-                                        </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => addFollowUpEntry(task.id)}
-                                          className="self-start rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
-                                          title="Add follow-up entry"
-                                        >
-                                          Add Note
-                                        </button>
-                                      </div>
 
                                       {followUpEntries.length > 0 && (
-                                        <div className="mt-3 space-y-2">
+                                        <div className="mb-3 space-y-2">
                                           {followUpEntries.slice(0, 10).map((entry) => {
                                             const editKey = `${task.id}:${entry.id}`;
                                             const isEditingEntry = Object.prototype.hasOwnProperty.call(editingFollowUpEntries, editKey);
@@ -2898,8 +3372,8 @@ const addParsedTasks = () => {
                                                         [editKey]: value,
                                                       }))
                                                     }
-                                                    rows={getTextareaRows(editingFollowUpEntries[editKey], 2, 10, 80)}
-                                                    className="mt-2 min-h-[54px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                                                    rows={getTextareaRows(editingFollowUpEntries[editKey], 1, 10, 80)}
+                                                    className="mt-2 min-h-[34px] w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
                                                   />
                                                 ) : (
                                                   <FormattedText value={entry.text} className="mt-1 space-y-1 text-slate-900" />
@@ -2909,6 +3383,26 @@ const addParsedTasks = () => {
                                           })}
                                         </div>
                                       )}
+
+                                      <div className="flex gap-2">
+                                        <div className="flex-1">
+                                          <FormattingTextarea
+                                            value={followUpDrafts[task.id] || ""}
+                                            onChange={(value) => setFollowUpDrafts((current) => ({ ...current, [task.id]: value }))}
+                                            rows={1}
+                                            placeholder="Add a follow-up note..."
+                                            className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                          />
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => addFollowUpEntry(task.id)}
+                                          className="self-start rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                                          title="Add follow-up entry"
+                                        >
+                                          Add Note
+                                        </button>
+                                      </div>
                                     </div>
 
                                   </td>
@@ -3207,11 +3701,14 @@ const addParsedTasks = () => {
                 </label>
                 <label className="text-sm font-semibold md:col-span-2">
                   Details
-                  <textarea
+                  <AutoResizeTextarea
                     value={selectedTask.details || ""}
-                    onChange={(event) => updateTaskField(selectedTask.id, "details", event.target.value)}
-                    rows={getTextareaRows(selectedTask.details, 3, 12, 90)}
-                    className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    onChange={(value) => updateTaskField(selectedTask.id, "details", value)}
+                    minRows={1}
+                    maxRows={12}
+                    charsPerRow={90}
+                    compactOnChange
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
 
@@ -3223,9 +3720,9 @@ const addParsedTasks = () => {
                       <div className="mt-1">
                         {MULTILINE_FIELDS.has(field) ? (
                           shouldUseFormattingToolbar(field) ? (
-                            <FormattingTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                            <FormattingTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                           ) : (
-                            <textarea value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                            <AutoResizeTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} minRows={1} maxRows={12} charsPerRow={90} compactOnChange className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                           )
                         ) : (
                           <input value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -3335,11 +3832,13 @@ const addParsedTasks = () => {
 
                   <label className="text-sm font-bold text-slate-800">
                     Address
-                    <textarea
+                    <AutoResizeTextarea
                       value={contactForm.address}
-                      onChange={(event) => setContactForm((current) => ({ ...current, address: event.target.value }))}
-                      rows={getTextareaRows(contactForm.address, 2, 6)}
-                      className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      onChange={(value) => setContactForm((current) => ({ ...current, address: value }))}
+                      minRows={1}
+                      maxRows={6}
+                      compactOnChange
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     />
                   </label>
 
@@ -3372,11 +3871,13 @@ const addParsedTasks = () => {
 
                   <label className="text-sm font-bold text-slate-800">
                     Notes
-                    <textarea
+                    <AutoResizeTextarea
                       value={contactForm.notes}
-                      onChange={(event) => setContactForm((current) => ({ ...current, notes: event.target.value }))}
-                      rows={getTextareaRows(contactForm.notes, 2, 8)}
-                      className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      onChange={(value) => setContactForm((current) => ({ ...current, notes: value }))}
+                      minRows={1}
+                      maxRows={8}
+                      compactOnChange
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     />
                   </label>
                 </div>

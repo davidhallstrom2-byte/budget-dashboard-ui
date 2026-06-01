@@ -320,6 +320,55 @@ const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => 
   return Math.max(minRows, Math.min(maxRows, estimatedRows));
 };
 
+
+const compactMultilineText = (value) =>
+  String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const AutoResizeTextarea = ({
+  value,
+  onChange,
+  className = "",
+  minRows = 1,
+  maxRows = 8,
+  charsPerRow = 72,
+  compactOnChange = false,
+  ...props
+}) => {
+  const textareaRef = useRef(null);
+  const displayValue = compactOnChange ? compactMultilineText(value) : String(value || "");
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    const lineHeight = 20;
+    const verticalPadding = 10;
+    const minHeight = Math.max(34, minRows * lineHeight + verticalPadding);
+    const maxHeight = Math.max(minHeight, maxRows * lineHeight + verticalPadding);
+
+    el.style.height = "auto";
+    const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [displayValue, minRows, maxRows]);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={displayValue}
+      onChange={(event) => onChange(compactOnChange ? compactMultilineText(event.target.value) : event.target.value)}
+      rows={getTextareaRows(displayValue, minRows, maxRows, charsPerRow)}
+      className={`${className} resize-none`}
+      {...props}
+    />
+  );
+};
+
 const safeJsonParse = (value, fallback) => {
   try {
     const parsed = JSON.parse(value || "");
@@ -356,6 +405,11 @@ const renderInlineFormatting = (value = "") => {
   html = html.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     (_match, label, url) => `<a href="${url}" target="_blank" rel="noreferrer" class="font-bold text-blue-700 underline">${label}</a>`
+  );
+
+  html = html.replace(
+    /\[color:(#[0-9a-fA-F]{6})\]([\s\S]+?)\[\/color\]/g,
+    (_match, color, text) => `<span style="color: ${color};">${text}</span>`
   );
 
   html = html
@@ -417,9 +471,84 @@ const formatTextToHtml = (value = "") => {
   return html.join("");
 };
 
-const hasFormattingMarkup = (value = "") => /\*\*[^*]+\*\*|\*[^*\n]+\*|__[^_]+__|~~[^~]+~~|^\s*[-*]\s+|^\s*\d+[.)]\s+|\[[^\]]+\]\(https?:\/\/[^\s)]+\)/m.test(String(value ?? ""));
+const hasFormattingMarkup = (value = "") => /\*\*[^*]+\*\*|\*[^*\n]+\*|__[^_]+__|~~[^~]+~~|\[color:#[0-9a-fA-F]{6}\][\s\S]+?\[\/color\]|^\s*[-*]\s+|^\s*\d+[.)]\s+|\[[^\]]+\]\(https?:\/\/[^\s)]+\)/m.test(String(value ?? ""));
 
-const applyTextFormatting = (format, value, onChange, textarea) => {
+const TEXT_COLOR_OPTIONS = [
+  { label: "Black", value: "#111827" },
+  { label: "Red", value: "#dc2626" },
+  { label: "Orange", value: "#ea580c" },
+  { label: "Yellow", value: "#ca8a04" },
+  { label: "Green", value: "#16a34a" },
+  { label: "Blue", value: "#2563eb" },
+  { label: "Purple", value: "#7c3aed" },
+];
+
+const looksLikeHtmlNote = (value = "") => /<(p|div|span|strong|em|u|s|ul|ol|li|a|br)\b/i.test(String(value ?? ""));
+
+const sanitizeFormattedHtml = (value = "") => {
+  if (typeof document === "undefined") return escapeFormattedHtml(value);
+
+  const template = document.createElement("template");
+  template.innerHTML = String(value ?? "");
+
+  const allowedTags = new Set(["P", "DIV", "SPAN", "STRONG", "B", "EM", "I", "U", "S", "UL", "OL", "LI", "A", "BR", "FONT"]);
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
+  const nodes = [];
+
+  while (walker.nextNode()) {
+    nodes.push(walker.currentNode);
+  }
+
+  nodes.forEach((node) => {
+    if (!allowedTags.has(node.tagName)) {
+      node.replaceWith(document.createTextNode(node.textContent || ""));
+      return;
+    }
+
+    if (node.tagName === "FONT") {
+      const color = node.getAttribute("color");
+      const span = document.createElement("span");
+      if (color) span.setAttribute("style", `color: ${color};`);
+      span.innerHTML = node.innerHTML;
+      node.replaceWith(span);
+      return;
+    }
+
+    [...node.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const valueText = attribute.value || "";
+
+      if (name.startsWith("on")) {
+        node.removeAttribute(attribute.name);
+        return;
+      }
+
+      if (name === "style") {
+        const colorMatch = valueText.match(/color\s*:\s*(#[0-9a-fA-F]{3,6}|rgb\([^)]*\)|[a-zA-Z]+)/);
+        if (colorMatch) {
+          node.setAttribute("style", `color: ${colorMatch[1]};`);
+        } else {
+          node.removeAttribute("style");
+        }
+        return;
+      }
+
+      if (node.tagName === "A" && name === "href" && /^https?:\/\//i.test(valueText)) {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noreferrer");
+        return;
+      }
+
+      if (name !== "target" && name !== "rel") {
+        node.removeAttribute(attribute.name);
+      }
+    });
+  });
+
+  return template.innerHTML;
+};
+
+const applyTextFormatting = (format, value, onChange, textarea, option = {}) => {
   const currentValue = String(value ?? "");
   const start = textarea?.selectionStart ?? currentValue.length;
   const end = textarea?.selectionEnd ?? currentValue.length;
@@ -456,6 +585,7 @@ const applyTextFormatting = (format, value, onChange, textarea) => {
     bullet: () => prefixLines("- ", "List item"),
     numbered: () => prefixLines((index) => `${index + 1}. `, "List item"),
     link: () => wrapSelection("[", "](https://example.com)", "link text"),
+    color: () => wrapSelection(`[color:${option.color || "#2563eb"}]`, "[/color]", "colored text"),
   };
 
   const result = formats[format]?.();
@@ -469,45 +599,194 @@ const applyTextFormatting = (format, value, onChange, textarea) => {
 };
 
 const FormattedText = ({ value, className = "" }) => {
-  const html = formatTextToHtml(value);
+  const rawValue = String(value ?? "");
+  const html = looksLikeHtmlNote(rawValue) ? sanitizeFormattedHtml(rawValue) : formatTextToHtml(rawValue);
   if (!html) return null;
   return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
-const FormattingToolbar = ({ onFormat }) => {
+const getEditorHtml = (value = "") => {
+  const rawValue = String(value ?? "");
+  if (!rawValue.trim()) return "";
+  return looksLikeHtmlNote(rawValue) ? sanitizeFormattedHtml(rawValue) : formatTextToHtml(rawValue);
+};
+
+const FormattingToolbar = ({ editorRef, selectionRef, colorValue, setColorValue }) => {
+  const [showColorMenu, setShowColorMenu] = useState(false);
   const buttonClass = "rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 hover:bg-slate-100";
 
+  const focusEditor = () => {
+    editorRef.current?.focus({ preventScroll: true });
+  };
+
+  const restoreSelection = () => {
+    const editor = editorRef.current;
+    const savedRange = selectionRef?.current;
+
+    if (!editor || !savedRange) return false;
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(savedRange);
+    return true;
+  };
+
+  const focusAndRestoreSelection = () => {
+    focusEditor();
+    return restoreSelection();
+  };
+
+  const saveCurrentSelection = () => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range.cloneRange();
+    }
+  };
+
+  const runCommand = (command, value = null) => {
+    focusAndRestoreSelection();
+    if (command === "createLink") {
+      const url = window.prompt("Enter link URL:", "https://");
+      if (!url || !/^https?:\/\//i.test(url)) return;
+      document.execCommand(command, false, url);
+      saveCurrentSelection();
+      return;
+    }
+    document.execCommand(command, false, value);
+    saveCurrentSelection();
+  };
+
+  const applyColor = (color) => {
+    const nextColor = color || "#111827";
+    setColorValue(nextColor);
+    setShowColorMenu(false);
+    focusAndRestoreSelection();
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand("foreColor", false, nextColor);
+    saveCurrentSelection();
+  };
+
   return (
-    <div className="mb-1 flex flex-wrap items-center gap-1">
-      <button type="button" onClick={() => onFormat("bold")} className={buttonClass} title="Bold selected text">B</button>
-      <button type="button" onClick={() => onFormat("italic")} className={`${buttonClass} italic`} title="Italic selected text">I</button>
-      <button type="button" onClick={() => onFormat("underline")} className={`${buttonClass} underline`} title="Underline selected text">U</button>
-      <button type="button" onClick={() => onFormat("strike")} className={`${buttonClass} line-through`} title="Strikethrough selected text">S</button>
-      <button type="button" onClick={() => onFormat("bullet")} className={buttonClass} title="Make selected lines bullets">• List</button>
-      <button type="button" onClick={() => onFormat("numbered")} className={buttonClass} title="Make selected lines numbered">1. List</button>
-      <button type="button" onClick={() => onFormat("link")} className={buttonClass} title="Add link formatting">Link</button>
+    <div className="relative mb-1 flex flex-wrap items-center gap-1">
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")} className={buttonClass} title="Bold selected text">B</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("italic")} className={`${buttonClass} italic`} title="Italic selected text">I</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("underline")} className={`${buttonClass} underline`} title="Underline selected text">U</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("strikeThrough")} className={`${buttonClass} line-through`} title="Strikethrough selected text">S</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertUnorderedList")} className={buttonClass} title="Make selected lines bullets">• List</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("insertOrderedList")} className={buttonClass} title="Make selected lines numbered">1. List</button>
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("createLink")} className={buttonClass} title="Add link">Link</button>
+      <div className="relative">
+        <button
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            restoreSelection();
+          }}
+          onClick={() => setShowColorMenu((current) => !current)}
+          className="flex h-[30px] w-14 items-center justify-center gap-1 rounded border border-slate-300 bg-white px-1 hover:bg-slate-100"
+          title="Text color"
+          aria-label="Text color"
+        >
+          <span className="h-3 w-3 rounded-sm border border-slate-300" style={{ backgroundColor: colorValue }} />
+          <span className="text-xs text-slate-600">⌄</span>
+        </button>
+        {showColorMenu && (
+          <div className="absolute left-0 top-8 z-50 grid grid-cols-7 gap-1 rounded border border-slate-300 bg-white p-1 shadow-lg">
+            {TEXT_COLOR_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applyColor(option.value);
+                }}
+                className="h-6 w-6 rounded border border-slate-300 hover:ring-2 hover:ring-slate-400"
+                style={{ backgroundColor: option.value }}
+                title={option.label}
+                aria-label={option.label}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
-const FormattingTextarea = ({ value, onChange, rows, className = "", ...props }) => {
-  const textareaRef = useRef(null);
+const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeholder = "", ...props }) => {
+  const editorRef = useRef(null);
+  const selectionRef = useRef(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const [colorValue, setColorValue] = useState("#111827");
+
+  useEffect(() => {
+    if (!editorRef.current || isFocused) return;
+    editorRef.current.innerHTML = getEditorHtml(value);
+  }, [value, isFocused]);
+
+  const saveSelection = () => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range.cloneRange();
+    }
+  };
+
+  const updateValueFromEditor = () => {
+    saveSelection();
+    const nextHtml = sanitizeFormattedHtml(editorRef.current?.innerHTML || "").trim();
+    onChange(nextHtml);
+  };
 
   return (
     <div>
-      <FormattingToolbar onFormat={(format) => applyTextFormatting(format, value, onChange, textareaRef.current)} />
-      <textarea
-        ref={textareaRef}
-        value={value || ""}
-        onChange={(event) => onChange(event.target.value)}
-        rows={rows}
-        className={className}
+      <FormattingToolbar editorRef={editorRef} selectionRef={selectionRef} colorValue={colorValue} setColorValue={setColorValue} />
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onFocus={() => {
+          setIsFocused(true);
+          window.requestAnimationFrame(saveSelection);
+        }}
+        onBlur={() => {
+          setIsFocused(false);
+          updateValueFromEditor();
+        }}
+        onInput={updateValueFromEditor}
+        onMouseUp={saveSelection}
+        onKeyUp={saveSelection}
+        data-placeholder={placeholder}
+        className={`${className} rich-note-editor`}
+        style={{ minHeight: `${Math.max(44, rows * 24)}px` }}
         {...props}
       />
+      <style>{`
+        .rich-note-editor:empty::before {
+          content: attr(data-placeholder);
+          color: #94a3b8;
+          pointer-events: none;
+        }
+        .rich-note-editor p {
+          margin: 0 0 0.25rem 0;
+        }
+        .rich-note-editor ul,
+        .rich-note-editor ol {
+          margin: 0.25rem 0 0.25rem 1.25rem;
+        }
+      `}</style>
     </div>
   );
 };
-
 
 const normalizeContact = (contact = {}) => ({
   ...EMPTY_CONTACT_FORM,
@@ -2092,7 +2371,7 @@ const addParsedTasks = () => {
             value={value || ""}
             onChange={onChange}
             rows={getTextareaRows(value, 1, 8)}
-            className="min-h-[38px] w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="min-h-[38px] w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
         );
       }
@@ -2102,7 +2381,7 @@ const addParsedTasks = () => {
           value={value || ""}
           onChange={(event) => onChange(event.target.value)}
           rows={getTextareaRows(value, 1, 8)}
-          className="min-h-[38px] w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="min-h-[38px] w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
       );
     }
@@ -2206,7 +2485,7 @@ const addParsedTasks = () => {
         </div>
       )}
 
-      <div className="rounded-xl border-2 border-green-200 bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
+      <div className="rounded-xl border-2 border-black bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">To-Do</h2>
@@ -2262,72 +2541,69 @@ const addParsedTasks = () => {
         </div>
       </div>
 
-      <section className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 p-4 shadow-md">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Active Tasks</h3>
-            <p className="text-sm text-slate-600">Only categories with open tasks are shown here.</p>
+      <section className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 p-3 shadow-md">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-[220px] shrink-0">
+            <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+              <span>Active Tasks</span>
+              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-blue-700 px-2 text-xs font-bold leading-none text-white shadow-sm">
+                {totalActiveTasks}
+              </span>
+            </h3>
           </div>
-          <div className="rounded-xl bg-green-700 px-4 py-2 text-center text-white shadow-sm">
-            <div className="text-xs font-bold uppercase tracking-wide text-green-100">Active</div>
-            <div className="text-3xl font-black leading-none">{totalActiveTasks}</div>
-          </div>
-        </div>
 
-        {activeCategorySummary.length > 0 ? (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {activeCategorySummary.map((item) => {
-              const Icon = TODO_CATEGORY_ICONS[item.type]?.icon || ListTodo;
-              const iconColor = TODO_CATEGORY_ICONS[item.type]?.color || "text-slate-600";
+          <div className="flex min-w-[280px] flex-1 flex-wrap items-center gap-2">
+            {activeCategorySummary.length > 0 ? (
+              activeCategorySummary.map((item) => {
+                const Icon = TODO_CATEGORY_ICONS[item.type]?.icon || ListTodo;
+                const iconColor = TODO_CATEGORY_ICONS[item.type]?.color || "text-slate-600";
 
-              return (
-                <a
-                  key={item.type}
-                  href={`#${getCategoryAnchorId(item.type)}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    setShowActiveOnly(true);
-                    setCollapsedCategories(
-                      TASK_TYPES.reduce((map, categoryType) => ({ ...map, [categoryType]: categoryType !== item.type }), {})
-                    );
-                    window.requestAnimationFrame(() => {
-                      document.getElementById(getCategoryAnchorId(item.type))?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    });
-                  }}
-                  className="group flex items-center justify-between gap-3 rounded-xl border border-green-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-green-400 hover:bg-green-100"
-                  title={`Go to ${item.type} active tasks`}
-                  aria-label={`Go to ${item.type} active tasks`}
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <Icon className={`h-5 w-5 shrink-0 ${iconColor}`} aria-hidden="true" />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-slate-900">{item.type}</div>
-                      <div className="mt-0.5 text-xs font-semibold text-slate-600">
-                        {item.overdueCount > 0 ? `${item.overdueCount} overdue` : item.dueSoonCount > 0 ? `${item.dueSoonCount} due soon` : "Open"}
+                return (
+                  <a
+                    key={item.type}
+                    href={`#${getCategoryAnchorId(item.type)}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setShowActiveOnly(true);
+                      setCollapsedCategories(
+                        TASK_TYPES.reduce((map, categoryType) => ({ ...map, [categoryType]: categoryType !== item.type }), {})
+                      );
+                      window.requestAnimationFrame(() => {
+                        document.getElementById(getCategoryAnchorId(item.type))?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      });
+                    }}
+                    className="group inline-flex items-center justify-between gap-2 rounded-lg border border-black bg-white px-4 py-2 text-left text-sm font-semibold shadow-sm transition hover:bg-green-100"
+                    title={`Go to ${item.type} active tasks`}
+                    aria-label={`Go to ${item.type} active tasks`}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Icon className={`h-4 w-4 shrink-0 ${iconColor}`} aria-hidden="true" />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">{item.type}</div>
                       </div>
                     </div>
-                  </div>
-                  <div
-                    className={`rounded-full px-3 py-1 text-lg font-black leading-none text-white shadow-sm ${
-                      item.overdueCount > 0 ? "bg-red-600 group-hover:bg-red-700" : "bg-blue-700 group-hover:bg-blue-800"
-                    }`}
-                    title={
-                      item.overdueCount > 0
-                        ? `${item.overdueCount} overdue task${item.overdueCount === 1 ? "" : "s"}`
-                        : `${item.activeCount} active task${item.activeCount === 1 ? "" : "s"}`
-                    }
-                  >
-                    {item.activeCount}
-                  </div>
-                </a>
-              );
-            })}
+                    <div
+                      className={`flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-bold leading-none text-white shadow-sm ${
+                        item.overdueCount > 0 ? "bg-red-600 group-hover:bg-red-700" : "bg-blue-700 group-hover:bg-blue-800"
+                      }`}
+                      title={
+                        item.overdueCount > 0
+                          ? `${item.overdueCount} overdue task${item.overdueCount === 1 ? "" : "s"}`
+                          : `${item.activeCount} active task${item.activeCount === 1 ? "" : "s"}`
+                      }
+                    >
+                      {item.activeCount}
+                    </div>
+                  </a>
+                );
+              })
+            ) : (
+              <div className="rounded-lg border border-green-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+                No active tasks.
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="mt-4 rounded-lg border border-green-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
-            No active tasks.
-          </div>
-        )}
+        </div>
       </section>
 
       <section className="space-y-5">
@@ -2364,7 +2640,7 @@ const addParsedTasks = () => {
               onClick={() => setShowActiveOnly((current) => !current)}
               title={showActiveOnly ? "Show all task categories" : "Show only categories with active tasks and hide completed tasks"}
               aria-pressed={showActiveOnly}
-              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm ${
+              className={`inline-flex min-w-[168px] items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm ${
                 showActiveOnly ? "bg-blue-700 hover:bg-blue-800" : "bg-slate-600 hover:bg-slate-700"
               }`}
             >
@@ -2663,11 +2939,14 @@ const addParsedTasks = () => {
                                   <span className={`inline-flex rounded px-2 py-1 text-xs font-bold ${statusClass}`}>{statusLabel}</span>
                                 </td>
                                 <td className="align-top px-2 py-2">
-                                  <textarea
+                                  <AutoResizeTextarea
                                     value={task.details || ""}
-                                    onChange={(event) => updateTaskField(task.id, "details", event.target.value)}
-                                    rows={getTextareaRows(task.details, 1, 8, 55)}
-                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm"
+                                    onChange={(value) => updateTaskField(task.id, "details", value)}
+                                    minRows={1}
+                                    maxRows={8}
+                                    charsPerRow={55}
+                                    compactOnChange
+                                    className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                   />
                                 </td>
                                 <td className="align-top px-2 py-2">
@@ -2783,14 +3062,17 @@ const addParsedTasks = () => {
                                                     value={task[field] || ""}
                                                     onChange={(value) => updateTaskField(task.id, field, value)}
                                                     rows={getTextareaRows(task[field], 1, 8, 48)}
-                                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                    className="min-h-[34px] w-full resize-none rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
                                                   />
                                                 ) : (
-                                                  <textarea
+                                                  <AutoResizeTextarea
                                                     value={task[field] || ""}
-                                                    onChange={(event) => updateTaskField(task.id, field, event.target.value)}
-                                                    rows={getTextareaRows(task[field], 1, 8, 48)}
-                                                    className="min-h-[34px] w-full resize-y rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    minRows={1}
+                                                    maxRows={8}
+                                                    charsPerRow={48}
+                                                    compactOnChange
+                                                    className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
                                                   />
                                                 )
                                               ) : (
@@ -2808,28 +3090,9 @@ const addParsedTasks = () => {
 
                                     <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
                                       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Notes</div>
-                                      <div className="flex gap-2">
-                                        <div className="flex-1">
-                                          <FormattingTextarea
-                                            value={followUpDrafts[task.id] || ""}
-                                            onChange={(value) => setFollowUpDrafts((current) => ({ ...current, [task.id]: value }))}
-                                            rows={2}
-                                            placeholder="Add a follow-up note..."
-                                            className="min-h-[44px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                          />
-                                        </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => addFollowUpEntry(task.id)}
-                                          className="self-start rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
-                                          title="Add follow-up entry"
-                                        >
-                                          Add Note
-                                        </button>
-                                      </div>
 
                                       {followUpEntries.length > 0 && (
-                                        <div className="mt-3 space-y-2">
+                                        <div className="mb-3 space-y-2">
                                           {followUpEntries.slice(0, 10).map((entry) => {
                                             const editKey = `${task.id}:${entry.id}`;
                                             const isEditingEntry = Object.prototype.hasOwnProperty.call(editingFollowUpEntries, editKey);
@@ -2897,8 +3160,8 @@ const addParsedTasks = () => {
                                                         [editKey]: value,
                                                       }))
                                                     }
-                                                    rows={getTextareaRows(editingFollowUpEntries[editKey], 2, 10, 80)}
-                                                    className="mt-2 min-h-[54px] w-full resize-y rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                                                    rows={getTextareaRows(editingFollowUpEntries[editKey], 1, 10, 80)}
+                                                    className="mt-2 min-h-[34px] w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
                                                   />
                                                 ) : (
                                                   <FormattedText value={entry.text} className="mt-1 space-y-1 text-slate-900" />
@@ -2908,6 +3171,26 @@ const addParsedTasks = () => {
                                           })}
                                         </div>
                                       )}
+
+                                      <div className="flex gap-2">
+                                        <div className="flex-1">
+                                          <FormattingTextarea
+                                            value={followUpDrafts[task.id] || ""}
+                                            onChange={(value) => setFollowUpDrafts((current) => ({ ...current, [task.id]: value }))}
+                                            rows={1}
+                                            placeholder="Add a follow-up note..."
+                                            className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-2 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                          />
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => addFollowUpEntry(task.id)}
+                                          className="self-start rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                                          title="Add follow-up entry"
+                                        >
+                                          Add Note
+                                        </button>
+                                      </div>
                                     </div>
 
                                   </td>
@@ -3206,11 +3489,14 @@ const addParsedTasks = () => {
                 </label>
                 <label className="text-sm font-semibold md:col-span-2">
                   Details
-                  <textarea
+                  <AutoResizeTextarea
                     value={selectedTask.details || ""}
-                    onChange={(event) => updateTaskField(selectedTask.id, "details", event.target.value)}
-                    rows={getTextareaRows(selectedTask.details, 3, 12, 90)}
-                    className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    onChange={(value) => updateTaskField(selectedTask.id, "details", value)}
+                    minRows={1}
+                    maxRows={12}
+                    charsPerRow={90}
+                    compactOnChange
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
 
@@ -3222,9 +3508,9 @@ const addParsedTasks = () => {
                       <div className="mt-1">
                         {MULTILINE_FIELDS.has(field) ? (
                           shouldUseFormattingToolbar(field) ? (
-                            <FormattingTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                            <FormattingTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                           ) : (
-                            <textarea value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} rows={getTextareaRows(selectedTask[field], 2, 12, 90)} className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                            <AutoResizeTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} minRows={1} maxRows={12} charsPerRow={90} compactOnChange className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                           )
                         ) : (
                           <input value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -3334,11 +3620,13 @@ const addParsedTasks = () => {
 
                   <label className="text-sm font-bold text-slate-800">
                     Address
-                    <textarea
+                    <AutoResizeTextarea
                       value={contactForm.address}
-                      onChange={(event) => setContactForm((current) => ({ ...current, address: event.target.value }))}
-                      rows={getTextareaRows(contactForm.address, 2, 6)}
-                      className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      onChange={(value) => setContactForm((current) => ({ ...current, address: value }))}
+                      minRows={1}
+                      maxRows={6}
+                      compactOnChange
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     />
                   </label>
 
@@ -3371,11 +3659,13 @@ const addParsedTasks = () => {
 
                   <label className="text-sm font-bold text-slate-800">
                     Notes
-                    <textarea
+                    <AutoResizeTextarea
                       value={contactForm.notes}
-                      onChange={(event) => setContactForm((current) => ({ ...current, notes: event.target.value }))}
-                      rows={getTextareaRows(contactForm.notes, 2, 8)}
-                      className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      onChange={(value) => setContactForm((current) => ({ ...current, notes: value }))}
+                      minRows={1}
+                      maxRows={8}
+                      compactOnChange
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     />
                   </label>
                 </div>
