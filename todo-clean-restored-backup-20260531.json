@@ -1,0 +1,10 @@
+copy(JSON.stringify({
+  tasks: JSON.parse(localStorage.getItem("todoTab.tasks.v1") || "[]"),
+  archived: JSON.parse(localStorage.getItem("todoTab.tasks.archived.v1") || "[]"),
+  contacts: JSON.parse(localStorage.getItem("todoTab.contacts.v1") || "[]")
+}, null, 2));
+
+console.log("Copied clean restored To-Do backup.");
+console.log("Active:", JSON.parse(localStorage.getItem("todoTab.tasks.v1") || "[]").length);
+console.log("Archived:", JSON.parse(localStorage.getItem("todoTab.tasks.archived.v1") || "[]").length);
+console.log("Contacts:", JSON.parse(localStorage.getItem("todoTab.contacts.v1") || "[]").length);

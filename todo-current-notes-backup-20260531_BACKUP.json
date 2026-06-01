@@ -1,0 +1,1130 @@
+
+{
+  "tasks": [
+    {
+      "id": "todo-monterey-park-citation",
+      "title": "Contest Parking Citation - Monterey Park",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Contest Monterey Park parking citation and confirm payment/status.",
+      "type": "DMV / Vehicle",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Contest Parking Citation - Monterey Park",
+      "archived": false,
+      "status": "pending",
+      "followUpEntries": [],
+      "date": "04/07/2026",
+      "phone": "(626) 307-1458",
+      "address": "640 N Garfield Ave",
+      "organization": "Monterey Park",
+      "website": "https://www.citationprocessingcenter.com",
+      "systemLink": "https://www.citationprocessingcenter.com",
+      "plate": "4WLC582",
+      "caseNumber": "10012245",
+      "amount": "$140",
+      "questions": "Code: 10.32.290\nTime: 12:32 PM"
+    },
+    {
+      "id": "todo-calfresh-maria",
+      "title": "Apply for CalFresh - Maria Burciaga Chavez",
+      "category": "DPSS / Benefits",
+      "completed": false,
+      "details": "Complete or confirm CalFresh application for Maria.",
+      "type": "DPSS / Benefits",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Apply for CalFresh - Maria Burciaga Chavez",
+      "archived": false,
+      "status": "pending",
+      "followUpEntries": [
+        {
+          "id": "recovered-note-1780093912773-sese3zyhw2i",
+          "text": "Spanish line / phone 1-800-300-0213. Tell them about Maria's maiden name / married name issue and that records need to reflect/work with Medi-Cal. Fragment also shows 541-5555 and notes office closed on Memorial Day. Review exact phone and wording.",
+          "createdAt": "2026-05-29T22:31:52.773Z",
+          "source": "recovered-leveldb-fragment"
+        }
+      ],
+      "person": "Maria Burciaga Chavez",
+      "organization": "DPSS",
+      "caseNumber": "L2086C5",
+      "website": "https://benefitscal.com",
+      "systemLink": "https://benefitscal.com",
+      "phone": "(866) 613-3777"
+    },
+    {
+      "id": "todo-lifeline-maria",
+      "title": "Submit Lifeline Documents - Maria D. Hallstrom",
+      "category": "Phone / Lifeline",
+      "completed": true,
+      "details": "Review task details and confirm next step.",
+      "type": "Phone / Lifeline",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Submit Lifeline Documents - Maria D. Hallstrom",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": [
+        {
+          "id": "39d76892-a85f-4701-b482-51a9465f6305",
+          "text": "Done. Completed on 05/29/2026, 04:16 PM.",
+          "createdAt": "2026-05-29T23:16:49.441Z",
+          "source": "done-action"
+        },
+        {
+          "id": "3ae88dbd-9b20-4a21-a907-daa9bf340f09",
+          "createdAt": "2026-05-29T23:15:28.742Z",
+          "text": "Took Carmen to DPSS out front on sidewalk and she got a VR Wireless phone with a new phone number. All set. Woohoo!"
+        }
+      ],
+      "deadline": "05/03/2026",
+      "website": "https://www.lifelinesupport.org",
+      "phone": "(800) 234-9473",
+      "updatedAt": "2026-05-29T23:16:49.441Z",
+      "activityLog": [
+        {
+          "id": "1ae67815-70be-43df-b24c-97169d7f15e0",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T23:16:49.441Z"
+        },
+        {
+          "id": "e3d06155-4f7b-4890-93a6-49ab10d30e38",
+          "action": "Follow-up entry added",
+          "detail": "Took Carmen to DPSS out front on sidewalk and she got a VR Wireless phone with a new phone number. All set. Woohoo!",
+          "createdAt": "2026-05-29T23:15:28.742Z"
+        }
+      ],
+      "completedAt": "2026-05-29T23:16:49.441Z"
+    },
+    {
+      "id": "todo-moving-assistance",
+      "title": "Secure Moving Assistance",
+      "category": "Moving",
+      "completed": false,
+      "details": "Call mover and confirm help.",
+      "type": "Moving",
+      "typeOverride": "Moving",
+      "notes": "",
+      "taskName": "Move Help - Celso & Buddy",
+      "archived": false,
+      "status": "pending",
+      "followUpEntries": [
+        {
+          "id": "a97a5936-542d-4b50-b40b-0fe472eab23f",
+          "createdAt": "2026-06-01T18:26:05.338Z",
+          "text": "<p>Spoke with Celso on 05/29/2026 in the evening. Rescheduled for 01/06/2026 at 9:00 AM.</p>"
+        },
+        {
+          "id": "084d86eb-c6aa-42c1-9613-403f921370ca",
+          "createdAt": "2026-05-29T23:09:39.637Z",
+          "text": "Decided to go the pay route and called Celso. He has moved for me before. Askewd me to call back 2 days prior to move. \n- Call on Friday night 05/29/2026 (3 days before)\n- Confirm that he and a buddy will work on 06/01/26"
+        }
+      ],
+      "date": "06/01/2026",
+      "deadline": "06/01/2026",
+      "phone": "213-379-8006",
+      "organization": "",
+      "website": "",
+      "systemLink": "",
+      "questions": "",
+      "updatedAt": "2026-06-01T19:27:54.352Z",
+      "activityLog": [
+        {
+          "id": "7aa60aee-3c76-4512-a6fc-0ea03fb33509",
+          "action": "Category changed",
+          "detail": "Moved from Work to Moving",
+          "createdAt": "2026-06-01T18:47:28.263Z"
+        },
+        {
+          "id": "0d59828d-f610-4f69-bec3-8fa9709fcfaf",
+          "action": "Follow-up entry added",
+          "detail": "<p>Spoke with Celso on 05/29/2026 in the evening. Rescheduled for 01/06/2026 at 9:00 AM.</p>",
+          "createdAt": "2026-06-01T18:26:05.338Z"
+        },
+        {
+          "id": "795e58f3-e698-42c6-99de-e90a28865333",
+          "action": "Follow-up entry added",
+          "detail": "Decided to go the pay route and called Celso. He has moved for me before. Askewd me to call back 2 days prior to move. \n- Call on Friday night 05/29/2026 (3 days before)\n- Confirm that he and a buddy will work on 06/01/26",
+          "createdAt": "2026-05-29T23:09:39.637Z"
+        }
+      ]
+    },
+    {
+      "id": "todo-lifeline-phones",
+      "title": "Apply for Lifeline Phones - Maria + Leticia",
+      "category": "Phone / Lifeline",
+      "completed": false,
+      "details": "https://www.californialifeline.com\nhttps://www.safelinkwireless.com\nhttps://www.truconnect.com\nhttps://www.assurancewireless.com",
+      "type": "Phone / Lifeline",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Apply for Lifeline Phones - Maria + Leticia",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": []
+    },
+    {
+      "id": "recovered-task-1780093912773-t8wza3jgmsc",
+      "taskName": "USPS Change of Address - Maria / Hallstrom Family",
+      "title": "USPS Change of Address - Maria / Hallstrom Family",
+      "category": "Moving",
+      "type": "Moving",
+      "completed": false,
+      "archived": false,
+      "status": "pending",
+      "details": "Confirm USPS change-of-address submission and exact family/name details.",
+      "notes": "",
+      "followUpEntries": [
+        {
+          "id": "recovered-note-1780093912773-l3blowg6fhq",
+          "text": "USPS / COA. Appears to reference Maria, Hallstrom family, Burciaga Chavez, and a submitted COA around 05/20/2026. Fragment also mentions signature/name details. Review exact wording.",
+          "createdAt": "2026-05-29T22:31:52.773Z",
+          "source": "recovered-leveldb-fragment"
+        }
+      ],
+      "typeOverride": "",
+      "person": "Maria / Hallstrom Family",
+      "organization": "USPS",
+      "website": "https://www.usps.com/manage/forward.htm",
+      "systemLink": "https://www.usps.com/manage/forward.htm",
+      "date": "05/20/2026",
+      "questions": "Confirm submitted COA, signature/name details, and Burciaga Chavez reference."
+    },
+    {
+      "id": "recovered-task-1780093912773-x6zz0ylti",
+      "taskName": "Review ESA Letter / Nora Follow-Up",
+      "title": "Review ESA Letter / Nora Follow-Up",
+      "category": "Medical",
+      "type": "Medical",
+      "completed": false,
+      "archived": false,
+      "status": "pending",
+      "details": "Review ESA letter document and confirm\nfollow-up action.",
+      "notes": "",
+      "followUpEntries": [
+        {
+          "id": "909ed8e6-3352-43c0-88a7-6780eceebf4d",
+          "createdAt": "2026-05-29T22:49:24.724Z",
+          "text": "Went to Dr. office and picked up letter for ESA. Not written how I had sent to Dr. Simonian, mentions Dog not Cats but should work. On official letterhead and original signed. \n- Dr. out of office will be back on June 8th."
+        },
+        {
+          "id": "recovered-note-1780093912773-zqb8mzgxhbj",
+          "text": "Review ESA Letter Template.docx. Mentions Nora, prescription pills, 818-551-1118, and 1141 N Brand Blvd, Suite 30. Also references a saved/downloaded ESA file. Review exact action needed.",
+          "createdAt": "2026-05-29T22:31:52.773Z",
+          "source": "recovered-leveldb-fragment"
+        }
+      ],
+      "typeOverride": "Medical",
+      "person": "Dr. Simonian",
+      "phone": "818-551-1118",
+      "address": "1141 N Brand Blvd, Suite 308",
+      "documents": "ESA Letter Template.docx",
+      "questions": "Ask Dr. to sign ESA letters",
+      "updatedAt": "2026-06-01T19:56:56.352Z",
+      "activityLog": [
+        {
+          "id": "9f0fc4fd-2f53-4b36-a332-ec6337c3aeb3",
+          "action": "Category changed",
+          "detail": "Moved from DMV / Vehicle to Medical",
+          "createdAt": "2026-05-29T23:07:39.043Z"
+        },
+        {
+          "id": "25f017d3-669b-4950-bb36-18a479d61934",
+          "action": "Follow-up entry added",
+          "detail": "Went to Dr. office and picked up letter for ESA. Not written how I had sent to Dr. Simonian, mentions Dog not Cats but should work. On official letterhead and original signed. \n- Dr. out of office will be back on June 8th.",
+          "createdAt": "2026-05-29T22:49:24.724Z"
+        }
+      ]
+    },
+    {
+      "taskName": "Pick up Truck",
+      "details": "Order/Reservation\nPrint this page\n\nBack to your order\n\nTruck Reservation # 70675127\nPreferred Pick Up\nPick Up Time:\nSaturday, 6/6/2026\n9:00 AM\nPick Up Location:\nT And G Beauty Supply Saint Mauve\nAddress:\n5131 Avalon Bl Ste A\nLos Angeles, CA 90011\nPhone Numbers:\n(323) 531-7885\n(800) 528-4285\nNote:\nA local U-Haul representative will call you before 5pm on Tuesday, June 2, 2026 to get your agreement on and schedule available location, time, and equipment.\n\nDrop Off\nDrop Off Time:\nBy: Saturday, 6/6/2026\n5:00 PM\nDrop Off Location\nSame as pick up location\nOrder Details\nItem\tQty\tTotal\n20' Truck\n8 hours of use requested, subject to availability.\n1\t$39.95\nSafemove®\t1\t$15.00\nAppliance Dolly\t1\t$10\nEnvironmental Fee\t1\t$1.00\nSubtotal:\t$65.95",
+      "type": "Moving",
+      "typeOverride": "Moving",
+      "date": "6/6/2026",
+      "phone": "(323) 750-7805",
+      "address": "508 E Florence Av Los Angeles, CA 90003",
+      "deadline": "6/6/2026",
+      "blockedBy": "",
+      "person": "",
+      "organization": "",
+      "website": "https://www.uhaul.com/Orders/OrderDetails/",
+      "plate": "",
+      "vin": "",
+      "policyNumber": "",
+      "caseNumber": "",
+      "amount": "Due at Pick Up $71.30",
+      "documents": "",
+      "questions": "My reservation is for 9 am but the counter doesnt open until 10 am, when is pickup actually at?---Seenotes",
+      "outcome": "",
+      "fileName": "",
+      "notes": "",
+      "followUpNotes": "",
+      "company": "U-Haul",
+      "vehicle": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "impact": "",
+      "requiredAction": "",
+      "systemLink": "",
+      "completed": false,
+      "id": "dbb630db-6874-4cbb-b74d-5cccf2acfe58",
+      "createdAt": "2026-06-01T17:49:32.223Z",
+      "updatedAt": "2026-06-01T19:29:17.351Z",
+      "activityLog": [
+        {
+          "id": "e16851c4-c959-4c28-9e95-76392f270595",
+          "action": "Follow-up entry added",
+          "detail": "<ul style=\"color: rgb(62, 62, 62);\"><li><div><div><strong>Truck Share 24/7</strong><p>Remember: You selected our&nbsp;<span>Truck Share 24/7</span>&nbsp;option, which requires a mobile device at time of pick-up.</p></div></div></li></ul>",
+          "createdAt": "2026-06-01T17:50:54.013Z"
+        },
+        {
+          "id": "8a469a66-b724-4006-b675-c55f09b05498",
+          "action": "Task created",
+          "detail": "",
+          "createdAt": "2026-06-01T17:49:32.223Z"
+        }
+      ],
+      "followUpEntries": [
+        {
+          "id": "3f1942d7-b3bc-4189-bb58-318cbd085b80",
+          "createdAt": "2026-06-01T17:50:54.013Z",
+          "text": "<ul style=\"color: rgb(62, 62, 62);\"><li><div><div><strong>Truck Share 24/7</strong><p>Remember: You selected our&nbsp;<span>Truck Share 24/7</span>&nbsp;option, which requires a mobile device at time of pick-up.</p></div></div></li></ul>"
+        }
+      ]
+    },
+    {
+      "taskName": "Call Ricardo - Move In",
+      "details": "What's next?  Today is supposed to be move in day.\n\nRicardo - 562-879-0064",
+      "type": "General",
+      "typeOverride": "General",
+      "date": "06/01/2026",
+      "phone": "(213) 624-9258",
+      "address": "339 E Plymouth St.",
+      "deadline": "",
+      "blockedBy": "",
+      "person": "Director - Ricardo",
+      "organization": "Homelight Family Living",
+      "website": "  https://www.midnightmission.org/our-services/homelight/",
+      "plate": "",
+      "vin": "",
+      "policyNumber": "",
+      "caseNumber": "",
+      "amount": "",
+      "documents": "",
+      "questions": "",
+      "outcome": "",
+      "fileName": "",
+      "notes": "",
+      "followUpNotes": "",
+      "company": "Midnight Mission",
+      "vehicle": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "impact": "",
+      "requiredAction": "",
+      "systemLink": "",
+      "completed": false,
+      "id": "778cf72a-a2e8-4f0b-b4fd-e59fc20db661",
+      "createdAt": "2026-06-01T18:19:00.317Z",
+      "updatedAt": "2026-06-01T19:56:47.696Z",
+      "activityLog": [
+        {
+          "id": "65da3478-97db-4371-804b-49806314a6bf",
+          "action": "Follow-up entry added",
+          "detail": "Called and left voicemail on Ricardo's personal cell phone.",
+          "createdAt": "2026-06-01T19:36:56.948Z"
+        },
+        {
+          "id": "4209333f-bf5d-42a9-ba96-e6aaf24239c3",
+          "action": "Task created",
+          "detail": "",
+          "createdAt": "2026-06-01T18:19:00.317Z"
+        }
+      ],
+      "followUpEntries": [
+        {
+          "id": "73e1df15-79a5-4380-8ade-c5c5a5bd0428",
+          "createdAt": "2026-06-01T19:36:56.948Z",
+          "text": "Called and left voicemail on Ricardo's personal cell phone."
+        }
+      ]
+    }
+  ],
+  "archived": [
+    {
+      "id": "todo-csc-torrance",
+      "title": "Call CSC Torrance",
+      "category": "Work",
+      "completed": true,
+      "details": "Last worked: 10/31/2025\nConfirm reactivation, retraining, schedule shift.",
+      "type": "Work",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Call CSC Torrance",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": [
+        {
+          "id": "86735a29-0971-422c-bf5a-d6f68baa1d91",
+          "text": "Done. Completed on 05/29/2026, 04:14 PM.",
+          "createdAt": "2026-05-29T23:14:29.630Z",
+          "source": "done-action"
+        },
+        {
+          "id": "bfcee4e1-d3f7-4bdb-9535-cc9e0537f82f",
+          "createdAt": "2026-05-29T23:14:27.949Z",
+          "text": "Called a month ago and confirmed all is good. I currently have 12 shifts scheduled."
+        }
+      ],
+      "phone": "(310) 320-0550",
+      "updatedAt": "2026-05-29T23:14:33.557Z",
+      "activityLog": [
+        {
+          "id": "bf28835e-2337-42b6-bb03-2c53befe8e93",
+          "action": "Archived",
+          "detail": "",
+          "createdAt": "2026-05-29T23:14:33.557Z"
+        },
+        {
+          "id": "6579c640-53a0-47a7-ad0e-aa2aaf91d1b6",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T23:14:29.630Z"
+        },
+        {
+          "id": "06e877cd-d8bb-4331-bff1-34a8dbe46f5f",
+          "action": "Follow-up entry added",
+          "detail": "Called a month ago and confirmed all is good. I currently have 12 shifts scheduled.",
+          "createdAt": "2026-05-29T23:14:27.949Z"
+        }
+      ],
+      "completedAt": "2026-05-29T23:14:29.630Z",
+      "archivedAt": "2026-05-29T23:14:33.557Z"
+    },
+    {
+      "id": "todo-dental-checkups",
+      "title": "Schedule Dental Checkups - David + Maria",
+      "category": "Medical",
+      "completed": true,
+      "details": "Bhakta Dental",
+      "type": "Dental",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Schedule Dental Checkups - David + Maria",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": [
+        {
+          "id": "f7425c77-b636-4f95-af62-5438e22983fc",
+          "text": "Done. Completed on 05/29/2026, 04:13 PM.",
+          "createdAt": "2026-05-29T23:13:18.260Z",
+          "source": "done-action"
+        },
+        {
+          "id": "29769e7e-1f32-4e08-a69c-2953e23b933b",
+          "createdAt": "2026-05-29T23:12:59.347Z",
+          "text": "I need crowns on 3 lower front teeth. Root canal upper back right tooth. and deep cleaning.\nCarmen needs deep cleaning and needs a tooth implant that will cost around $2,500, need to hold off on that one. It's to shore up a gap and offer more support for her bridge."
+        },
+        {
+          "id": "31d18ba0-f8fe-4e88-bea7-d63893a300eb",
+          "createdAt": "2026-05-29T22:42:05.080Z",
+          "text": "Went to appt and got x-rays done for both of us. They'll let us know when authorizations come in."
+        }
+      ],
+      "updatedAt": "2026-05-29T23:13:39.682Z",
+      "activityLog": [
+        {
+          "id": "1adca235-d519-4856-bfa6-86ca82d42407",
+          "action": "Archived",
+          "detail": "",
+          "createdAt": "2026-05-29T23:13:39.682Z"
+        },
+        {
+          "id": "18ab33ad-944c-43ab-9d59-f37c526ff0e4",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T23:13:18.260Z"
+        },
+        {
+          "id": "dfd88d54-7eab-4dde-af57-141db326424c",
+          "action": "Follow-up entry added",
+          "detail": "I need crowns on 3 lower front teeth. Root canal upper back right tooth. and deep cleaning.\nCarmen needs deep cleaning and needs a tooth implant that will cost around $2,500, need to hold off on that one. It's to shore up a gap and offer more support for her bridge.",
+          "createdAt": "2026-05-29T23:12:59.347Z"
+        },
+        {
+          "id": "cb6648e4-0104-4c9b-b379-9390a240ae19",
+          "action": "Follow-up entry added",
+          "detail": "Went to appt and got x-rays done for both of us. They'll let us know when authorizations come in.",
+          "createdAt": "2026-05-29T22:42:05.080Z"
+        }
+      ],
+      "phone": "(323) 235-5892",
+      "completedAt": "2026-05-29T23:13:18.260Z",
+      "archivedAt": "2026-05-29T23:13:39.682Z"
+    },
+    {
+      "id": "todo-dr-ananyan-leg-infection",
+      "title": "Call Dr. Ananyan",
+      "category": "Medical",
+      "completed": true,
+      "details": "Schedule appointment, update if missed from 04/29/2026.\nRequest antibiotics for recurring leg infection.",
+      "type": "Work",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Call Dr. Ananyan",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": [
+        {
+          "id": "3b6d1f27-9257-41f9-a08b-93524b9dff78",
+          "text": "Done. Completed on 05/29/2026, 04:10 PM.",
+          "createdAt": "2026-05-29T23:10:11.194Z",
+          "source": "done-action"
+        }
+      ],
+      "phone": "323-264-6157",
+      "completedAt": "2026-05-29T23:10:11.194Z",
+      "updatedAt": "2026-05-29T23:10:23.681Z",
+      "activityLog": [
+        {
+          "id": "a2bf9525-7004-4a23-a9ec-084b29200a88",
+          "action": "Archived",
+          "detail": "",
+          "createdAt": "2026-05-29T23:10:23.681Z"
+        },
+        {
+          "id": "66d91316-efc2-4f1a-b5f8-e7aec5e81771",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T23:10:11.194Z"
+        }
+      ],
+      "archivedAt": "2026-05-29T23:10:23.681Z"
+    },
+    {
+      "id": "todo-dpss-gr-denial",
+      "title": "Call DPSS",
+      "category": "DPSS / Benefits",
+      "completed": true,
+      "details": "Fix GR denial, bank statements, registration.\nConfirm not working since 10/31/2025.",
+      "type": "DPSS / Benefits",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Call DPSS",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": [
+        {
+          "id": "5aafc2c3-91ea-49e7-b80a-458118560e5f",
+          "text": "Done. Completed on 05/29/2026, 04:04 PM.",
+          "createdAt": "2026-05-29T23:04:32.310Z",
+          "source": "done-action"
+        },
+        {
+          "id": "9c8493bf-2602-4112-afa2-127825514127",
+          "createdAt": "2026-05-29T23:04:23.243Z",
+          "text": "Went to office on Grand. Good to go. CalFresh re-established, Carmen added to case."
+        }
+      ],
+      "phone": "(866) 613-3777",
+      "caseNumber": "678753 - David",
+      "updatedAt": "2026-05-29T23:06:42.378Z",
+      "activityLog": [
+        {
+          "id": "f88e2c9c-d309-405b-a52c-5136cc205611",
+          "action": "Archived",
+          "detail": "",
+          "createdAt": "2026-05-29T23:06:42.378Z"
+        },
+        {
+          "id": "8a284fc8-847f-438e-84a5-faac8e0ae28d",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T23:04:32.311Z"
+        },
+        {
+          "id": "72e79044-2a30-4cd8-b580-7a8e0d675df1",
+          "action": "Follow-up entry added",
+          "detail": "Went to office on Grand. Good to go. CalFresh re-established, Carmen added to case.",
+          "createdAt": "2026-05-29T23:04:23.243Z"
+        }
+      ],
+      "completedAt": "2026-05-29T23:04:32.310Z",
+      "archivedAt": "2026-05-29T23:06:42.378Z"
+    },
+    {
+      "id": "todo-quest-blood-draw",
+      "title": "Complete Blood Draw - Quest Diagnostics",
+      "category": "Medical",
+      "completed": true,
+      "details": "Location: 4th St, Los Angeles\nOrder Date: 11/06/2025\nTests: Testosterone, PSA, Estradiol, CBC, CMP.",
+      "type": "Medical",
+      "typeOverride": "",
+      "notes": "",
+      "taskName": "Complete Blood Draw - Quest Diagnostics",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": [
+        {
+          "id": "c0f3f251-dce1-4b9f-8291-7d29a52402c6",
+          "createdAt": "2026-05-29T22:47:56.613Z",
+          "text": "Done and received results 3 days later online portal."
+        }
+      ],
+      "date": "04/29/2026",
+      "updatedAt": "2026-05-29T23:01:01.886Z",
+      "activityLog": [
+        {
+          "id": "9c5697ee-07f2-44c4-afb1-140f57bd7532",
+          "action": "Archived",
+          "detail": "",
+          "createdAt": "2026-05-29T23:01:01.886Z"
+        },
+        {
+          "id": "57228d49-aedf-4320-9173-c285240a3e57",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T22:47:59.992Z"
+        },
+        {
+          "id": "d783fa19-e524-41c0-a8b4-f5c41aa9514d",
+          "action": "Follow-up entry added",
+          "detail": "Done and received results 3 days later online portal.",
+          "createdAt": "2026-05-29T22:47:56.614Z"
+        }
+      ],
+      "completedAt": "2026-05-29T22:47:59.992Z",
+      "archivedAt": "2026-05-29T23:01:01.886Z"
+    },
+    {
+      "id": "todo-dr-taylor-followup",
+      "title": "Call Dr. Randy Taylor",
+      "category": "Medical",
+      "completed": true,
+      "details": "Schedule follow-up, about 3 weeks from last visit, mid-May 2026.",
+      "type": "Medical",
+      "typeOverride": "Medical",
+      "notes": "",
+      "taskName": "Call Dr. Randy Taylor - Make Appt.",
+      "archived": false,
+      "status": "active",
+      "followUpEntries": [
+        {
+          "id": "eb3db6aa-4f13-4c70-97d4-30311d229b20",
+          "text": "Done. Completed on 05/29/2026, 04:00 PM.",
+          "createdAt": "2026-05-29T23:00:12.290Z",
+          "source": "done-action"
+        },
+        {
+          "id": "2877d9fa-5c1f-47ae-966a-958f5f06a469",
+          "createdAt": "2026-05-29T22:46:51.092Z",
+          "text": "Daniel had our meds and authos ordered."
+        },
+        {
+          "id": "3959c1ae-4bea-465a-ac7e-44905a40677e",
+          "createdAt": "2026-05-29T22:46:34.373Z",
+          "text": "Went to appt on May 15. After we waited for over an hour I spoke with Daniel and gave him the reason for our visit, meds that we needed ordered and authorizations that we needed. Then we left without seeing Dr. Taylor."
+        },
+        {
+          "id": "1f75ed33-aeec-44c2-b517-6b371af9186c",
+          "createdAt": "2026-05-29T22:43:08.860Z",
+          "text": "During visit: get endocrinology referral, CT Lung Low Dose authorization."
+        }
+      ],
+      "updatedAt": "2026-05-29T23:00:34.866Z",
+      "activityLog": [
+        {
+          "id": "9a77b928-c88d-4297-977e-42f0a419d4cd",
+          "action": "Archived",
+          "detail": "",
+          "createdAt": "2026-05-29T23:00:34.866Z"
+        },
+        {
+          "id": "5f50df35-239e-4092-95e6-e1595390ef25",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T23:00:12.290Z"
+        },
+        {
+          "id": "74ce3d44-acdb-4dc8-98d9-5ffdfff33169",
+          "action": "Reopened",
+          "detail": "",
+          "createdAt": "2026-05-29T23:00:09.201Z"
+        },
+        {
+          "id": "e7ed6264-8bf3-44e3-b4eb-ab68f46f5346",
+          "action": "Category changed",
+          "detail": "Moved from Work to Medical",
+          "createdAt": "2026-05-29T22:59:16.660Z"
+        },
+        {
+          "id": "71594625-8828-4fa9-b5e2-ce29497915ee",
+          "action": "Marked done",
+          "detail": "",
+          "createdAt": "2026-05-29T22:46:56.310Z"
+        },
+        {
+          "id": "1d786651-d5da-4fd6-805e-3d98c5539b40",
+          "action": "Follow-up entry added",
+          "detail": "Daniel had our meds and authos ordered.",
+          "createdAt": "2026-05-29T22:46:51.092Z"
+        },
+        {
+          "id": "5761e100-554f-4db0-986e-47b673cc49f7",
+          "action": "Follow-up entry added",
+          "detail": "Went to appt on May 15. After we waited for over an hour I spoke with Daniel and gave him the reason for our visit, meds that we needed ordered and authorizations that we needed. Then we left without seeing Dr. Taylor.",
+          "createdAt": "2026-05-29T22:46:34.373Z"
+        },
+        {
+          "id": "95e912e7-3ff9-4497-8f10-08977bb49f93",
+          "action": "Follow-up entry added",
+          "detail": "During visit: get endocrinology referral, CT Lung Low Dose authorization.",
+          "createdAt": "2026-05-29T22:43:08.860Z"
+        }
+      ],
+      "phone": "(626) 459-5420",
+      "address": "11436 Garvey Ave Ste B, El Monte, CA",
+      "completedAt": "2026-05-29T23:00:12.290Z",
+      "archivedAt": "2026-05-29T23:00:34.866Z"
+    },
+    {
+      "id": "eab1fdb4-506e-4c5c-aefe-67eb8df119c5",
+      "title": "Resolve Auto Insurance Assignment",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Resolve Auto Insurance Assignment",
+      "type": "DMV / Vehicle",
+      "date": "",
+      "deadline": "",
+      "completedAt": "",
+      "blockedBy": "",
+      "notes": "",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-eab1fdb4-506e-4c5c-aefe-67eb8df119c5",
+          "text": "Wait 2-3 business days from 05/06/2026 for AIPSO insurer assignment.\nNeed assigned insurer name and NAIC before DMV submission if online form requires NAIC.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    },
+    {
+      "id": "fe26507d-3e17-450e-b5e0-b9dac8f6d5de",
+      "title": "Resolve Auto Insurance Assignment",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Resolve Auto Insurance Assignment",
+      "type": "DMV / Vehicle",
+      "company": "",
+      "policyNumber": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "completedAt": "",
+      "blockedBy": "",
+      "notes": "",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-fe26507d-3e17-450e-b5e0-b9dac8f6d5de",
+          "text": "Wait 2-3 business days from 05/06/2026 for AIPSO insurer assignment.\nNeed assigned insurer name and NAIC before DMV submission if online form requires NAIC.",
+          "createdAt": "2026-05-27T16:39:11.282Z",
+          "source": "notes"
+        },
+        {
+          "id": "notes-bf151c94-ff0b-414d-9fd4-f6516c916f87",
+          "text": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "date": "",
+      "deadline": "",
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    },
+    {
+      "id": "f1655a0a-bcdf-49d2-9b50-788ced2805d8",
+      "title": "Resolve Auto Insurance Assignment",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Resolve Auto Insurance Assignment",
+      "type": "DMV / Vehicle",
+      "company": "",
+      "policyNumber": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "completedAt": "",
+      "blockedBy": "",
+      "notes": "",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-f1655a0a-bcdf-49d2-9b50-788ced2805d8",
+          "text": "Wait 2-3 business days from 05/06/2026 for AIPSO insurer assignment.\nNeed assigned insurer name and NAIC before DMV submission if online form requires NAIC.",
+          "createdAt": "2026-05-27T16:41:06.065Z",
+          "source": "notes"
+        },
+        {
+          "id": "notes-bf151c94-ff0b-414d-9fd4-f6516c916f87",
+          "text": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "date": "",
+      "deadline": "",
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    },
+    {
+      "id": "77f36ae9-290a-4d56-806f-984b9d295139",
+      "title": "Resolve Auto Insurance Assignment",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Resolve Auto Insurance Assignment",
+      "type": "DMV / Vehicle",
+      "company": "",
+      "policyNumber": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "completedAt": "",
+      "blockedBy": "",
+      "notes": "",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-77f36ae9-290a-4d56-806f-984b9d295139",
+          "text": "Wait 2-3 business days from 05/06/2026 for AIPSO insurer assignment.\nNeed assigned insurer name and NAIC before DMV submission if online form requires NAIC.",
+          "createdAt": "2026-05-27T16:41:06.159Z",
+          "source": "notes"
+        },
+        {
+          "id": "notes-bf151c94-ff0b-414d-9fd4-f6516c916f87",
+          "text": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "date": "",
+      "deadline": "",
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    },
+    {
+      "id": "e72691ed-f2af-4b2a-830f-a8006ec250e9",
+      "title": "Resolve Auto Insurance Assignment",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Resolve Auto Insurance Assignment",
+      "type": "DMV / Vehicle",
+      "company": "",
+      "policyNumber": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "completedAt": "",
+      "blockedBy": "",
+      "notes": "",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-e72691ed-f2af-4b2a-830f-a8006ec250e9",
+          "text": "Wait 2-3 business days from 05/06/2026 for AIPSO insurer assignment.\nNeed assigned insurer name and NAIC before DMV submission if online form requires NAIC.",
+          "createdAt": "2026-05-27T16:42:49.383Z",
+          "source": "notes"
+        },
+        {
+          "id": "notes-bf151c94-ff0b-414d-9fd4-f6516c916f87",
+          "text": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "date": "",
+      "deadline": "",
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    },
+    {
+      "id": "c6279ee0-03f4-402d-bb26-9caca26f4d7a",
+      "title": "Resolve Auto Insurance Assignment",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Resolve Auto Insurance Assignment",
+      "type": "DMV / Vehicle",
+      "company": "",
+      "policyNumber": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "completedAt": "",
+      "blockedBy": "",
+      "notes": "",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-c6279ee0-03f4-402d-bb26-9caca26f4d7a",
+          "text": "Wait 2-3 business days from 05/06/2026 for AIPSO insurer assignment.\nNeed assigned insurer name and NAIC before DMV submission if online form requires NAIC.",
+          "createdAt": "2026-05-27T16:42:49.483Z",
+          "source": "notes"
+        },
+        {
+          "id": "notes-bf151c94-ff0b-414d-9fd4-f6516c916f87",
+          "text": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "date": "",
+      "deadline": "",
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    },
+    {
+      "id": "467f3192-4249-42a4-94ad-5160d546ba96",
+      "title": "Resolve Auto Insurance Assignment",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Resolve Auto Insurance Assignment",
+      "type": "DMV / Vehicle",
+      "company": "",
+      "policyNumber": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "completedAt": "",
+      "blockedBy": "",
+      "notes": "Wait 2-3 business days from 05/06/2026 for AIPSO insurer assignment.\nNeed assigned insurer name and NAIC before DMV submission if online form requires NAIC.",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-bf151c94-ff0b-414d-9fd4-f6516c916f87",
+          "text": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "date": "",
+      "deadline": "",
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    },
+    {
+      "id": "7e63b746-f6f3-4568-b7a9-223ed0640d9f",
+      "title": "Complete DMV Registration Renewal",
+      "category": "DMV / Vehicle",
+      "completed": false,
+      "details": "Registration Due: 05/22/2026\nSuspension: 06/04/2026\nInsurance cancelled: 02/09/2026\nDMV: 1-800-777-0133\nIntegon: (800) 632-3306.",
+      "taskName": "Complete DMV Registration Renewal",
+      "type": "DMV / Vehicle",
+      "company": "",
+      "policyNumber": "",
+      "policyStatus": "",
+      "effectiveDate": "",
+      "completedAt": "",
+      "blockedBy": "467f3192-4249-42a4-94ad-5160d546ba96",
+      "notes": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+      "typeOverride": "",
+      "followUpEntries": [
+        {
+          "id": "notes-bf151c94-ff0b-414d-9fd4-f6516c916f87",
+          "text": "Submit insurance proof after assigned insurer and NAIC are confirmed.",
+          "createdAt": "2026-05-27T16:39:11.171Z",
+          "source": "notes"
+        }
+      ],
+      "archived": true,
+      "archivedAt": "2026-05-27T17:20:01.639Z",
+      "status": "archived",
+      "plate": "4WLC582",
+      "vin": "1LNHM81W03Y609664",
+      "amount": "$179 to $254"
+    }
+  ],
+  "contacts": [
+    {
+      "id": "ebcade95-1746-4f5a-abda-dd064e4097d9",
+      "name": "Homelight",
+      "category": "General",
+      "phone": "(213) 624-9258",
+      "directPhone": "  x 2103",
+      "website": "  ",
+      "address": "339 E Plymouth St.",
+      "organization": "Homelight Family Living",
+      "company": "Midnight Mission",
+      "person": "Director - Ricardo",
+      "notes": "Ricardo - 526-879-0064",
+      "updatedAt": "2026-06-01T18:14:47.462Z",
+      "createdAt": "2026-06-01T18:14:47.462Z"
+    },
+    {
+      "id": "7c3d104f-feaf-49be-87ea-fd8cfa7c2939",
+      "name": "U-Haul",
+      "category": "Moving",
+      "phone": "(323) 531-7885",
+      "directPhone": "",
+      "website": "",
+      "address": "5131 Avalon Bl Ste A Los Angeles, CA 90011",
+      "organization": "",
+      "company": "U-Haul",
+      "person": "",
+      "notes": "",
+      "updatedAt": "2026-06-01T17:42:39.929Z",
+      "createdAt": "2026-06-01T17:42:39.929Z"
+    },
+    {
+      "id": "contact-dpss",
+      "name": "DPSS",
+      "category": "DPSS / Benefits",
+      "phone": "(866) 613-3777",
+      "directPhone": "",
+      "website": "https://benefitscal.com",
+      "address": "",
+      "organization": "DPSS",
+      "company": "",
+      "person": "",
+      "notes": "Benefits, GR, CalFresh, Medi-Cal case support."
+    },
+    {
+      "id": "contact-dmv",
+      "name": "California DMV",
+      "category": "DMV / Vehicle",
+      "phone": "1-800-777-0133",
+      "directPhone": "",
+      "website": "https://www.dmv.ca.gov/",
+      "address": "",
+      "organization": "California DMV",
+      "company": "",
+      "person": "",
+      "notes": "Driver license, registration, address changes, vehicle issues."
+    },
+    {
+      "id": "contact-usps",
+      "name": "USPS",
+      "category": "Moving",
+      "phone": "1-800-275-8777",
+      "directPhone": "",
+      "website": "https://www.usps.com/manage/forward.htm",
+      "address": "",
+      "organization": "USPS",
+      "company": "",
+      "person": "",
+      "notes": "Mail forwarding and change of address."
+    },
+    {
+      "id": "contact-spectrum",
+      "name": "Spectrum",
+      "category": "Phone / Lifeline",
+      "phone": "1-833-267-6094",
+      "directPhone": "",
+      "website": "https://www.spectrum.net/",
+      "address": "",
+      "organization": "Spectrum",
+      "company": "",
+      "person": "",
+      "notes": "Internet, cable, service change, billing, downgrade, transfer."
+    },
+    {
+      "id": "contact-health-net",
+      "name": "Health Net",
+      "category": "Medical",
+      "phone": "1-800-675-6110",
+      "directPhone": "",
+      "website": "https://www.healthnet.com/",
+      "address": "",
+      "organization": "Health Net",
+      "company": "",
+      "person": "",
+      "notes": "Medi-Cal plan support and member services."
+    },
+    {
+      "id": "contact-dr-taylor",
+      "name": "Dr. Taylor",
+      "category": "Medical",
+      "phone": "(626) 459-5420",
+      "directPhone": "",
+      "website": "",
+      "address": "11436 Garvey Ave, Ste B, El Monte, CA 91732",
+      "organization": "Mayflower Medical Group",
+      "company": "",
+      "person": "Dr. Taylor",
+      "notes": "Primary care."
+    },
+    {
+      "id": "contact-dr-ananyan",
+      "name": "Dr. Ananyan",
+      "category": "Medical",
+      "phone": "323-264-6157",
+      "directPhone": "",
+      "website": "",
+      "address": "3616 E 1st St, Los Angeles, CA 90063",
+      "organization": "Podiatry",
+      "company": "",
+      "person": "Dr. Ananyan",
+      "notes": "Podiatry."
+    },
+    {
+      "id": "contact-custodio-dubey",
+      "name": "Custodio & Dubey",
+      "category": "Legal",
+      "phone": "213-593-9095",
+      "directPhone": "",
+      "website": "",
+      "address": "",
+      "organization": "Custodio & Dubey",
+      "company": "",
+      "person": "Keshav Nair / Maria Saavedra",
+      "notes": "Attorney contact."
+    },
+    {
+      "id": "contact-211-la",
+      "name": "211 LA",
+      "category": "Moving",
+      "phone": "211",
+      "directPhone": "",
+      "website": "https://211la.org/",
+      "address": "",
+      "organization": "211 LA",
+      "company": "",
+      "person": "",
+      "notes": "Moving assistance and local support resources."
+    }
+  ]
+}
