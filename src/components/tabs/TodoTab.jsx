@@ -39,10 +39,10 @@ const STORAGE_KEY = "todoTab.tasks.v1";
 const STORAGE_BACKUP_KEY = "todoTab.tasks.backup.v1";
 const ARCHIVE_STORAGE_KEY = "todoTab.tasks.archived.v1";
 const SAFETY_SNAPSHOT_STORAGE_KEY = "todoTab.tasks.safetySnapshots.v1";
-const TODO_CALENDAR_ADDED_STORAGE_KEY = "todoTab.googleCalendar.addedIds.v1";
 const MAX_SAFETY_SNAPSHOTS = 30;
 
 const CONTACTS_STORAGE_KEY = "todoTab.contacts.v1";
+const TODO_GOOGLE_CALENDAR_ADDED_STORAGE_KEY = "todoTab.googleCalendar.addedIds.v1";
 
 const DEFAULT_CONTACTS = [
   {
@@ -892,6 +892,181 @@ const addTaskHistory = (task = {}, action, detail = "") => {
 
 const getFollowUpEntries = (task = {}) => (Array.isArray(task.followUpEntries) ? task.followUpEntries : []);
 
+const readTodoGoogleCalendarAddedIds = () => {
+  const parsed = safeJsonParse(localStorage.getItem(TODO_GOOGLE_CALENDAR_ADDED_STORAGE_KEY), []);
+  return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+};
+
+const writeTodoGoogleCalendarAddedIds = (ids = []) => {
+  localStorage.setItem(
+    TODO_GOOGLE_CALENDAR_ADDED_STORAGE_KEY,
+    JSON.stringify(Array.from(new Set(ids)).filter(Boolean))
+  );
+};
+
+const stripTodoCalendarHtml = (value = "") => {
+  const rawValue = String(value ?? "");
+
+  if (typeof document === "undefined") {
+    return rawValue.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = rawValue;
+  const textValue = template.content.textContent || rawValue;
+
+  return textValue
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+};
+
+const normalizeTodoCalendarDate = (value = "") => {
+  const rawValue = String(value || "").trim();
+
+  if (!rawValue) return "";
+
+  const isoMatch = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+  const slashMatch = rawValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const month = slashMatch[1].padStart(2, "0");
+    const day = slashMatch[2].padStart(2, "0");
+    const year = slashMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  const parsedDate = new Date(rawValue);
+  if (Number.isNaN(parsedDate.getTime())) return "";
+
+  return [
+    String(parsedDate.getFullYear()).padStart(4, "0"),
+    String(parsedDate.getMonth() + 1).padStart(2, "0"),
+    String(parsedDate.getDate()).padStart(2, "0"),
+  ].join("-");
+};
+
+const addDaysToTodoCalendarDate = (dateValue, days = 1) => {
+  const normalized = normalizeTodoCalendarDate(dateValue);
+  if (!normalized) return "";
+
+  const [year, month, day] = normalized.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + days);
+
+  return [
+    String(date.getFullYear()).padStart(4, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+};
+
+const findTodoCalendarTime = (task = {}) => {
+  const haystack = [
+    task.time,
+    task.startTime,
+    task.appointmentTime,
+    task.details,
+    task.questions,
+    task.notes,
+    task.followUpNotes,
+    ...getFollowUpEntries(task).map((entry) => stripTodoCalendarHtml(entry?.text || "")),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const match = haystack.match(/\b(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\b/i);
+  if (!match) return "";
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  const meridiem = match[3].toUpperCase();
+
+  if (!hour || hour > 12 || minute > 59) return "";
+
+  const hour24 =
+    meridiem === "PM" && hour !== 12
+      ? hour + 12
+      : meridiem === "AM" && hour === 12
+        ? 0
+        : hour;
+
+  return `${String(hour24).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+};
+
+const addHoursToTodoCalendarDateTime = (dateValue, timeValue, hours = 1) => {
+  const normalized = normalizeTodoCalendarDate(dateValue);
+  if (!normalized || !timeValue) return "";
+
+  const [year, month, day] = normalized.split("-").map(Number);
+  const [hour, minute, second] = timeValue.split(":").map(Number);
+  const date = new Date(year, month - 1, day, hour || 0, minute || 0, second || 0);
+  date.setHours(date.getHours() + hours);
+
+  return [
+    String(date.getFullYear()).padStart(4, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-") + `T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
+};
+
+const buildTodoGoogleCalendarEventPayload = (task = {}) => {
+  const dateValue = normalizeTodoCalendarDate(task.deadline || task.date || task.effectiveDate || "");
+  if (!dateValue) {
+    throw new Error("Add a due date or date before sending this task to Google Calendar.");
+  }
+
+  const timeValue = findTodoCalendarTime(task);
+  const noteText = stripTodoCalendarHtml(task.notes || task.followUpNotes || "");
+  const followUpText = getFollowUpEntries(task)
+    .map((entry) => stripTodoCalendarHtml(entry?.text || ""))
+    .filter(Boolean)
+    .join("\n\n");
+
+  const description = [
+    task.details ? `Details:\n${task.details}` : "",
+    task.phone ? `Phone: ${task.phone}` : "",
+    task.organization ? `Organization: ${task.organization}` : "",
+    task.company ? `Company: ${task.company}` : "",
+    task.person ? `Person: ${task.person}` : "",
+    task.caseNumber ? `Case #: ${task.caseNumber}` : "",
+    task.policyNumber ? `Policy #: ${task.policyNumber}` : "",
+    task.amount ? `Amount: ${task.amount}` : "",
+    task.website ? `Website: ${task.website}` : "",
+    task.systemLink ? `System link: ${task.systemLink}` : "",
+    task.questions ? `Questions:\n${task.questions}` : "",
+    noteText ? `Notes:\n${noteText}` : "",
+    followUpText ? `Follow-up notes:\n${followUpText}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const payload = {
+    summary: task.taskName || task.title || "To-Do Task",
+    location: task.address || "",
+    description,
+  };
+
+  if (timeValue) {
+    payload.start = {
+      dateTime: `${dateValue}T${timeValue}`,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles",
+    };
+    payload.end = {
+      dateTime: addHoursToTodoCalendarDateTime(dateValue, timeValue, 1),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles",
+    };
+  } else {
+    payload.start = { date: dateValue };
+    payload.end = { date: addDaysToTodoCalendarDate(dateValue, 1) };
+  }
+
+  return payload;
+};
+
+
 const combineNotesIntoFollowUpEntries = (task = {}) => {
   const notesText = String(task.notes || "").trim();
 
@@ -1376,161 +1551,6 @@ const sortTasks = (tasks) => {
   });
 };
 
-const readStoredTodoCalendarAddedIds = () => {
-  const parsed = safeJsonParse(localStorage.getItem(TODO_CALENDAR_ADDED_STORAGE_KEY), []);
-  return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-};
-
-const writeStoredTodoCalendarAddedIds = (ids) => {
-  localStorage.setItem(TODO_CALENDAR_ADDED_STORAGE_KEY, JSON.stringify(Array.from(new Set(ids.filter(Boolean)))));
-};
-
-const stripHtmlForCalendar = (value = "") => {
-  if (typeof document === "undefined") {
-    return String(value || "").replace(/<[^>]+>/g, "");
-  }
-
-  const element = document.createElement("div");
-  element.innerHTML = String(value || "");
-  return element.textContent || element.innerText || "";
-};
-
-const formatCalendarDate = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const formatCalendarDateTime = (date) => {
-  const datePart = formatCalendarDate(date);
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${datePart}T${hours}:${minutes}:00`;
-};
-
-const addCalendarDays = (date, days) => {
-  const nextDate = new Date(date);
-  nextDate.setDate(nextDate.getDate() + days);
-  return nextDate;
-};
-
-const parseTodoCalendarDate = (value = "") => {
-  const text = String(value || "").trim();
-  if (!text) return null;
-
-  const numericMatch = text.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
-  if (numericMatch) {
-    const month = Number(numericMatch[1]);
-    const day = Number(numericMatch[2]);
-    const year = Number(numericMatch[3].length === 2 ? `20${numericMatch[3]}` : numericMatch[3]);
-    const parsedDate = new Date(year, month - 1, day);
-    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
-  }
-
-  const namedMonthMatch = text.match(/(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?[,]?\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?[,]?\s+(\d{4})/i);
-  if (namedMonthMatch) {
-    const parsedDate = new Date(`${namedMonthMatch[1]} ${namedMonthMatch[2]}, ${namedMonthMatch[3]}`);
-    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
-  }
-
-  const parsedDate = new Date(text);
-  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
-};
-
-const parseTodoCalendarTime = (value = "") => {
-  const text = String(value || "");
-  const timeMatch = text.match(/(?:^|\b)(\d{1,2})(?::(\d{2}))?\s*(AM|PM|A\.M\.|P\.M\.)\b/i);
-  if (!timeMatch) return null;
-
-  let hours = Number(timeMatch[1]);
-  const minutes = Number(timeMatch[2] || 0);
-  const meridiem = timeMatch[3].toLowerCase();
-
-  if (meridiem.startsWith("p") && hours < 12) hours += 12;
-  if (meridiem.startsWith("a") && hours === 12) hours = 0;
-
-  return { hours, minutes };
-};
-
-const getTaskFollowUpTextForCalendar = (task = {}) => {
-  return getFollowUpEntries(task)
-    .map((entry) => stripHtmlForCalendar(entry?.text || "").trim())
-    .filter(Boolean)
-    .join("\n\n");
-};
-
-const buildTodoCalendarEventPayload = (task = {}) => {
-  const detailText = stripHtmlForCalendar(task.details || "");
-  const questionText = stripHtmlForCalendar(task.questions || "");
-  const noteText = stripHtmlForCalendar(task.notes || "");
-  const followUpText = getTaskFollowUpTextForCalendar(task);
-  const searchableText = [
-    task.taskName,
-    task.title,
-    task.date,
-    task.deadline,
-    task.effectiveDate,
-    detailText,
-    questionText,
-    noteText,
-    followUpText,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const explicitDate = parseTodoCalendarDate(searchableText);
-  const taskDate = explicitDate || parseTodoCalendarDate(task.deadline || task.date || task.effectiveDate || "");
-
-  if (!taskDate) {
-    throw new Error("Add a task date or due date before creating a Google Calendar event.");
-  }
-
-  const timeValue = parseTodoCalendarTime(searchableText);
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles";
-
-  const descriptionLines = [
-    detailText,
-    task.person ? `Person: ${task.person}` : "",
-    task.organization ? `Organization: ${task.organization}` : "",
-    task.company ? `Company: ${task.company}` : "",
-    task.phone ? `Phone: ${task.phone}` : "",
-    task.address ? `Address: ${task.address}` : "",
-    task.caseNumber ? `Case #: ${task.caseNumber}` : "",
-    task.citationNumber ? `Citation #: ${task.citationNumber}` : "",
-    task.policyNumber ? `Policy #: ${task.policyNumber}` : "",
-    task.plate ? `Plate: ${task.plate}` : "",
-    task.vin ? `VIN: ${task.vin}` : "",
-    task.amount ? `Amount: ${task.amount}` : "",
-    task.website ? `Website: ${task.website}` : "",
-    task.systemLink ? `System link: ${task.systemLink}` : "",
-    questionText ? `Questions:\n${questionText}` : "",
-    noteText ? `Notes:\n${noteText}` : "",
-    followUpText ? `Follow-up notes:\n${followUpText}` : "",
-  ].filter(Boolean);
-
-  const payload = {
-    summary: task.taskName || task.title || "To-Do Task",
-    location: task.address || "",
-    description: descriptionLines.join("\n\n"),
-  };
-
-  if (timeValue) {
-    const startDate = new Date(taskDate);
-    startDate.setHours(timeValue.hours, timeValue.minutes, 0, 0);
-    const endDate = new Date(startDate);
-    endDate.setHours(endDate.getHours() + 1);
-
-    payload.start = { dateTime: formatCalendarDateTime(startDate), timeZone: timezone };
-    payload.end = { dateTime: formatCalendarDateTime(endDate), timeZone: timezone };
-  } else {
-    payload.start = { date: formatCalendarDate(taskDate) };
-    payload.end = { date: formatCalendarDate(addCalendarDays(taskDate, 1)) };
-  }
-
-  return payload;
-};
-
 export default function TodoTab() {
   const hasHydrated = useRef(false);
   const [tasks, setTasks] = useState(readStoredTasks);
@@ -1561,8 +1581,8 @@ export default function TodoTab() {
   const [replaceExistingContactFields, setReplaceExistingContactFields] = useState(false);
   const [contactApplyTarget, setContactApplyTarget] = useState("form");
   const [completionCelebration, setCompletionCelebration] = useState(null);
-  const [calendarAddedIds, setCalendarAddedIds] = useState(readStoredTodoCalendarAddedIds);
   const [calendarAddingTaskId, setCalendarAddingTaskId] = useState("");
+  const [calendarAddedIds, setCalendarAddedIds] = useState(readTodoGoogleCalendarAddedIds);
   const completionCelebrationTimeoutRef = useRef(null);
   const previousTaskCompletionRef = useRef(new Map(tasks.map((task) => [task.id, Boolean(task.completed)])));
 
@@ -1854,6 +1874,43 @@ const addParsedTasks = () => {
           : task
       )
     );
+  };
+
+  const createTaskGoogleCalendarEvent = async (task) => {
+    if (!task?.id || calendarAddingTaskId) return;
+
+    try {
+      setCalendarAddingTaskId(task.id);
+      const eventPayload = buildTodoGoogleCalendarEventPayload(task);
+      const createdEvent = await createGoogleCalendarEvent(eventPayload);
+
+      setCalendarAddedIds((current) => {
+        const nextIds = Array.from(new Set([...current, task.id]));
+        writeTodoGoogleCalendarAddedIds(nextIds);
+        return nextIds;
+      });
+
+      setTasks((current) =>
+        current.map((item) =>
+          item.id === task.id
+            ? addTaskHistory(
+                {
+                  ...item,
+                  googleCalendarEventId: createdEvent?.id || item.googleCalendarEventId || "",
+                  googleCalendarEventLink: createdEvent?.htmlLink || item.googleCalendarEventLink || "",
+                  googleCalendarAddedAt: new Date().toISOString(),
+                },
+                "Added to Google Calendar",
+                createdEvent?.htmlLink || ""
+              )
+            : item
+        )
+      );
+    } catch (error) {
+      window.alert(error?.message || "Could not add this task to Google Calendar.");
+    } finally {
+      setCalendarAddingTaskId("");
+    }
   };
 
   const openContactManager = (target = "form") => {
@@ -2225,40 +2282,6 @@ const addParsedTasks = () => {
     );
 
     cancelEditingFollowUpEntry(taskId, entryId);
-  };
-
-  const createTaskCalendarEvent = async (task) => {
-    if (!task?.id || calendarAddingTaskId) return;
-
-    try {
-      setCalendarAddingTaskId(task.id);
-      const eventPayload = buildTodoCalendarEventPayload(task);
-      await createGoogleCalendarEvent(eventPayload);
-
-      setCalendarAddedIds((current) => {
-        const nextIds = Array.from(new Set([...current, task.id]));
-        writeStoredTodoCalendarAddedIds(nextIds);
-        return nextIds;
-      });
-
-      setTasks((current) =>
-        current.map((item) =>
-          item.id === task.id
-            ? addTaskHistory(
-                {
-                  ...item,
-                  calendarAddedAt: new Date().toISOString(),
-                },
-                "Google Calendar event added"
-              )
-            : item
-        )
-      );
-    } catch (error) {
-      window.alert(error?.message || "Could not add this task to Google Calendar.");
-    } finally {
-      setCalendarAddingTaskId("");
-    }
   };
 
   const toggleCategory = (type) => {
@@ -3203,30 +3226,26 @@ const addParsedTasks = () => {
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => createTaskCalendarEvent(task)}
-                                      disabled={calendarAddingTaskId === task.id}
-                                      className={`inline-flex items-center justify-center rounded px-2 py-1 text-white ${
-                                        calendarAddedIds.includes(task.id) || task.calendarAddedAt
-                                          ? "bg-green-700 hover:bg-green-800"
-                                          : "bg-emerald-700 hover:bg-emerald-800"
-                                      } disabled:cursor-wait disabled:opacity-60`}
-                                      aria-label="Add task to Google Calendar"
-                                      title={calendarAddedIds.includes(task.id) || task.calendarAddedAt ? "Google Calendar event added" : "Add task to Google Calendar"}
-                                    >
-                                      {calendarAddedIds.includes(task.id) || task.calendarAddedAt ? (
-                                        <Check className="h-4 w-4" />
-                                      ) : (
-                                        <CalendarPlus className="h-4 w-4" />
-                                      )}
-                                    </button>
-                                    <button
-                                      type="button"
                                       onClick={() => setSelectedTaskId(task.id)}
                                       className="inline-flex items-center justify-center rounded bg-cyan-700 px-2 py-1 text-white hover:bg-cyan-800"
                                       aria-label="Open task detail drawer"
                                       title="Open task detail drawer"
                                     >
                                       <PanelRightOpen className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => createTaskGoogleCalendarEvent(task)}
+                                      disabled={calendarAddingTaskId === task.id}
+                                      className={`inline-flex items-center justify-center rounded px-2 py-1 text-white ${
+                                        calendarAddedIds.includes(task.id)
+                                          ? "bg-green-700 hover:bg-green-800"
+                                          : "bg-emerald-700 hover:bg-emerald-800"
+                                      } disabled:cursor-wait disabled:opacity-60`}
+                                      aria-label="Add task to Google Calendar"
+                                      title={calendarAddedIds.includes(task.id) ? "Added to Google Calendar" : "Add task to Google Calendar"}
+                                    >
+                                      {calendarAddedIds.includes(task.id) ? <Check className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
                                     </button>
                                     <button
                                       type="button"

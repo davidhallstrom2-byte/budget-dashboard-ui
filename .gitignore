@@ -8,3 +8,5 @@ screenshots/
 
 .restore_tmp_*/
 screenshots/
+
+.env.local
