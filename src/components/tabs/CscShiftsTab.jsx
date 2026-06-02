@@ -1818,82 +1818,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </div>
 
           <>
-          <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
-            <div className="relative md:col-span-2 xl:col-span-2">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={localSearch}
-                onChange={(event) => setLocalSearch(event.target.value)}
-                placeholder="Search shifts, notes, venue, job..."
-                className="h-10 w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-              />
-            </div>
-
-            <select
-              value={venueFilter}
-              onChange={(event) => setVenueFilter(event.target.value)}
-              className="h-10 min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-            >
-              {venueOptions.map((venue) => (
-                <option key={venue} value={venue}>
-                  {venue === 'All' ? 'All venues' : venue}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="h-10 min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-            >
-              <option value="All">All statuses</option>
-              {SHIFT_STATUS_OPTIONS.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={selectedMonth}
-              onChange={(event) => setSelectedMonth(event.target.value)}
-              className="h-10 min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-            >
-              {monthOptions.map((month) => (
-                <option key={month} value={month}>
-                  {month === 'All' ? 'All months' : getMonthLabel(month)}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={paidFilter}
-              onChange={(event) => setPaidFilter(event.target.value)}
-              className="h-10 min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-            >
-              <option value="All">All pay statuses</option>
-              {PAID_STATUS_OPTIONS.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              onClick={() => {
-                setLocalSearch('');
-                setVenueFilter('All');
-                setStatusFilter('All');
-                setPaidFilter('All');
-                setSelectedMonth('All');
-              }}
-              className="h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
-            >
-              Clear filters
-            </button>
-          </div>
 
           <div className="overflow-hidden rounded-lg border-2 border-black">
             <div className="flex items-center justify-between gap-3 bg-black px-4 py-3 text-white">
@@ -2152,7 +2076,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid grid-cols-4 gap-3">
           <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-yellow-950 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -2213,7 +2137,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {monthlySummary.map((month) => (
               <button
                 key={month.monthKey}
