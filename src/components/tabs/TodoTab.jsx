@@ -892,6 +892,65 @@ const addTaskHistory = (task = {}, action, detail = "") => {
 
 const getFollowUpEntries = (task = {}) => (Array.isArray(task.followUpEntries) ? task.followUpEntries : []);
 
+const getFirstFilledValue = (task = {}, fields = []) => {
+  for (const field of fields) {
+    const value = String(task[field] ?? "").trim();
+    if (value) return value;
+  }
+
+  return "";
+};
+
+const buildConnectedFollowUpSourceSummary = (task = {}) => {
+  const entries = getFollowUpEntries(task)
+    .slice(0, 3)
+    .map((entry) => {
+      const entryText = stripTodoCalendarHtml(entry?.text || "").trim();
+      if (!entryText) return "";
+      const entryDate = formatDateTime(entry?.createdAt);
+      return entryDate ? `${entryDate}: ${entryText}` : entryText;
+    })
+    .filter(Boolean);
+
+  const lines = [
+    task.taskName ? `Source task: ${task.taskName}` : "",
+    getFirstFilledValue(task, ["person"]) ? `Person: ${getFirstFilledValue(task, ["person"])}` : "",
+    getFirstFilledValue(task, ["organization", "company"]) ? `Organization: ${getFirstFilledValue(task, ["organization", "company"])}` : "",
+    getFirstFilledValue(task, ["caseNumber", "policyNumber"]) ? `Case / ID: ${getFirstFilledValue(task, ["caseNumber", "policyNumber"])}` : "",
+    getFirstFilledValue(task, ["phone"]) ? `Phone: ${getFirstFilledValue(task, ["phone"])}` : "",
+    getFirstFilledValue(task, ["website", "systemLink"]) ? `Website: ${getFirstFilledValue(task, ["website", "systemLink"])}` : "",
+    getFirstFilledValue(task, ["deadline", "date", "effectiveDate"]) ? `Date / deadline: ${getFirstFilledValue(task, ["deadline", "date", "effectiveDate"])}` : "",
+    getFirstFilledValue(task, ["amount"]) ? `Amount: ${getFirstFilledValue(task, ["amount"])}` : "",
+    task.details ? `Details: ${stripTodoCalendarHtml(task.details).trim()}` : "",
+    task.notes ? `Notes: ${stripTodoCalendarHtml(task.notes).trim()}` : "",
+    entries.length ? `Recent notes: ${entries.join(" | ")}` : "",
+  ].filter(Boolean);
+
+  return lines.join("\n");
+};
+
+const buildConnectedFollowUpSourceSnapshot = (task = {}) => ({
+  id: task.id || "",
+  taskName: task.taskName || "",
+  details: task.details || "",
+  type: task.type || "",
+  typeOverride: task.typeOverride || "",
+  date: task.date || "",
+  deadline: task.deadline || "",
+  person: task.person || "",
+  organization: task.organization || task.company || "",
+  phone: task.phone || "",
+  address: task.address || "",
+  website: task.website || "",
+  systemLink: task.systemLink || "",
+  caseNumber: task.caseNumber || task.policyNumber || "",
+  amount: task.amount || "",
+  notes: task.notes || "",
+  followUpEntries: getFollowUpEntries(task).slice(0, 10),
+  completedAt: task.completedAt || "",
+  archivedAt: task.archivedAt || "",
+});
+
 const readTodoGoogleCalendarAddedIds = () => {
   const parsed = safeJsonParse(localStorage.getItem(TODO_GOOGLE_CALENDAR_ADDED_STORAGE_KEY), []);
   return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
@@ -1590,6 +1649,44 @@ export default function TodoTab() {
     hasHydrated.current = true;
   }, []);
 
+  useEffect(() => {
+    const openCreateTask = () => {
+      setForm(createEmptyTask());
+      setEditingId(null);
+      setShowAdvanced(false);
+      setIsCreateOpen(true);
+    };
+
+    const openArchiveDrawer = () => {
+      setArchivedTasks(readStoredArchivedTasks());
+      setIsArchiveDrawerOpen(true);
+    };
+
+    const saveSnapshot = () => {
+      writeSafetySnapshot("Toolbar safety snapshot", tasks, archivedTasks);
+      alert("Safety snapshot saved.");
+    };
+
+    const openExport = () => setIsExportOpen(true);
+    const openImport = () => setIsImportOpen(true);
+
+    window.addEventListener("todo-toolbar:add", openCreateTask);
+    window.addEventListener("todo-toolbar:archive", openArchiveDrawer);
+    window.addEventListener("todo-toolbar:snapshot", saveSnapshot);
+    window.addEventListener("todo-toolbar:save", saveSnapshot);
+    window.addEventListener("todo-toolbar:export", openExport);
+    window.addEventListener("todo-toolbar:import", openImport);
+
+    return () => {
+      window.removeEventListener("todo-toolbar:add", openCreateTask);
+      window.removeEventListener("todo-toolbar:archive", openArchiveDrawer);
+      window.removeEventListener("todo-toolbar:snapshot", saveSnapshot);
+      window.removeEventListener("todo-toolbar:save", saveSnapshot);
+      window.removeEventListener("todo-toolbar:export", openExport);
+      window.removeEventListener("todo-toolbar:import", openImport);
+    };
+  }, [tasks, archivedTasks]);
+
   const playCompletionSound = () => {
     if (typeof window === "undefined") return;
 
@@ -2083,6 +2180,110 @@ const addParsedTasks = () => {
       `Copied from ${task.taskName || "task"}`
     );
     setTasks((current) => normalizeInsuranceDmvTasks([...current, copy]).tasks);
+  };
+
+  const createConnectedFollowUpTask = (task) => {
+    if (!task?.id) return;
+
+    const sourceTask = tasks.find((item) => item.id === task.id) || task;
+    const now = new Date().toISOString();
+    const sourceSummary = buildConnectedFollowUpSourceSummary(sourceTask);
+    const sourceSnapshot = buildConnectedFollowUpSourceSnapshot(sourceTask);
+    const sourceTaskName = sourceTask.taskName || "Completed task";
+    const sourceType = normalizeType(sourceTask.typeOverride || sourceTask.type);
+    const nextTaskName = window.prompt("Follow-up task name:", `Follow up: ${sourceTaskName}`);
+
+    if (nextTaskName === null) return;
+
+    const cleanedTaskName = String(nextTaskName).trim();
+    if (!cleanedTaskName) return;
+
+    writeSafetySnapshot("Before connected follow-up creation", tasks, archivedTasks);
+
+    const followUpEntryText = [
+      `Created from completed task: ${sourceTaskName}`,
+      sourceSummary ? `Source summary:\n${sourceSummary}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const followUpTask = stampTask(
+      {
+        ...createEmptyTask(),
+        id: createId(),
+        taskName: cleanedTaskName,
+        details: `Next follow-up connected to: ${sourceTaskName}`,
+        type: sourceType,
+        typeOverride: sourceType,
+        person: sourceTask.person || "",
+        organization: sourceTask.organization || sourceTask.company || "",
+        company: sourceTask.company || "",
+        phone: sourceTask.phone || "",
+        address: sourceTask.address || "",
+        website: sourceTask.website || "",
+        systemLink: sourceTask.systemLink || sourceTask.website || "",
+        caseNumber: sourceTask.caseNumber || "",
+        amount: sourceTask.amount || "",
+        documents: sourceTask.documents || "",
+        questions: sourceTask.questions || "",
+        outcome: sourceTask.outcome || "",
+        requiredAction: "",
+        impact: "",
+        notes: "Connected follow-up. Source task summary is saved below.",
+        completed: false,
+        completedAt: "",
+        blockedBy: "",
+        sourceTaskId: sourceTask.id || "",
+        sourceTaskName,
+        sourceTaskSummary: sourceSummary,
+        sourceTaskSnapshot: sourceSnapshot,
+        sourceTaskArchivedAt: now,
+        sourceTaskCompletedAt: now,
+        followUpEntries: followUpEntryText
+          ? [
+              {
+                id: createId(),
+                createdAt: now,
+                text: followUpEntryText,
+              },
+            ]
+          : [],
+      },
+      "Connected follow-up created",
+      `Source task: ${sourceTaskName}`
+    );
+
+    const archivedTask = addTaskHistory(
+      {
+        ...sourceTask,
+        completed: true,
+        completedAt: sourceTask.completedAt || now,
+        archivedAt: now,
+        connectedFollowUpTaskId: followUpTask.id,
+        connectedFollowUpTaskName: followUpTask.taskName,
+      },
+      "Archived after connected follow-up created",
+      `New follow-up: ${followUpTask.taskName}`
+    );
+
+    setTasks((current) => {
+      const nextTasks = current
+        .filter((item) => item.id !== sourceTask.id)
+        .map((item) => (item.blockedBy === sourceTask.id ? { ...item, blockedBy: followUpTask.id } : item));
+
+      return normalizeInsuranceDmvTasks([followUpTask, ...nextTasks]).tasks;
+    });
+
+    setArchivedTasks((current) => {
+      const nextArchived = [archivedTask, ...current.filter((item) => item?.id !== sourceTask.id)];
+      writeStoredArchivedTasks(nextArchived);
+      return nextArchived;
+    });
+
+    setMovingTaskId(null);
+    setSelectedTaskId(followUpTask.id);
+    setCheckedTaskIds((current) => current.filter((id) => id !== sourceTask.id));
+    window.dispatchEvent(new Event("todoTasksChanged"));
   };
 
   const archiveTask = (task) => {
@@ -3143,6 +3344,9 @@ const addParsedTasks = () => {
                                   {controls.length > 0 && (
                                     <div className="mt-1 text-xs text-slate-600">Controls: {controls.map((item) => item.taskName).join(", ")}</div>
                                   )}
+                                  {task.sourceTaskName && (
+                                    <div className="mt-1 text-xs font-semibold text-indigo-700">Related source: {task.sourceTaskName}</div>
+                                  )}
                                 </td>
                                 <td className="align-top px-2 py-2">
                                   <input
@@ -3188,6 +3392,15 @@ const addParsedTasks = () => {
                                       title="Copy task"
                                     >
                                       <Copy className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => createConnectedFollowUpTask(task)}
+                                      className="inline-flex items-center justify-center rounded bg-indigo-600 px-2 py-1 text-white hover:bg-indigo-700"
+                                      aria-label="Create connected follow-up task"
+                                      title="Create connected follow-up, mark this done, and archive the source task"
+                                    >
+                                      <Plus className="h-4 w-4" />
                                     </button>
                                     <button
                                       type="button"
@@ -3316,6 +3529,14 @@ const addParsedTasks = () => {
                                             </div>
                                           </label>
                                         ))}
+                                      </div>
+                                    )}
+
+                                    {task.sourceTaskSummary && (
+                                      <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                                        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-indigo-800">Related Source Task</div>
+                                        <div className="text-sm font-semibold text-slate-900">{task.sourceTaskName || "Source task"}</div>
+                                        <FormattedText value={task.sourceTaskSummary} className="mt-2 whitespace-pre-wrap text-sm text-slate-800" />
                                       </div>
                                     )}
 

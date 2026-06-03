@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   BriefcaseBusiness,
@@ -973,6 +973,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [expandedNoteIds, setExpandedNoteIds] = useState(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [calendarAddedIds, setCalendarAddedIds] = useState(() => new Set(loadCalendarAddedIds()));
+  const toolbarImportInputRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -1300,6 +1301,36 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const months = Array.from(new Set(shifts.map((shift) => getMonthKey(shift.startDate)))).sort();
     return ['All', ...months];
   }, [shifts]);
+
+
+  useEffect(() => {
+    const openAddShift = () => {
+      setNewShift(createBlankShift());
+      setEditingShiftId(null);
+      setShowAddDrawer(true);
+    };
+
+    const openArchiveDrawer = () => setShowArchiveDrawer(true);
+    const openImport = () => toolbarImportInputRef.current?.click();
+    const saveSnapshot = () => handleManualSafetySnapshot();
+    const exportShifts = () => handleExportCsv();
+
+    window.addEventListener('csc-toolbar:add', openAddShift);
+    window.addEventListener('csc-toolbar:archive', openArchiveDrawer);
+    window.addEventListener('csc-toolbar:snapshot', saveSnapshot);
+    window.addEventListener('csc-toolbar:save', saveSnapshot);
+    window.addEventListener('csc-toolbar:export', exportShifts);
+    window.addEventListener('csc-toolbar:import', openImport);
+
+    return () => {
+      window.removeEventListener('csc-toolbar:add', openAddShift);
+      window.removeEventListener('csc-toolbar:archive', openArchiveDrawer);
+      window.removeEventListener('csc-toolbar:snapshot', saveSnapshot);
+      window.removeEventListener('csc-toolbar:save', saveSnapshot);
+      window.removeEventListener('csc-toolbar:export', exportShifts);
+      window.removeEventListener('csc-toolbar:import', openImport);
+    };
+  }, [shifts, archivedShifts]);
 
   const filteredShifts = useMemo(() => {
     return shifts.filter((shift) => {
@@ -1721,7 +1752,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               >
                 <FileUp className="h-4 w-4" />
                 Import
-                <input type="file" accept=".csv,text/csv" onChange={handleImportCsv} className="hidden" />
+                <input ref={toolbarImportInputRef} type="file" accept=".csv,text/csv" onChange={handleImportCsv} className="hidden" />
               </label>
 
               <button
@@ -1757,15 +1788,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleManualSafetySnapshot}
-                title="Safety Snapshot"
-                aria-label="Save a manual safety snapshot of active and archived CSC shifts"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-700 text-white shadow-sm hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2"
-              >
-                <History className="h-5 w-5" />
-              </button>
               <button
                 type="button"
                 onClick={() => setShowArchiveDrawer(true)}

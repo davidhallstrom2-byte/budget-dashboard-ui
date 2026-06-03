@@ -797,6 +797,207 @@ const BudgetDashboard = () => {
     event.target.value = '';
   };
 
+  const dispatchToolbarEvent = (eventName) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(eventName));
+  };
+
+  const getStoredArrayLength = (storageKey) => {
+    if (typeof localStorage === 'undefined') return 0;
+
+    try {
+      const parsed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(parsed) ? parsed.length : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const renderArchiveIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+      />
+    </svg>
+  );
+
+  const renderDownloadIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+      />
+    </svg>
+  );
+
+  const renderUploadIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+      />
+    </svg>
+  );
+
+  const renderSaveIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+      />
+    </svg>
+  );
+
+  const renderPlusIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+    </svg>
+  );
+
+  const renderHistoryIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12a9 9 0 109-9m0 0V1m0 2H8m4 4v5l3 2" />
+    </svg>
+  );
+
+  const renderTabToolbarActions = () => {
+    if (activeTab === 'todo') {
+      const todoArchiveCount = getStoredArrayLength(TODO_ARCHIVE_STORAGE_KEY);
+
+      return (
+        <>
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:add')} className="p-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Add To-Do Task" aria-label="Add To-Do Task">
+            {renderPlusIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:archive')} className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1" title="To-Do Archive Drawer" aria-label="Open To-Do Archive Drawer">
+            {renderArchiveIcon()}
+            <span className="text-xs">({todoArchiveCount})</span>
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:snapshot')} className="p-2 bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition-colors" title="To-Do Safety Snapshot" aria-label="Create To-Do Safety Snapshot">
+            {renderHistoryIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:export')} className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors" title="Export To-Do" aria-label="Export To-Do">
+            {renderDownloadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:import')} className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors" title="Import To-Do" aria-label="Import To-Do">
+            {renderUploadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:save')} className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors" title="Save To-Do Safety Snapshot" aria-label="Save To-Do Safety Snapshot">
+            {renderSaveIcon()}
+          </button>
+        </>
+      );
+    }
+
+    if (activeTab === 'cscShifts') {
+      const cscArchiveCount = getStoredArrayLength('cscShifts.archived.v1');
+
+      return (
+        <>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:add')} className="p-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Add CSC Shift" aria-label="Add CSC Shift">
+            {renderPlusIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:archive')} className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1" title="CSC Archive Drawer" aria-label="Open CSC Archive Drawer">
+            {renderArchiveIcon()}
+            <span className="text-xs">({cscArchiveCount})</span>
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:snapshot')} className="p-2 bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition-colors" title="CSC Safety Snapshot" aria-label="Create CSC Safety Snapshot">
+            {renderHistoryIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:export')} className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors" title="Export CSC Shifts" aria-label="Export CSC Shifts">
+            {renderDownloadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:import')} className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors" title="Import CSC Shifts" aria-label="Import CSC Shifts">
+            {renderUploadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:save')} className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors" title="Save CSC Safety Snapshot" aria-label="Save CSC Safety Snapshot">
+            {renderSaveIcon()}
+          </button>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <button
+          onClick={() => setIsStatementScannerOpen(true)}
+          className="p-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
+          title="Scan Statement"
+          aria-label="Scan Statement"
+        >
+          {renderPlusIcon()}
+        </button>
+
+        <button
+          onClick={() => setIsBudgetArchiveDrawerOpen(true)}
+          className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1"
+          title="Budget Archives"
+          aria-label="Open Budget Archives"
+        >
+          {renderArchiveIcon()}
+          <span className="text-xs">({state.archived?.length || 0})</span>
+        </button>
+
+        <button
+          onClick={() => setShowExportDialog(true)}
+          className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+          title="Export JSON"
+          aria-label="Export JSON"
+        >
+          {renderDownloadIcon()}
+        </button>
+
+        <label
+          className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors cursor-pointer"
+          title="Import JSON"
+          aria-label="Import JSON"
+        >
+          <input
+            type="file"
+            accept=".json"
+            onChange={handleImportJSON}
+            className="hidden"
+          />
+          {renderUploadIcon()}
+        </label>
+
+        <button
+          onClick={() => saveBudget()}
+          disabled={isSaving}
+          className={`p-2 rounded-lg transition-colors ${
+            isSaving
+              ? 'bg-gray-400 text-white cursor-not-allowed'
+              : 'bg-blue-500 text-white hover:bg-blue-600'
+          }`}
+          title="Save Budget"
+          aria-label="Save Budget"
+        >
+          {isSaving ? (
+            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
+            </svg>
+          ) : (
+            renderSaveIcon()
+          )}
+        </button>
+      </>
+    );
+  };
+
   if (isLoading) return <LoadingGate />;
 
   return (
@@ -847,6 +1048,7 @@ const BudgetDashboard = () => {
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             <NotificationPanel
               state={state}
+              activeTab={activeTab}
               onMarkPaid={handleMarkPaidFromNotification}
             />
 
@@ -871,114 +1073,7 @@ const BudgetDashboard = () => {
               )}
             </div>
 
-            <button
-              onClick={() => setIsStatementScannerOpen(true)}
-              className="p-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
-              title="Scan Statement"
-              aria-label="Scan Statement"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-            </button>
-
-            <button
-              onClick={() => setIsBudgetArchiveDrawerOpen(true)}
-              className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1"
-              title="Budget Archives"
-              aria-label="Open Budget Archives"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-                />
-              </svg>
-              <span className="text-xs">({state.archived?.length || 0})</span>
-            </button>
-
-            <button
-              onClick={() => setShowExportDialog(true)}
-              className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-              title="Export JSON"
-              aria-label="Export JSON"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                />
-              </svg>
-            </button>
-
-            <label
-              className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors cursor-pointer"
-              title="Import JSON"
-              aria-label="Import JSON"
-            >
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImportJSON}
-                className="hidden"
-              />
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                />
-              </svg>
-            </label>
-
-            <button
-              onClick={() => saveBudget()}
-              disabled={isSaving}
-              className={`p-2 rounded-lg transition-colors ${
-                isSaving
-                  ? 'bg-gray-400 text-white cursor-not-allowed'
-                  : 'bg-blue-500 text-white hover:bg-blue-600'
-              }`}
-              title="Save Budget"
-              aria-label="Save Budget"
-            >
-              {isSaving ? (
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                  />
-                </svg>
-              )}
-            </button>
+            {renderTabToolbarActions()}
           </div>
         </div>
       </StickyToolbar>
