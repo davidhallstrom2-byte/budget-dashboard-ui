@@ -6,7 +6,6 @@ import DashboardTab from './tabs/DashboardTab';
 import AnalysisTab from './tabs/AnalysisTab';
 import CalculatorTab from './tabs/CalculatorTab';
 import TodoTab from './tabs/TodoTab';
-import EditorTab from './tabs/EditorTab';
 import CscShiftsTab from './tabs/CscShiftsTab';
 import ArchivedDrawer from './ui/ArchivedDrawer';
 import StickyToolbar from './common/StickyToolbar.jsx';
@@ -531,7 +530,6 @@ const BudgetDashboard = () => {
   const budgetTabs = useMemo(
     () => [
       { id: 'overview', label: 'Overview', inactiveClass: 'bg-blue-50 text-blue-900 hover:bg-blue-100' },
-      { id: 'editor', label: 'Editor', inactiveClass: 'bg-orange-50 text-orange-900 hover:bg-orange-100' },
       { id: 'analysis', label: 'Analysis', inactiveClass: 'bg-purple-50 text-purple-900 hover:bg-purple-100' },
       { id: 'calculator', label: 'Calculator', inactiveClass: 'bg-green-50 text-green-900 hover:bg-green-100' },
     ],
@@ -1139,7 +1137,7 @@ const BudgetDashboard = () => {
 
         {activeTab === 'budget' && (
           <div className="min-h-screen">
-            {activeBudgetTab === 'overview' && (
+            {(activeBudgetTab === 'overview' || activeBudgetTab === 'editor') && (
               <DashboardTab
                 state={state}
                 setState={setState}
@@ -1147,18 +1145,6 @@ const BudgetDashboard = () => {
                 searchQuery={searchQuery}
                 budgetSubnav={renderBudgetSubnav()}
               />
-            )}
-
-            {activeBudgetTab === 'editor' && (
-              <div className="pt-4">
-                {renderBudgetToolHeader('Budget Editor', 'Edit budget items, categories, amounts, due dates, notes, and payment details.')}
-                <EditorTab
-                  state={state}
-                  setState={setState}
-                  saveBudget={saveBudget}
-                  searchQuery={searchQuery}
-                />
-              </div>
             )}
 
             {activeBudgetTab === 'analysis' && (

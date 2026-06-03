@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 import EmergencyFundWidget from '../modern/EmergencyFundWidget';
+import EditorTab from './EditorTab.jsx';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -1089,6 +1090,20 @@ const DashboardTab = ({
           );
         })}
       </div>
+
+      <section className="mx-auto mb-6 max-w-6xl rounded-xl border border-orange-200 bg-orange-50 px-6 py-4 shadow-sm">
+        <h2 className="text-2xl font-bold text-slate-900">Budget Editor</h2>
+        <p className="mt-1 text-sm font-medium text-slate-600">
+          Edit budget items, categories, amounts, due dates, notes, and payment details.
+        </p>
+      </section>
+
+      <EditorTab
+        state={state}
+        setState={setState}
+        saveBudget={saveBudget}
+        searchQuery={searchQuery}
+      />
 
       {/* Grand Totals */}
       <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
