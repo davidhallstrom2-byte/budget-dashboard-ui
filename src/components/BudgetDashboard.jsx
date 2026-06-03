@@ -771,6 +771,36 @@ const BudgetDashboard = () => {
     setTimeout(() => setSaveStatus(null), 3000);
   };
 
+  const handleBudgetSafetySnapshot = () => {
+    const now = new Date();
+    const stamp = now
+      .toISOString()
+      .slice(0, 16)
+      .replace(/[-:T]/g, '');
+    const filename = `budget-safety-snapshot-${stamp}.json`;
+    const snapshot = {
+      createdAt: now.toISOString(),
+      type: 'budget-safety-snapshot',
+      state,
+    };
+    const dataStr = JSON.stringify(snapshot, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = filename;
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
+
+    setSaveStatus({ type: 'success', message: 'Budget safety snapshot downloaded.' });
+    setTimeout(() => setSaveStatus(null), 3000);
+  };
+
   const handleImportJSON = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -812,6 +842,12 @@ const BudgetDashboard = () => {
       return 0;
     }
   };
+
+  const toolbarIconButtonClass =
+    'h-10 w-10 p-0 rounded-lg transition-colors flex items-center justify-center flex-shrink-0';
+
+  const toolbarCountButtonClass =
+    'h-10 w-16 p-0 rounded-lg transition-colors flex items-center justify-center gap-1 flex-shrink-0 text-xs font-semibold';
 
   const renderArchiveIcon = () => (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -875,23 +911,23 @@ const BudgetDashboard = () => {
 
       return (
         <>
-          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:add')} className="p-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Add To-Do Task" aria-label="Add To-Do Task">
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:add')} className={`${toolbarIconButtonClass} bg-slate-900 text-white hover:bg-slate-800`} title="Add To-Do Task" aria-label="Add To-Do Task">
             {renderPlusIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:archive')} className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1" title="To-Do Archive Drawer" aria-label="Open To-Do Archive Drawer">
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:archive')} className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`} title="To-Do Archive Drawer" aria-label="Open To-Do Archive Drawer">
             {renderArchiveIcon()}
-            <span className="text-xs">({todoArchiveCount})</span>
+            <span>({todoArchiveCount})</span>
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:snapshot')} className="p-2 bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition-colors" title="To-Do Safety Snapshot" aria-label="Create To-Do Safety Snapshot">
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="To-Do Safety Snapshot" aria-label="Create To-Do Safety Snapshot">
             {renderHistoryIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:export')} className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors" title="Export To-Do" aria-label="Export To-Do">
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:export')} className={`${toolbarIconButtonClass} bg-green-500 text-white hover:bg-green-600`} title="Export To-Do" aria-label="Export To-Do">
             {renderDownloadIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:import')} className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors" title="Import To-Do" aria-label="Import To-Do">
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import To-Do" aria-label="Import To-Do">
             {renderUploadIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:save')} className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors" title="Save To-Do Safety Snapshot" aria-label="Save To-Do Safety Snapshot">
+          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:save')} className={`${toolbarIconButtonClass} bg-blue-500 text-white hover:bg-blue-600`} title="Save To-Do Safety Snapshot" aria-label="Save To-Do Safety Snapshot">
             {renderSaveIcon()}
           </button>
         </>
@@ -903,23 +939,23 @@ const BudgetDashboard = () => {
 
       return (
         <>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:add')} className="p-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Add CSC Shift" aria-label="Add CSC Shift">
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:add')} className={`${toolbarIconButtonClass} bg-slate-900 text-white hover:bg-slate-800`} title="Add CSC Shift" aria-label="Add CSC Shift">
             {renderPlusIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:archive')} className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1" title="CSC Archive Drawer" aria-label="Open CSC Archive Drawer">
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:archive')} className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`} title="CSC Archive Drawer" aria-label="Open CSC Archive Drawer">
             {renderArchiveIcon()}
-            <span className="text-xs">({cscArchiveCount})</span>
+            <span>({cscArchiveCount})</span>
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:snapshot')} className="p-2 bg-emerald-700 text-white rounded-lg hover:bg-emerald-800 transition-colors" title="CSC Safety Snapshot" aria-label="Create CSC Safety Snapshot">
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="CSC Safety Snapshot" aria-label="Create CSC Safety Snapshot">
             {renderHistoryIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:export')} className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors" title="Export CSC Shifts" aria-label="Export CSC Shifts">
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:export')} className={`${toolbarIconButtonClass} bg-green-500 text-white hover:bg-green-600`} title="Export CSC Shifts" aria-label="Export CSC Shifts">
             {renderDownloadIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:import')} className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors" title="Import CSC Shifts" aria-label="Import CSC Shifts">
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import CSC Shifts" aria-label="Import CSC Shifts">
             {renderUploadIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:save')} className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors" title="Save CSC Safety Snapshot" aria-label="Save CSC Safety Snapshot">
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:save')} className={`${toolbarIconButtonClass} bg-blue-500 text-white hover:bg-blue-600`} title="Save CSC Safety Snapshot" aria-label="Save CSC Safety Snapshot">
             {renderSaveIcon()}
           </button>
         </>
@@ -930,7 +966,7 @@ const BudgetDashboard = () => {
       <>
         <button
           onClick={() => setIsStatementScannerOpen(true)}
-          className="p-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
+          className={`${toolbarIconButtonClass} bg-indigo-500 text-white hover:bg-indigo-600`}
           title="Scan Statement"
           aria-label="Scan Statement"
         >
@@ -939,17 +975,27 @@ const BudgetDashboard = () => {
 
         <button
           onClick={() => setIsBudgetArchiveDrawerOpen(true)}
-          className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center gap-1"
+          className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`}
           title="Budget Archives"
           aria-label="Open Budget Archives"
         >
           {renderArchiveIcon()}
-          <span className="text-xs">({state.archived?.length || 0})</span>
+          <span>({state.archived?.length || 0})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleBudgetSafetySnapshot}
+          className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`}
+          title="Budget Safety Snapshot"
+          aria-label="Create Budget Safety Snapshot"
+        >
+          {renderHistoryIcon()}
         </button>
 
         <button
           onClick={() => setShowExportDialog(true)}
-          className="p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+          className={`${toolbarIconButtonClass} bg-green-500 text-white hover:bg-green-600`}
           title="Export JSON"
           aria-label="Export JSON"
         >
@@ -957,7 +1003,7 @@ const BudgetDashboard = () => {
         </button>
 
         <label
-          className="p-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors cursor-pointer"
+          className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600 cursor-pointer`}
           title="Import JSON"
           aria-label="Import JSON"
         >
@@ -973,7 +1019,7 @@ const BudgetDashboard = () => {
         <button
           onClick={() => saveBudget()}
           disabled={isSaving}
-          className={`p-2 rounded-lg transition-colors ${
+          className={`${toolbarIconButtonClass} ${
             isSaving
               ? 'bg-gray-400 text-white cursor-not-allowed'
               : 'bg-blue-500 text-white hover:bg-blue-600'

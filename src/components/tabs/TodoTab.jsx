@@ -1055,7 +1055,7 @@ const TodoDatePickerInput = ({ value, onChange, className = "", placeholder = "m
         onClick={openPicker}
         title="Pick date"
         aria-label="Pick date"
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-blue-600 shadow-sm hover:bg-slate-50"
       >
         <CalendarPlus className="h-4 w-4" />
       </button>

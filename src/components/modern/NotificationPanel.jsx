@@ -250,13 +250,13 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
     <div className="relative" ref={panelRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors"
+        className="relative h-10 w-10 p-0 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center flex-shrink-0"
         title={notificationConfig.buttonTitle}
         aria-label={notificationConfig.buttonTitle}
       >
         <Bell className={`w-5 h-5 ${overdueCount > 0 ? 'text-red-600' : 'text-slate-600'}`} />
         {reminderCount > 0 && (
-          <span className={`absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center text-xs font-bold text-white rounded-full ${
+          <span className={`absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-xs font-bold leading-none text-white rounded-full ${
             overdueCount > 0 ? 'bg-red-600' : 'bg-yellow-600'
           }`}>
             {reminderCount}
