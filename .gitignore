@@ -18,3 +18,9 @@ screenshots/
 .env.local
 
 .env.local
+.env.local
+*.bak
+public/restore/*.bak
+* - Copy*.jsx
+*Copy*.jsx
+one-click-*.ps1

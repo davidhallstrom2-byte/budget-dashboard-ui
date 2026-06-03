@@ -310,6 +310,7 @@ const REQUIRED_FIELDS_BY_TYPE = {
 
 const MULTILINE_FIELDS = new Set(["details", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
 const FORMATTED_TEXT_FIELDS = new Set(["notes", "followUpNotes"]);
+const DATE_PICKER_FIELDS = new Set(["date", "deadline", "effectiveDate"]);
 const shouldUseFormattingToolbar = (field) => FORMATTED_TEXT_FIELDS.has(field);
 
 const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => {
@@ -1006,6 +1007,62 @@ const normalizeTodoCalendarDate = (value = "") => {
     String(parsedDate.getDate()).padStart(2, "0"),
   ].join("-");
 };
+
+const formatTodoDateForTextInput = (value = "") => {
+  const normalized = normalizeTodoCalendarDate(value);
+  if (!normalized) return String(value || "");
+
+  const [year, month, day] = normalized.split("-");
+  return `${month}/${day}/${year}`;
+};
+
+const TodoDatePickerInput = ({ value, onChange, className = "", placeholder = "mm/dd/yyyy" }) => {
+  const pickerRef = useRef(null);
+  const normalizedValue = normalizeTodoCalendarDate(value);
+
+  const openPicker = () => {
+    const picker = pickerRef.current;
+    if (!picker) return;
+
+    if (typeof picker.showPicker === "function") {
+      picker.showPicker();
+      return;
+    }
+
+    picker.focus();
+    picker.click();
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className={className}
+      />
+      <input
+        ref={pickerRef}
+        type="date"
+        value={normalizedValue}
+        onChange={(event) => onChange(formatTodoDateForTextInput(event.target.value))}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+      <button
+        type="button"
+        onClick={openPicker}
+        title="Pick date"
+        aria-label="Pick date"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+      >
+        <CalendarPlus className="h-4 w-4" />
+      </button>
+    </div>
+  );
+};
+
 
 const addDaysToTodoCalendarDate = (dateValue, days = 1) => {
   const normalized = normalizeTodoCalendarDate(dateValue);
@@ -2804,6 +2861,16 @@ const addParsedTasks = () => {
       );
     }
 
+    if (DATE_PICKER_FIELDS.has(field)) {
+      return (
+        <TodoDatePickerInput
+          value={value || ""}
+          onChange={onChange}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      );
+    }
+
     return (
       <input
         value={value || ""}
@@ -3349,10 +3416,9 @@ const addParsedTasks = () => {
                                   )}
                                 </td>
                                 <td className="align-top px-2 py-2">
-                                  <input
+                                  <TodoDatePickerInput
                                     value={task.deadline || task.date || ""}
-                                    onChange={(event) => updateTaskField(task.id, task.deadline !== undefined ? "deadline" : "date", event.target.value)}
-                                    placeholder="mm/dd/yyyy"
+                                    onChange={(value) => updateTaskField(task.id, task.deadline !== undefined ? "deadline" : "date", value)}
                                     className="w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                   />
                                 </td>
@@ -3520,11 +3586,19 @@ const addParsedTasks = () => {
                                                   />
                                                 )
                                               ) : (
-                                                <input
-                                                  value={task[field] || ""}
-                                                  onChange={(event) => updateTaskField(task.id, field, event.target.value)}
-                                                  className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                                />
+                                                DATE_PICKER_FIELDS.has(field) ? (
+                                                  <TodoDatePickerInput
+                                                    value={task[field] || ""}
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                ) : (
+                                                  <input
+                                                    value={task[field] || ""}
+                                                    onChange={(event) => updateTaskField(task.id, field, event.target.value)}
+                                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                )
                                               )}
                                             </div>
                                           </label>
@@ -3937,7 +4011,13 @@ const addParsedTasks = () => {
                 </label>
                 <label className="text-sm font-semibold">
                   Due Date
-                  <input value={selectedTask.deadline || selectedTask.date || ""} onChange={(event) => updateTaskField(selectedTask.id, selectedTask.deadline !== undefined ? "deadline" : "date", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <div className="mt-1">
+                    <TodoDatePickerInput
+                      value={selectedTask.deadline || selectedTask.date || ""}
+                      onChange={(value) => updateTaskField(selectedTask.id, selectedTask.deadline !== undefined ? "deadline" : "date", value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
                 </label>
                 <label className="text-sm font-semibold md:col-span-2">
                   Details
@@ -3964,6 +4044,12 @@ const addParsedTasks = () => {
                           ) : (
                             <AutoResizeTextarea value={selectedTask[field] || ""} onChange={(value) => updateTaskField(selectedTask.id, field, value)} minRows={1} maxRows={12} charsPerRow={90} compactOnChange className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                           )
+                        ) : DATE_PICKER_FIELDS.has(field) ? (
+                          <TodoDatePickerInput
+                            value={selectedTask[field] || ""}
+                            onChange={(value) => updateTaskField(selectedTask.id, field, value)}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          />
                         ) : (
                           <input value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                         )}
