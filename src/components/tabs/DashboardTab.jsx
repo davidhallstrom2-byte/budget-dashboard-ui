@@ -1,6 +1,6 @@
 // src/components/tabs/DashboardTab.jsx
 import React, { useState, useMemo, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, Plus, Minus, Archive } from 'lucide-react';
+import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, Plus, Minus, Archive, Check, Copy, Link, Edit3, Trash2 } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package
@@ -277,6 +277,166 @@ const DashboardTab = ({
     setStatusFilter(filterId);
     // Switch to flat view when filtering, grouped when showing all
     setViewMode(filterId === 'all' ? 'grouped' : 'flat');
+  };
+
+  const updateBudgetItem = (bucketName, itemId, updates) => {
+    if (!bucketName || !itemId || itemId === 'system-csc-shift-income') return;
+
+    setState((prev) => {
+      const bucketItems = prev?.buckets?.[bucketName] || [];
+      const updatedBucket = bucketItems.map((item) =>
+        item.id === itemId ? { ...item, ...updates } : item
+      );
+
+      return {
+        ...prev,
+        buckets: {
+          ...prev.buckets,
+          [bucketName]: updatedBucket,
+        },
+      };
+    });
+  };
+
+  const handleBudgetMarkPaid = (bucketName, item) => {
+    if (!item || item.isSystemItem) return;
+
+    updateBudgetItem(bucketName, item.id, {
+      status: 'paid',
+      actualCost: Number(item.actualCost) || Number(item.estBudget) || 0,
+      paidDate: new Date().toISOString(),
+    });
+  };
+
+  const handleBudgetCopy = (bucketName, item) => {
+    if (!item || item.isSystemItem) return;
+
+    const copiedItem = {
+      ...item,
+      id: `budget-copy-${Date.now()}`,
+      category: `${item.category || 'Budget Item'} Copy`,
+      status: item.status || 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    setState((prev) => ({
+      ...prev,
+      buckets: {
+        ...prev.buckets,
+        [bucketName]: [...(prev?.buckets?.[bucketName] || []), copiedItem],
+      },
+    }));
+  };
+
+  const handleBudgetFollowUp = (bucketName, item) => {
+    if (!item || item.isSystemItem) return;
+
+    const sourceSummary = [
+      `Source item: ${item.category || 'Budget Item'}`,
+      `Original amount: ${formatDashboardCurrency(Number(item.estBudget) || 0)}`,
+      `Actual cost: ${formatDashboardCurrency(Number(item.actualCost) || 0)}`,
+      `Due date: ${item.dueDate || 'N/A'}`,
+      `Status: ${item.status || 'pending'}`,
+      item.note ? `Prior note: ${item.note}` : null,
+    ].filter(Boolean).join('\n');
+
+    const followUpItem = {
+      ...item,
+      id: `budget-follow-up-${Date.now()}`,
+      category: `Follow up - ${item.category || 'Budget Item'}`,
+      status: 'pending',
+      actualCost: 0,
+      dueDate: '',
+      note: sourceSummary,
+      sourceItemId: item.id,
+      sourceBucket: bucketName,
+      sourceSummary,
+      createdAt: new Date().toISOString(),
+    };
+
+    setState((prev) => ({
+      ...prev,
+      buckets: {
+        ...prev.buckets,
+        [bucketName]: [...(prev?.buckets?.[bucketName] || []), followUpItem],
+      },
+    }));
+  };
+
+  const handleBudgetArchive = (bucketName, item) => {
+    if (!item || item.isSystemItem) return;
+
+    setState((prev) => {
+      const bucketItems = prev?.buckets?.[bucketName] || [];
+      const archivedItem = {
+        ...item,
+        originalBucket: bucketName,
+        archivedAt: new Date().toISOString(),
+      };
+
+      return {
+        ...prev,
+        buckets: {
+          ...prev.buckets,
+          [bucketName]: bucketItems.filter((row) => row.id !== item.id),
+        },
+        archived: [...(prev?.archived || []), archivedItem],
+      };
+    });
+  };
+
+  const handleBudgetDelete = (bucketName, item) => {
+    if (!item || item.isSystemItem) return;
+    if (!window.confirm(`Delete ${item.category || 'this budget item'}?`)) return;
+
+    setState((prev) => ({
+      ...prev,
+      buckets: {
+        ...prev.buckets,
+        [bucketName]: (prev?.buckets?.[bucketName] || []).filter((row) => row.id !== item.id),
+      },
+    }));
+  };
+
+  const handleBudgetEdit = (bucketName) => {
+    setExpandedCategories((prev) => ({ ...prev, [bucketName]: true }));
+    requestAnimationFrame(() => {
+      document.getElementById('budget-editor-section')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  };
+
+  const renderBudgetActions = (bucketName, item) => {
+    if (item?.isSystemItem) {
+      return <span className="text-xs font-semibold text-gray-500">System</span>;
+    }
+
+    const buttonClass = 'flex h-9 w-9 items-center justify-center rounded-lg text-white transition-colors';
+
+    return (
+      <div className="grid w-[124px] grid-cols-3 grid-rows-2 gap-1">
+        <button type="button" onClick={() => handleBudgetMarkPaid(bucketName, item)} className={`${buttonClass} bg-green-600 hover:bg-green-700`} title="Mark Paid" aria-label="Mark Paid">
+          <Check className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => handleBudgetCopy(bucketName, item)} className={`${buttonClass} bg-blue-600 hover:bg-blue-700`} title="Copy Item" aria-label="Copy Item">
+          <Copy className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => handleBudgetFollowUp(bucketName, item)} className={`${buttonClass} bg-indigo-600 hover:bg-indigo-700`} title="Create Follow-Up" aria-label="Create Follow-Up">
+          <Link className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => handleBudgetArchive(bucketName, item)} className={`${buttonClass} bg-purple-600 hover:bg-purple-700`} title="Archive Item" aria-label="Archive Item">
+          <Archive className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => handleBudgetDelete(bucketName, item)} className={`${buttonClass} bg-red-600 hover:bg-red-700`} title="Delete Item" aria-label="Delete Item">
+          <Trash2 className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => handleBudgetEdit(bucketName)} className={`${buttonClass} bg-slate-700 hover:bg-slate-800`} title="Edit in Budget Editor" aria-label="Edit in Budget Editor">
+          <Edit3 className="h-4 w-4" />
+        </button>
+      </div>
+    );
   };
 
   const getFilteredItemsWithBucket = () => {
@@ -891,6 +1051,7 @@ const DashboardTab = ({
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-36">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white">
@@ -926,6 +1087,9 @@ const DashboardTab = ({
                             placeholder="Add note..."
                             className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                           />
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          {renderBudgetActions(item.bucketName, item)}
                         </td>
                       </tr>
                     );
@@ -1004,6 +1168,7 @@ const DashboardTab = ({
                             <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Available</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-36">Actions</th>
                           </>
                         ) : (
                           <>
@@ -1013,6 +1178,7 @@ const DashboardTab = ({
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
+                            <th className="px-3 py-2 text-center text-xs font-medium text-gray-700 w-36">Actions</th>
                           </>
                         )}
                       </tr>
@@ -1029,6 +1195,7 @@ const DashboardTab = ({
                               <td className="px-3 py-2 text-sm text-right">${(item.availableCredit || 0).toFixed(2)}</td>
                               <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
                               <td className="px-3 py-2">{getStatusBadge(item)}</td>
+                              <td className="px-3 py-2 align-middle">{renderBudgetActions(bucketName, item)}</td>
                             </>
                           ) : (
                             <>
@@ -1058,6 +1225,7 @@ const DashboardTab = ({
                               />
                             )}
                               </td>
+                              <td className="px-3 py-2 align-middle">{renderBudgetActions(bucketName, item)}</td>
                             </>
                           )}
                         </tr>
@@ -1072,13 +1240,13 @@ const DashboardTab = ({
                             <td className="px-3 py-2 text-sm text-right font-bold">${totalBalance.toFixed(2)}</td>
                             <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
                             <td className="px-3 py-2 text-sm text-right font-bold">${totalAvailable.toFixed(2)}</td>
-                            <td colSpan="2"></td>
+                            <td colSpan="3"></td>
                           </>
                         ) : (
                           <>
                             <td className="px-3 py-2 text-sm text-right font-bold">${totalBudgeted.toFixed(2)}</td>
                             <td className="px-3 py-2 text-sm text-right font-bold">${totalActual.toFixed(2)}</td>
-                            <td colSpan="3"></td>
+                            <td colSpan="4"></td>
                           </>
                         )}
                       </tr>
@@ -1091,7 +1259,7 @@ const DashboardTab = ({
         })}
       </div>
 
-      <section className="mx-auto mb-6 max-w-6xl rounded-xl border border-orange-200 bg-orange-50 px-6 py-4 shadow-sm">
+      <section id="budget-editor-section" className="mx-auto mb-6 max-w-6xl rounded-xl border border-orange-200 bg-orange-50 px-6 py-4 shadow-sm">
         <h2 className="text-2xl font-bold text-slate-900">Budget Editor</h2>
         <p className="mt-1 text-sm font-medium text-slate-600">
           Edit budget items, categories, amounts, due dates, notes, and payment details.
