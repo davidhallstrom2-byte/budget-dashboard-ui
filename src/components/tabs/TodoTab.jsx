@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   AlertCircle,
@@ -33,116 +33,23 @@ import {
 import PageContainer from "../common/PageContainer";
 import PremiumTodoListView from "../todo/PremiumTodoListView";
 import ArchivedDrawer from "../ui/ArchivedDrawer";
+import ContactManager from "../contacts/ContactManager";
 import { createGoogleCalendarEvent } from "../../utils/googleCalendarApi";
+import {
+  CONTACT_APPLY_FIELDS,
+  createEmptyContact,
+  getInitialContactsForState,
+  normalizeContact,
+  normalizeContacts,
+  parseContactText,
+} from "../../utils/contactsStore";
 
 const STORAGE_KEY = "todoTab.tasks.v1";
 const STORAGE_BACKUP_KEY = "todoTab.tasks.backup.v1";
 const ARCHIVE_STORAGE_KEY = "todoTab.tasks.archived.v1";
 const SAFETY_SNAPSHOT_STORAGE_KEY = "todoTab.tasks.safetySnapshots.v1";
-const MAX_SAFETY_SNAPSHOTS = 30;
-
-const CONTACTS_STORAGE_KEY = "todoTab.contacts.v1";
 const TODO_GOOGLE_CALENDAR_ADDED_STORAGE_KEY = "todoTab.googleCalendar.addedIds.v1";
-
-const DEFAULT_CONTACTS = [
-  {
-    id: "contact-dpss",
-    name: "DPSS",
-    category: "DPSS / Benefits",
-    phone: "(866) 613-3777",
-    website: "https://benefitscal.com",
-    organization: "DPSS",
-    notes: "Benefits, GR, CalFresh, Medi-Cal case support.",
-  },
-  {
-    id: "contact-dmv",
-    name: "California DMV",
-    category: "DMV / Vehicle",
-    phone: "1-800-777-0133",
-    website: "https://www.dmv.ca.gov/",
-    organization: "California DMV",
-    notes: "Driver license, registration, address changes, vehicle issues.",
-  },
-  {
-    id: "contact-usps",
-    name: "USPS",
-    category: "Moving",
-    phone: "1-800-275-8777",
-    website: "https://www.usps.com/manage/forward.htm",
-    organization: "USPS",
-    notes: "Mail forwarding and change of address.",
-  },
-  {
-    id: "contact-spectrum",
-    name: "Spectrum",
-    category: "Phone / Lifeline",
-    phone: "1-833-267-6094",
-    website: "https://www.spectrum.net/",
-    organization: "Spectrum",
-    notes: "Internet, cable, service change, billing, downgrade, transfer.",
-  },
-  {
-    id: "contact-health-net",
-    name: "Health Net",
-    category: "Medical",
-    phone: "1-800-675-6110",
-    website: "https://www.healthnet.com/",
-    organization: "Health Net",
-    notes: "Medi-Cal plan support and member services.",
-  },
-  {
-    id: "contact-dr-taylor",
-    name: "Dr. Taylor",
-    category: "Medical",
-    phone: "(626) 459-5420",
-    address: "11436 Garvey Ave, Ste B, El Monte, CA 91732",
-    organization: "Mayflower Medical Group",
-    person: "Dr. Taylor",
-    notes: "Primary care.",
-  },
-  {
-    id: "contact-dr-ananyan",
-    name: "Dr. Ananyan",
-    category: "Medical",
-    phone: "323-264-6157",
-    address: "3616 E 1st St, Los Angeles, CA 90063",
-    organization: "Podiatry",
-    person: "Dr. Ananyan",
-    notes: "Podiatry.",
-  },
-  {
-    id: "contact-custodio-dubey",
-    name: "Custodio & Dubey",
-    category: "Legal",
-    phone: "213-593-9095",
-    organization: "Custodio & Dubey",
-    person: "Keshav Nair / Maria Saavedra",
-    notes: "Attorney contact.",
-  },
-  {
-    id: "contact-211-la",
-    name: "211 LA",
-    category: "Moving",
-    phone: "211",
-    website: "https://211la.org/",
-    organization: "211 LA",
-    notes: "Moving assistance and local support resources.",
-  },
-];
-
-const EMPTY_CONTACT_FORM = {
-  id: "",
-  name: "",
-  category: "General",
-  phone: "",
-  directPhone: "",
-  website: "",
-  address: "",
-  organization: "",
-  company: "",
-  person: "",
-  notes: "",
-};
+const MAX_SAFETY_SNAPSHOTS = 30;
 
 const TASK_TYPES = [
   "General",
@@ -177,7 +84,14 @@ const DEFAULT_FORM = {
   typeOverride: "",
   date: "",
   phone: "",
+  fax: "",
   address: "",
+  phone2: "",
+  fax2: "",
+  address2: "",
+  phone3: "",
+  fax3: "",
+  address3: "",
   deadline: "",
   blockedBy: "",
   person: "",
@@ -189,6 +103,11 @@ const DEFAULT_FORM = {
   caseNumber: "",
   amount: "",
   documents: "",
+  scannedDocumentName: "",
+  scannedDocumentType: "",
+  scannedDocumentDataUrl: "",
+  scannedDocumentText: "",
+  scannedAt: "",
   questions: "",
   outcome: "",
   fileName: "",
@@ -204,9 +123,24 @@ const DEFAULT_FORM = {
   completed: false,
 };
 
+const HIDDEN_DOCUMENT_METADATA_FIELDS = new Set([
+  "scannedDocumentName",
+  "scannedDocumentType",
+  "scannedDocumentDataUrl",
+  "scannedDocumentText",
+  "scannedAt",
+]);
+
 const FIELD_LABELS = {
   phone: ["phone", "tel", "telephone"],
+  fax: ["fax", "facsimile"],
   address: ["address", "location"],
+  phone2: ["phone 2", "office 2 phone"],
+  fax2: ["fax 2", "office 2 fax"],
+  address2: ["address 2", "office 2 address"],
+  phone3: ["phone 3", "office 3 phone"],
+  fax3: ["fax 3", "office 3 fax"],
+  address3: ["address 3", "office 3 address"],
   deadline: ["deadline", "due", "due date", "reg due", "registration due", "suspension"],
   date: ["date", "appointment date", "visit date", "order date"],
   caseNumber: ["case", "case #", "case number", "citation", "citation #", "citation number", "id"],
@@ -238,8 +172,15 @@ const FIELD_LABEL_DISPLAY = {
   type: "Type",
   typeOverride: "Category",
   date: "Date",
-  phone: "Phone",
-  address: "Address",
+  phone: "Office 1 Phone",
+  fax: "Office 1 Fax",
+  address: "Office 1 Address",
+  phone2: "Office 2 Phone",
+  fax2: "Office 2 Fax",
+  address2: "Office 2 Address",
+  phone3: "Office 3 Phone",
+  fax3: "Office 3 Fax",
+  address3: "Office 3 Address",
   deadline: "Deadline",
   blockedBy: "Blocked by",
   person: "Person",
@@ -285,14 +226,14 @@ const getFieldLabel = (task, field) => {
 
 const TYPE_FIELDS = {
   General: ["date", "deadline", "phone", "website", "documents", "questions", "outcome", "notes"],
-  Medical: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
+  Medical: ["person", "organization", "phone", "fax", "address", "phone2", "fax2", "address2", "phone3", "fax3", "address3", "date", "deadline", "documents", "questions", "outcome", "notes"],
   "DMV / Vehicle": ["plate", "vin", "vehicle", "date", "deadline", "amount", "caseNumber", "phone", "website", "systemLink", "documents", "requiredAction", "impact", "notes"],
   Insurance: ["company", "policyNumber", "policyStatus", "effectiveDate", "phone", "website", "systemLink", "amount", "deadline", "requiredAction", "impact", "documents", "notes"],
   "DPSS / Benefits": ["person", "organization", "caseNumber", "phone", "website", "systemLink", "deadline", "amount", "documents", "questions", "outcome", "notes"],
   Legal: ["person", "organization", "caseNumber", "phone", "address", "date", "deadline", "amount", "website", "systemLink", "documents", "questions", "outcome", "notes"],
   Moving: ["date", "deadline", "address", "phone", "amount", "documents", "questions", "outcome", "notes"],
   Work: ["organization", "person", "phone", "website", "date", "deadline", "documents", "questions", "outcome", "notes"],
-  Dental: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
+  Dental: ["person", "organization", "phone", "fax", "address", "phone2", "fax2", "address2", "phone3", "fax3", "address3", "date", "deadline", "documents", "questions", "outcome", "notes"],
   "Phone / Lifeline": ["person", "company", "phone", "website", "systemLink", "caseNumber", "deadline", "documents", "questions", "outcome", "notes"],
 };
 
@@ -322,6 +263,153 @@ const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => 
     .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / charsPerRow)), 0);
 
   return Math.max(minRows, Math.min(maxRows, estimatedRows));
+};
+
+const getTaskDocumentName = (task = {}) =>
+  String(task.scannedDocumentName || task.documents || "").trim();
+
+const hasTaskScannedDocument = (task = {}) =>
+  Boolean(task.scannedDocumentDataUrl && getTaskDocumentName(task));
+
+const dataUrlToBlob = (dataUrl = "") => {
+  const [header = "", payload = ""] = String(dataUrl || "").split(",");
+  const mimeMatch = header.match(/^data:([^;]+);base64$/i);
+  if (!mimeMatch || !payload) return null;
+
+  try {
+    const binary = window.atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeMatch[1] });
+  } catch {
+    return null;
+  }
+};
+
+const openTaskScannedDocument = (task = {}) => {
+  if (!task?.scannedDocumentDataUrl) return;
+
+  const documentName = getTaskDocumentName(task) || "Scanned document";
+  const blob = dataUrlToBlob(task.scannedDocumentDataUrl);
+  const directUrl = blob ? URL.createObjectURL(blob) : task.scannedDocumentDataUrl;
+  const win = window.open(directUrl, "_blank", "noopener,noreferrer");
+
+  if (blob && win) {
+    window.setTimeout(() => URL.revokeObjectURL(directUrl), 60000);
+  }
+
+  if (!win) {
+    const link = document.createElement("a");
+    link.href = directUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.download = documentName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    if (blob) {
+      window.setTimeout(() => URL.revokeObjectURL(directUrl), 60000);
+    }
+  }
+};
+
+function loadDocumentScanScriptOnce(src, globalName) {
+  return new Promise((resolve, reject) => {
+    if (globalName && window[globalName]) {
+      resolve(window[globalName]);
+      return;
+    }
+
+    const existing = document.querySelector(`script[data-task-document-scan-src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(globalName ? window[globalName] : true), { once: true });
+      existing.addEventListener("error", () => reject(new Error(`Could not load ${src}`)), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.taskDocumentScanSrc = src;
+    script.onload = () => resolve(globalName ? window[globalName] : true);
+    script.onerror = () => reject(new Error(`Could not load ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+function readTaskDocumentFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readTaskDocumentFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function getTaskDocumentTesseract() {
+  return loadDocumentScanScriptOnce("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js", "Tesseract");
+}
+
+async function getTaskDocumentPdfJs() {
+  const pdfjsLib = await loadDocumentScanScriptOnce("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js", "pdfjsLib");
+  if (pdfjsLib?.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  }
+  return pdfjsLib;
+}
+
+async function ocrTaskDocumentImageDataUrl(dataUrl) {
+  const Tesseract = await getTaskDocumentTesseract();
+  const result = await Tesseract.recognize(dataUrl, "eng");
+  return result?.data?.text || "";
+}
+
+async function ocrTaskDocumentPdfFile(file) {
+  const [pdfjsLib, arrayBuffer] = await Promise.all([getTaskDocumentPdfJs(), readTaskDocumentFileAsArrayBuffer(file)]);
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pageTexts = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+
+    await page.render({ canvasContext: context, viewport }).promise;
+    const dataUrl = canvas.toDataURL("image/png");
+    const text = await ocrTaskDocumentImageDataUrl(dataUrl);
+    pageTexts.push(text);
+  }
+
+  return pageTexts.join("\n\n");
+};
+
+const buildTaskDocumentDetails = (parsedContact = {}) => {
+  const details = [];
+
+  if (parsedContact.treatmentRequested) {
+    details.push(`Treatment Requested: ${parsedContact.treatmentRequested}`);
+  }
+
+  if (parsedContact.comments) {
+    details.push(`Comments: ${parsedContact.comments}`);
+  }
+
+  return details.join("\n");
 };
 
 
@@ -792,45 +880,52 @@ const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeho
   );
 };
 
-const normalizeContact = (contact = {}) => ({
-  ...EMPTY_CONTACT_FORM,
-  ...contact,
-  id: contact.id || createId(),
-  name: String(contact.name || contact.organization || contact.company || contact.person || "Untitled contact").trim(),
-  category: TASK_TYPES.includes(contact.category) ? contact.category : "General",
-});
+const buildContactTaskDetails = (contact = {}) => {
+  const details = [];
 
-const readStoredContacts = () => {
-  if (typeof localStorage === "undefined") return DEFAULT_CONTACTS.map(normalizeContact);
-
-  const parsed = safeJsonParse(localStorage.getItem(CONTACTS_STORAGE_KEY), null);
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    const defaults = DEFAULT_CONTACTS.map(normalizeContact);
-    localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(defaults));
-    return defaults;
+  if (contact.treatmentRequested) {
+    details.push(`Treatment Requested: ${contact.treatmentRequested}`);
   }
 
-  return parsed.map(normalizeContact);
+  if (contact.comments) {
+    details.push(`Comments: ${contact.comments}`);
+  }
+
+  return details.join("\n");
 };
 
-const writeStoredContacts = (contacts = []) => {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts.map(normalizeContact)));
+const getContactOfficeLocationsForTask = (contact = {}) => {
+  const locations = Array.isArray(contact.officeLocations) ? contact.officeLocations : [];
+  const normalized = locations
+    .map((location, index) => ({
+      label: location?.label || `Office ${index + 1}`,
+      address: String(location?.address || "").trim(),
+      phone: String(location?.phone || "").trim(),
+      fax: String(location?.fax || "").trim(),
+    }))
+    .filter((location) => location.address || location.phone || location.fax);
+
+  if (normalized.length) return normalized.slice(0, 3);
+
+  const fallback = [
+    { label: "Office 1", address: contact.address || "", phone: contact.phone || "", fax: contact.fax || "" },
+    { label: "Office 2", address: contact.address2 || "", phone: contact.phone2 || "", fax: contact.fax2 || "" },
+    { label: "Office 3", address: contact.address3 || "", phone: contact.phone3 || "", fax: contact.fax3 || "" },
+  ];
+
+  return fallback.filter((location) => location.address || location.phone || location.fax);
 };
 
-const createEmptyContact = () => ({
-  ...EMPTY_CONTACT_FORM,
-  id: createId(),
-});
+const appendContactTaskDetails = (currentDetails = "", nextDetails = "") => {
+  const current = String(currentDetails || "").trim();
+  const addition = String(nextDetails || "").trim();
 
-const CONTACT_APPLY_FIELDS = [
-  "phone",
-  "address",
-  "website",
-  "organization",
-  "company",
-  "person",
-];
+  if (!addition) return currentDetails || "";
+  if (!current) return addition;
+  if (current.includes(addition)) return current;
+
+  return `${current}\n${addition}`;
+};
 
 const applyContactToTaskData = (task = {}, contact = {}, replaceExisting = false) => {
   const next = { ...task };
@@ -848,6 +943,41 @@ const applyContactToTaskData = (task = {}, contact = {}, replaceExisting = false
 
   if (contact.directPhone && (replaceExisting || !String(next.phone || "").trim())) {
     next.phone = contact.directPhone;
+  }
+
+  const officeLocations = getContactOfficeLocationsForTask(contact);
+  officeLocations.slice(0, 3).forEach((office, index) => {
+    const suffix = index === 0 ? "" : String(index + 1);
+    const addressField = suffix ? `address${suffix}` : "address";
+    const phoneField = suffix ? `phone${suffix}` : "phone";
+    const faxField = suffix ? `fax${suffix}` : "fax";
+
+    if (office.address && (replaceExisting || !String(next[addressField] || "").trim())) {
+      next[addressField] = office.address;
+    }
+
+    if (office.phone && (replaceExisting || !String(next[phoneField] || "").trim())) {
+      next[phoneField] = office.phone;
+    }
+
+    if (office.fax && (replaceExisting || !String(next[faxField] || "").trim())) {
+      next[faxField] = office.fax;
+    }
+  });
+
+  if (contact.scannedDocumentName && (replaceExisting || !String(next.documents || "").trim())) {
+    next.documents = contact.scannedDocumentName;
+  }
+
+  ["scannedDocumentName", "scannedDocumentType", "scannedDocumentDataUrl", "scannedDocumentText", "scannedAt"].forEach((field) => {
+    if (contact[field] && (replaceExisting || !String(next[field] || "").trim())) {
+      next[field] = contact[field];
+    }
+  });
+
+  const contactTaskDetails = buildContactTaskDetails(contact);
+  if (contactTaskDetails) {
+    next.details = appendContactTaskDetails(next.details, contactTaskDetails);
   }
 
   return normalizeDerivedFields(next);
@@ -1667,10 +1797,13 @@ const sortTasks = (tasks) => {
   });
 };
 
-export default function TodoTab() {
+export default function TodoTab({ contacts: sharedContacts, onContactsChange } = {}) {
   const hasHydrated = useRef(false);
   const [tasks, setTasks] = useState(readStoredTasks);
   const [form, setForm] = useState(createEmptyTask);
+  const [taskDocumentScanStatus, setTaskDocumentScanStatus] = useState("");
+  const [taskDocumentScanError, setTaskDocumentScanError] = useState("");
+  const [taskDocumentScanText, setTaskDocumentScanText] = useState("");
   const [importText, setImportText] = useState("");
   const [parsedTasks, setParsedTasks] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -1689,13 +1822,28 @@ export default function TodoTab() {
   const [bulkMoveType, setBulkMoveType] = useState(TASK_TYPES[0] || "General");
   const [followUpDrafts, setFollowUpDrafts] = useState({});
   const [editingFollowUpEntries, setEditingFollowUpEntries] = useState({});
-  const [contacts, setContacts] = useState(readStoredContacts);
+  const [localContacts, setLocalContacts] = useState(() => getInitialContactsForState(sharedContacts));
   const [isContactsOpen, setIsContactsOpen] = useState(false);
   const [contactSearch, setContactSearch] = useState("");
   const [contactForm, setContactForm] = useState(createEmptyContact);
   const [editingContactId, setEditingContactId] = useState(null);
   const [replaceExistingContactFields, setReplaceExistingContactFields] = useState(false);
   const [contactApplyTarget, setContactApplyTarget] = useState("form");
+  const contacts = useMemo(() => getInitialContactsForState(sharedContacts?.length ? sharedContacts : localContacts), [sharedContacts, localContacts]);
+  const setContacts = useCallback((updater) => {
+    setLocalContacts((current) => {
+      const baseContacts = getInitialContactsForState(sharedContacts?.length ? sharedContacts : current);
+      const nextContacts = normalizeContacts(
+        typeof updater === "function" ? updater(baseContacts) : updater
+      );
+
+      if (typeof onContactsChange === "function") {
+        onContactsChange(nextContacts);
+      }
+
+      return nextContacts;
+    });
+  }, [onContactsChange, sharedContacts]);
   const [completionCelebration, setCompletionCelebration] = useState(null);
   const [calendarAddingTaskId, setCalendarAddingTaskId] = useState("");
   const [calendarAddedIds, setCalendarAddedIds] = useState(readTodoGoogleCalendarAddedIds);
@@ -1862,10 +2010,6 @@ export default function TodoTab() {
     };
   }, []);
 
-  useEffect(() => {
-    writeStoredContacts(contacts);
-  }, [contacts]);
-
   const taskById = useMemo(() => {
     return tasks.reduce((map, task) => {
       map[task.id] = task;
@@ -1888,12 +2032,65 @@ export default function TodoTab() {
     const valuedFields = Object.keys(DEFAULT_FORM).filter((field) => form[field] && field !== "completed");
 
     return Array.from(new Set([...typeFields, ...valuedFields])).filter(
-      (field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field)
+      (field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field) && !HIDDEN_DOCUMENT_METADATA_FIELDS.has(field)
     );
   }, [form]);
 
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const applyScannedDocumentToForm = (file, dataUrl, scannedText = "") => {
+    const parsedContact = parseContactText(scannedText);
+    const documentName = file?.name || "Scanned document";
+    const documentType = file?.type || (/.pdf$/i.test(documentName) ? "application/pdf" : "");
+    const taskDetails = buildTaskDocumentDetails(parsedContact);
+
+    setForm((current) =>
+      normalizeDerivedFields({
+        ...current,
+        documents: documentName,
+        scannedDocumentName: documentName,
+        scannedDocumentType: documentType,
+        scannedDocumentDataUrl: dataUrl,
+        scannedDocumentText: scannedText,
+        scannedAt: new Date().toISOString(),
+        details: appendContactTaskDetails(current.details, taskDetails),
+      })
+    );
+  };
+
+  const scanTaskDocumentFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setTaskDocumentScanError("");
+    setTaskDocumentScanStatus(`Scanning ${file.name}...`);
+    setTaskDocumentScanText("");
+
+    try {
+      const dataUrl = await readTaskDocumentFileAsDataUrl(file);
+      let scannedText = "";
+
+      if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+        scannedText = await ocrTaskDocumentPdfFile(file);
+      } else if (file.type.startsWith("image/")) {
+        scannedText = await ocrTaskDocumentImageDataUrl(dataUrl);
+      } else if (/\.txt$/i.test(file.name)) {
+        scannedText = await file.text();
+      } else {
+        throw new Error("Use an image, PDF, or text file.");
+      }
+
+      setTaskDocumentScanText(scannedText);
+      applyScannedDocumentToForm(file, dataUrl, scannedText);
+      setTaskDocumentScanStatus(`Scan complete. Document attached: ${file.name}`);
+    } catch (error) {
+      setTaskDocumentScanError(error?.message || "Could not scan document.");
+      setTaskDocumentScanStatus("");
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const applyAutoLinks = (incomingTasks, existingTasks) => {
@@ -3601,6 +3798,16 @@ const addParsedTasks = () => {
                                                 )
                                               )}
                                             </div>
+                                            {field === "documents" && hasTaskScannedDocument(task) && (
+                                              <button
+                                                type="button"
+                                                onClick={() => openTaskScannedDocument(task)}
+                                                className="mt-2 inline-flex w-fit items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-bold normal-case tracking-normal text-blue-800 hover:bg-blue-100"
+                                              >
+                                                <FileText className="h-3 w-3" />
+                                                Open document
+                                              </button>
+                                            )}
                                           </label>
                                         ))}
                                       </div>
@@ -3800,6 +4007,56 @@ const addParsedTasks = () => {
               <div className="grid gap-3 md:grid-cols-2">
                 {renderContactPicker("form")}
 
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 md:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-black text-blue-950">Scan Document for Task</div>
+                      <div className="text-xs font-semibold text-blue-800">
+                        Upload a referral, lab order, blood draw order, image, PDF, or text file. The document attaches to this task without creating a duplicate contact.
+                      </div>
+                    </div>
+                    {hasTaskScannedDocument(form) && (
+                      <button
+                        type="button"
+                        onClick={() => openTaskScannedDocument(form)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-800 hover:bg-blue-100"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Open document
+                      </button>
+                    )}
+                  </div>
+
+                  <label className="mt-3 block text-xs font-black text-blue-950">
+                    Scan image/PDF/text
+                    <input
+                      type="file"
+                      accept="image/*,.pdf,.txt"
+                      onChange={scanTaskDocumentFile}
+                      className="mt-1 block w-full text-xs text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-700 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white hover:file:bg-blue-800"
+                    />
+                  </label>
+
+                  {taskDocumentScanStatus && (
+                    <div className="mt-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-900">
+                      {taskDocumentScanStatus}
+                    </div>
+                  )}
+
+                  {taskDocumentScanError && (
+                    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+                      {taskDocumentScanError}
+                    </div>
+                  )}
+
+                  {taskDocumentScanText && (
+                    <details className="mt-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs text-slate-700">
+                      <summary className="cursor-pointer font-bold text-blue-900">View extracted text</summary>
+                      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-sans">{taskDocumentScanText}</pre>
+                    </details>
+                  )}
+                </div>
+
                 <label className="text-sm font-medium md:col-span-2">
                   Task name
                   <input value={form.taskName} onChange={(event) => updateForm("taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -3834,6 +4091,16 @@ const addParsedTasks = () => {
                   <label key={field} className="text-sm font-medium">
                     {getFieldLabel(form, field)}
                     <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
+                    {field === "documents" && hasTaskScannedDocument(form) && (
+                      <button
+                        type="button"
+                        onClick={() => openTaskScannedDocument(form)}
+                        className="mt-2 inline-flex w-fit items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Open document: {getTaskDocumentName(form)}
+                      </button>
+                    )}
                   </label>
                 ))}
               </div>
@@ -3845,12 +4112,22 @@ const addParsedTasks = () => {
               {showAdvanced && (
                 <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3 md:grid-cols-2">
                   {Object.keys(DEFAULT_FORM)
-                    .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
+                    .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field) && !HIDDEN_DOCUMENT_METADATA_FIELDS.has(field))
                     .filter((field) => !visibleFormFields.includes(field))
                     .map((field) => (
                       <label key={field} className="text-sm font-medium">
                         {getFieldLabel(form, field)}
                         <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
+                        {field === "documents" && hasTaskScannedDocument(form) && (
+                          <button
+                            type="button"
+                            onClick={() => openTaskScannedDocument(form)}
+                            className="mt-2 inline-flex w-fit items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            Open document: {getTaskDocumentName(form)}
+                          </button>
+                        )}
                       </label>
                     ))}
                 </div>
@@ -4033,7 +4310,7 @@ const addParsedTasks = () => {
                 </label>
 
                 {Array.from(new Set([...(TYPE_FIELDS[selectedTask.type] || []), ...Object.keys(DEFAULT_FORM).filter((field) => selectedTask[field])]))
-                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
+                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field) && !HIDDEN_DOCUMENT_METADATA_FIELDS.has(field))
                   .map((field) => (
                     <label key={field} className="text-sm font-semibold">
                       {getFieldLabel(selectedTask, field)}
@@ -4054,6 +4331,16 @@ const addParsedTasks = () => {
                           <input value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                         )}
                       </div>
+                      {field === "documents" && hasTaskScannedDocument(selectedTask) && (
+                        <button
+                          type="button"
+                          onClick={() => openTaskScannedDocument(selectedTask)}
+                          className="mt-2 inline-flex w-fit items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          Open document: {getTaskDocumentName(selectedTask)}
+                        </button>
+                      )}
                     </label>
                   ))}
               </div>
@@ -4082,230 +4369,27 @@ const addParsedTasks = () => {
         </div>
       )}
 
-      {isContactsOpen && (
-        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/50 px-4 py-4 backdrop-blur-sm sm:px-6">
-          <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Manage Contacts</h3>
-                <p className="text-sm font-semibold text-slate-600">Add, edit, delete, search, and use saved contacts.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsContactsOpen(false)}
-                title="Close contacts"
-                className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[340px_1fr]">
-              <div className="overflow-y-auto border-r border-slate-200 px-4 py-5">
-                <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-3 text-sm font-semibold text-blue-900">
-                  {contactApplyTarget === "selectedTask" && selectedTask
-                    ? `Use applies to: ${selectedTask.taskName || "selected task"}`
-                    : "Use applies to the Add Task form."}
-                </div>
-
-                <div className="grid gap-3">
-                  <label className="text-sm font-bold text-slate-800">
-                    Name
-                    <input
-                      value={contactForm.name}
-                      onChange={(event) => setContactForm((current) => ({ ...current, name: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Category
-                    <select
-                      value={contactForm.category}
-                      onChange={(event) => setContactForm((current) => ({ ...current, category: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    >
-                      {TASK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-                    </select>
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Phone
-                    <input
-                      value={contactForm.phone}
-                      onChange={(event) => setContactForm((current) => ({ ...current, phone: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Direct Phone
-                    <input
-                      value={contactForm.directPhone}
-                      onChange={(event) => setContactForm((current) => ({ ...current, directPhone: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Website
-                    <input
-                      value={contactForm.website}
-                      onChange={(event) => setContactForm((current) => ({ ...current, website: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Address
-                    <AutoResizeTextarea
-                      value={contactForm.address}
-                      onChange={(value) => setContactForm((current) => ({ ...current, address: value }))}
-                      minRows={1}
-                      maxRows={6}
-                      compactOnChange
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Organization
-                    <input
-                      value={contactForm.organization}
-                      onChange={(event) => setContactForm((current) => ({ ...current, organization: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Company
-                    <input
-                      value={contactForm.company}
-                      onChange={(event) => setContactForm((current) => ({ ...current, company: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Person
-                    <input
-                      value={contactForm.person}
-                      onChange={(event) => setContactForm((current) => ({ ...current, person: event.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-
-                  <label className="text-sm font-bold text-slate-800">
-                    Notes
-                    <AutoResizeTextarea
-                      value={contactForm.notes}
-                      onChange={(value) => setContactForm((current) => ({ ...current, notes: value }))}
-                      minRows={1}
-                      maxRows={8}
-                      compactOnChange
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={saveContact}
-                    title={editingContactId ? "Save contact changes" : "Add saved contact"}
-                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
-                  >
-                    {editingContactId ? "Save Contact" : "Add Contact"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={resetContactForm}
-                    title="Clear contact form"
-                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex min-h-0 flex-col overflow-hidden px-4 py-5">
-                <div className="mb-4 flex flex-wrap items-center gap-3">
-                  <input
-                    value={contactSearch}
-                    onChange={(event) => setContactSearch(event.target.value)}
-                    placeholder="Search contacts..."
-                    className="min-w-[240px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                  <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={replaceExistingContactFields}
-                      onChange={(event) => setReplaceExistingContactFields(event.target.checked)}
-                    />
-                    Replace filled fields when using
-                  </label>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-slate-200">
-                  {filteredContacts.length ? (
-                    <div className="divide-y divide-slate-200">
-                      {filteredContacts.map((contact) => (
-                        <div key={contact.id} className="bg-white p-4 hover:bg-slate-50">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-base font-black text-slate-900">{contact.name}</div>
-                              <div className="mt-1 text-xs font-black uppercase tracking-wide text-slate-500">{contact.category}</div>
-                              <div className="mt-2 grid gap-1 text-sm text-slate-700 md:grid-cols-2">
-                                {contact.phone && <div><span className="font-bold">Phone:</span> {contact.phone}</div>}
-                                {contact.directPhone && <div><span className="font-bold">Direct:</span> {contact.directPhone}</div>}
-                                {contact.website && <div className="truncate"><span className="font-bold">Website:</span> {contact.website}</div>}
-                                {contact.organization && <div><span className="font-bold">Organization:</span> {contact.organization}</div>}
-                                {contact.company && <div><span className="font-bold">Company:</span> {contact.company}</div>}
-                                {contact.person && <div><span className="font-bold">Person:</span> {contact.person}</div>}
-                                {contact.address && <div className="whitespace-pre-wrap md:col-span-2"><span className="font-bold">Address:</span> {contact.address}</div>}
-                                {contact.notes && <div className="whitespace-pre-wrap md:col-span-2"><span className="font-bold">Notes:</span> {contact.notes}</div>}
-                              </div>
-                            </div>
-
-                            <div className="flex shrink-0 flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => applyContactToTarget(contact)}
-                                title="Use this contact"
-                                className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
-                              >
-                                Use
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => editContact(contact)}
-                                title="Edit this contact"
-                                className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-900"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteContact(contact.id)}
-                                title="Delete this contact"
-                                className="rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white hover:bg-red-700"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-6 text-sm font-semibold text-slate-600">No contacts found.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ContactManager
+        isOpen={isContactsOpen}
+        onClose={() => setIsContactsOpen(false)}
+        contactApplyTarget={contactApplyTarget}
+        selectedTask={selectedTask}
+        contactForm={contactForm}
+        setContactForm={setContactForm}
+        editingContactId={editingContactId}
+        saveContact={saveContact}
+        resetContactForm={resetContactForm}
+        contactSearch={contactSearch}
+        setContactSearch={setContactSearch}
+        replaceExistingContactFields={replaceExistingContactFields}
+        setReplaceExistingContactFields={setReplaceExistingContactFields}
+        filteredContacts={filteredContacts}
+        applyContactToTarget={applyContactToTarget}
+        editContact={editContact}
+        deleteContact={deleteContact}
+        taskTypes={TASK_TYPES}
+        AutoResizeTextarea={AutoResizeTextarea}
+      />
 
       <ArchivedDrawer
         isOpen={isArchiveDrawerOpen}
