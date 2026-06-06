@@ -713,92 +713,6 @@ const DashboardTab = ({
         )}
       </section>
 
-      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
-        <button
-          type="button"
-          onClick={() => setShowPaymentAlerts(prev => !prev)}
-          className="flex w-full items-center justify-between gap-4 bg-slate-950 px-4 py-3 text-left text-white hover:bg-slate-900"
-          title={showPaymentAlerts ? 'Collapse overdue and due soon items' : 'Expand overdue and due soon items'}
-        >
-          <div className="flex items-center gap-2">
-            {showPaymentAlerts ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-            <AlertCircle className="h-5 w-5 text-red-300" />
-            <h3 className="text-lg font-bold">Payment Alerts</h3>
-            <span className="rounded-full bg-red-600 px-2 py-1 text-xs font-extrabold text-white">
-              Overdue {alerts.overdue.length}
-            </span>
-            <span className="rounded-full bg-yellow-500 px-2 py-1 text-xs font-extrabold text-white">
-              Due Soon {alerts.upcoming.length}
-            </span>
-          </div>
-          <span className="text-sm font-semibold text-slate-200">
-            {showPaymentAlerts ? 'Collapse' : 'Expand'}
-          </span>
-        </button>
-
-        {showPaymentAlerts && (
-          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
-            <div className="overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50">
-              <div className="flex items-center gap-2 bg-red-600 px-4 py-3 text-white">
-                <AlertCircle className="h-5 w-5" />
-                <h3 className="text-lg font-bold">Overdue Items ({alerts.overdue.length})</h3>
-              </div>
-              <div className="bg-white p-4">
-                {alerts.overdue.length > 0 ? (
-                  <div className="space-y-2">
-                    {(showAllOverdue ? alerts.overdue : alerts.overdue.slice(0, 5)).map(item => (
-                      <div key={item.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-gray-100 py-2 text-sm last:border-b-0">
-                        <span className="truncate font-medium text-gray-800">{item.category}</span>
-                        <span className="whitespace-nowrap text-xs text-gray-600">{item.dueDate}</span>
-                        <span className="whitespace-nowrap text-right font-bold text-red-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
-                      </div>
-                    ))}
-                    {alerts.overdue.length > 5 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllOverdue(prev => !prev)}
-                        title={showAllOverdue ? 'Show fewer overdue items' : 'Show all overdue items'}
-                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
-                      >
-                        {showAllOverdue
-                          ? 'Show fewer overdue items'
-                          : `+ ${alerts.overdue.length - 5} more overdue items`}
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <p className="py-2 text-center text-sm text-gray-500">No overdue items</p>
-                )}
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50">
-              <div className="flex items-center gap-2 bg-yellow-500 px-4 py-3 text-white">
-                <Clock className="h-5 w-5" />
-                <h3 className="text-lg font-bold">Due Soon ({alerts.upcoming.length})</h3>
-              </div>
-              <div className="bg-white p-4">
-                {alerts.upcoming.length > 0 ? (
-                  <div className="space-y-2">
-                    {alerts.upcoming.slice(0, 5).map(item => (
-                      <div key={item.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-gray-100 py-2 text-sm last:border-b-0">
-                        <span className="truncate font-medium text-gray-800">{item.category}</span>
-                        <span className="whitespace-nowrap text-xs text-gray-600">{item.dueDate}</span>
-                        <span className="whitespace-nowrap text-right font-bold text-yellow-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
-                      </div>
-                    ))}
-                    {alerts.upcoming.length > 5 && (
-                      <p className="pt-2 text-xs text-gray-600">+ {alerts.upcoming.length - 5} more upcoming items</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="py-2 text-center text-sm text-gray-500">No items due within 5 days</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
 
       <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
@@ -1146,6 +1060,93 @@ const DashboardTab = ({
           </div>
         </div>
       </div>
+
+      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
+        <button
+          type="button"
+          onClick={() => setShowPaymentAlerts(prev => !prev)}
+          className="flex w-full items-center justify-between gap-4 bg-blue-600 px-4 py-3 text-left text-white hover:bg-blue-700"
+          title={showPaymentAlerts ? 'Collapse overdue and due soon items' : 'Expand overdue and due soon items'}
+        >
+          <div className="flex items-center gap-2">
+            {showPaymentAlerts ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+            <AlertCircle className="h-5 w-5 text-red-300" />
+            <h3 className="text-lg font-bold">Payment Alerts</h3>
+            <span className="rounded-full bg-red-600 px-2 py-1 text-xs font-extrabold text-white">
+              Overdue {alerts.overdue.length}
+            </span>
+            <span className="rounded-full bg-yellow-500 px-2 py-1 text-xs font-extrabold text-white">
+              Due Soon {alerts.upcoming.length}
+            </span>
+          </div>
+          <span className="text-sm font-semibold text-white">
+            {showPaymentAlerts ? 'Collapse' : 'Expand'}
+          </span>
+        </button>
+
+        {showPaymentAlerts && (
+          <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
+            <div className="overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50">
+              <div className="flex items-center gap-2 bg-red-600 px-4 py-3 text-white">
+                <AlertCircle className="h-5 w-5" />
+                <h3 className="text-lg font-bold">Overdue Items ({alerts.overdue.length})</h3>
+              </div>
+              <div className="bg-white p-4">
+                {alerts.overdue.length > 0 ? (
+                  <div className="space-y-2">
+                    {(showAllOverdue ? alerts.overdue : alerts.overdue.slice(0, 5)).map(item => (
+                      <div key={item.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-gray-100 py-2 text-sm last:border-b-0">
+                        <span className="truncate font-medium text-gray-800">{item.category}</span>
+                        <span className="whitespace-nowrap text-xs text-gray-600">{item.dueDate}</span>
+                        <span className="whitespace-nowrap text-right font-bold text-red-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                    {alerts.overdue.length > 5 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllOverdue(prev => !prev)}
+                        title={showAllOverdue ? 'Show fewer overdue items' : 'Show all overdue items'}
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+                      >
+                        {showAllOverdue
+                          ? 'Show fewer overdue items'
+                          : `+ ${alerts.overdue.length - 5} more overdue items`}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="py-2 text-center text-sm text-gray-500">No overdue items</p>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border-2 border-blue-300 bg-blue-50">
+              <div className="flex items-center gap-2 bg-yellow-500 px-4 py-3 text-white">
+                <Clock className="h-5 w-5" />
+                <h3 className="text-lg font-bold">Due Soon ({alerts.upcoming.length})</h3>
+              </div>
+              <div className="bg-white p-4">
+                {alerts.upcoming.length > 0 ? (
+                  <div className="space-y-2">
+                    {alerts.upcoming.slice(0, 5).map(item => (
+                      <div key={item.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-gray-100 py-2 text-sm last:border-b-0">
+                        <span className="truncate font-medium text-gray-800">{item.category}</span>
+                        <span className="whitespace-nowrap text-xs text-gray-600">{item.dueDate}</span>
+                        <span className="whitespace-nowrap text-right font-bold text-yellow-600">${(item.actualCost || item.estBudget || 0).toFixed(2)}</span>
+                      </div>
+                    ))}
+                    {alerts.upcoming.length > 5 && (
+                      <p className="pt-2 text-xs text-gray-600">+ {alerts.upcoming.length - 5} more upcoming items</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="py-2 text-center text-sm text-gray-500">No items due within 5 days</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
 
       <EmergencyFundWidget state={state} setState={setState} saveBudget={saveBudget} />
 
