@@ -41,7 +41,6 @@ import {
   getInitialContactsForState,
   normalizeContact,
   normalizeContacts,
-  parseContactText,
 } from "../../utils/contactsStore";
 
 const STORAGE_KEY = "todoTab.tasks.v1";
@@ -84,14 +83,7 @@ const DEFAULT_FORM = {
   typeOverride: "",
   date: "",
   phone: "",
-  fax: "",
   address: "",
-  phone2: "",
-  fax2: "",
-  address2: "",
-  phone3: "",
-  fax3: "",
-  address3: "",
   deadline: "",
   blockedBy: "",
   person: "",
@@ -103,11 +95,6 @@ const DEFAULT_FORM = {
   caseNumber: "",
   amount: "",
   documents: "",
-  scannedDocumentName: "",
-  scannedDocumentType: "",
-  scannedDocumentDataUrl: "",
-  scannedDocumentText: "",
-  scannedAt: "",
   questions: "",
   outcome: "",
   fileName: "",
@@ -123,24 +110,9 @@ const DEFAULT_FORM = {
   completed: false,
 };
 
-const HIDDEN_DOCUMENT_METADATA_FIELDS = new Set([
-  "scannedDocumentName",
-  "scannedDocumentType",
-  "scannedDocumentDataUrl",
-  "scannedDocumentText",
-  "scannedAt",
-]);
-
 const FIELD_LABELS = {
   phone: ["phone", "tel", "telephone"],
-  fax: ["fax", "facsimile"],
   address: ["address", "location"],
-  phone2: ["phone 2", "office 2 phone"],
-  fax2: ["fax 2", "office 2 fax"],
-  address2: ["address 2", "office 2 address"],
-  phone3: ["phone 3", "office 3 phone"],
-  fax3: ["fax 3", "office 3 fax"],
-  address3: ["address 3", "office 3 address"],
   deadline: ["deadline", "due", "due date", "reg due", "registration due", "suspension"],
   date: ["date", "appointment date", "visit date", "order date"],
   caseNumber: ["case", "case #", "case number", "citation", "citation #", "citation number", "id"],
@@ -172,15 +144,8 @@ const FIELD_LABEL_DISPLAY = {
   type: "Type",
   typeOverride: "Category",
   date: "Date",
-  phone: "Office 1 Phone",
-  fax: "Office 1 Fax",
-  address: "Office 1 Address",
-  phone2: "Office 2 Phone",
-  fax2: "Office 2 Fax",
-  address2: "Office 2 Address",
-  phone3: "Office 3 Phone",
-  fax3: "Office 3 Fax",
-  address3: "Office 3 Address",
+  phone: "Phone",
+  address: "Address",
   deadline: "Deadline",
   blockedBy: "Blocked by",
   person: "Person",
@@ -226,14 +191,14 @@ const getFieldLabel = (task, field) => {
 
 const TYPE_FIELDS = {
   General: ["date", "deadline", "phone", "website", "documents", "questions", "outcome", "notes"],
-  Medical: ["person", "organization", "phone", "fax", "address", "phone2", "fax2", "address2", "phone3", "fax3", "address3", "date", "deadline", "documents", "questions", "outcome", "notes"],
+  Medical: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
   "DMV / Vehicle": ["plate", "vin", "vehicle", "date", "deadline", "amount", "caseNumber", "phone", "website", "systemLink", "documents", "requiredAction", "impact", "notes"],
   Insurance: ["company", "policyNumber", "policyStatus", "effectiveDate", "phone", "website", "systemLink", "amount", "deadline", "requiredAction", "impact", "documents", "notes"],
   "DPSS / Benefits": ["person", "organization", "caseNumber", "phone", "website", "systemLink", "deadline", "amount", "documents", "questions", "outcome", "notes"],
   Legal: ["person", "organization", "caseNumber", "phone", "address", "date", "deadline", "amount", "website", "systemLink", "documents", "questions", "outcome", "notes"],
   Moving: ["date", "deadline", "address", "phone", "amount", "documents", "questions", "outcome", "notes"],
   Work: ["organization", "person", "phone", "website", "date", "deadline", "documents", "questions", "outcome", "notes"],
-  Dental: ["person", "organization", "phone", "fax", "address", "phone2", "fax2", "address2", "phone3", "fax3", "address3", "date", "deadline", "documents", "questions", "outcome", "notes"],
+  Dental: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
   "Phone / Lifeline": ["person", "company", "phone", "website", "systemLink", "caseNumber", "deadline", "documents", "questions", "outcome", "notes"],
 };
 
@@ -265,153 +230,6 @@ const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => 
   return Math.max(minRows, Math.min(maxRows, estimatedRows));
 };
 
-const getTaskDocumentName = (task = {}) =>
-  String(task.scannedDocumentName || task.documents || "").trim();
-
-const hasTaskScannedDocument = (task = {}) =>
-  Boolean(task.scannedDocumentDataUrl && getTaskDocumentName(task));
-
-const dataUrlToBlob = (dataUrl = "") => {
-  const [header = "", payload = ""] = String(dataUrl || "").split(",");
-  const mimeMatch = header.match(/^data:([^;]+);base64$/i);
-  if (!mimeMatch || !payload) return null;
-
-  try {
-    const binary = window.atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return new Blob([bytes], { type: mimeMatch[1] });
-  } catch {
-    return null;
-  }
-};
-
-const openTaskScannedDocument = (task = {}) => {
-  if (!task?.scannedDocumentDataUrl) return;
-
-  const documentName = getTaskDocumentName(task) || "Scanned document";
-  const blob = dataUrlToBlob(task.scannedDocumentDataUrl);
-  const directUrl = blob ? URL.createObjectURL(blob) : task.scannedDocumentDataUrl;
-  const win = window.open(directUrl, "_blank", "noopener,noreferrer");
-
-  if (blob && win) {
-    window.setTimeout(() => URL.revokeObjectURL(directUrl), 60000);
-  }
-
-  if (!win) {
-    const link = document.createElement("a");
-    link.href = directUrl;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.download = documentName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    if (blob) {
-      window.setTimeout(() => URL.revokeObjectURL(directUrl), 60000);
-    }
-  }
-};
-
-function loadDocumentScanScriptOnce(src, globalName) {
-  return new Promise((resolve, reject) => {
-    if (globalName && window[globalName]) {
-      resolve(window[globalName]);
-      return;
-    }
-
-    const existing = document.querySelector(`script[data-task-document-scan-src="${src}"]`);
-    if (existing) {
-      existing.addEventListener("load", () => resolve(globalName ? window[globalName] : true), { once: true });
-      existing.addEventListener("error", () => reject(new Error(`Could not load ${src}`)), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.dataset.taskDocumentScanSrc = src;
-    script.onload = () => resolve(globalName ? window[globalName] : true);
-    script.onerror = () => reject(new Error(`Could not load ${src}`));
-    document.head.appendChild(script);
-  });
-}
-
-function readTaskDocumentFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
-    reader.readAsDataURL(file);
-  });
-}
-
-function readTaskDocumentFileAsArrayBuffer(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-async function getTaskDocumentTesseract() {
-  return loadDocumentScanScriptOnce("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js", "Tesseract");
-}
-
-async function getTaskDocumentPdfJs() {
-  const pdfjsLib = await loadDocumentScanScriptOnce("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js", "pdfjsLib");
-  if (pdfjsLib?.GlobalWorkerOptions) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
-  }
-  return pdfjsLib;
-}
-
-async function ocrTaskDocumentImageDataUrl(dataUrl) {
-  const Tesseract = await getTaskDocumentTesseract();
-  const result = await Tesseract.recognize(dataUrl, "eng");
-  return result?.data?.text || "";
-}
-
-async function ocrTaskDocumentPdfFile(file) {
-  const [pdfjsLib, arrayBuffer] = await Promise.all([getTaskDocumentPdfJs(), readTaskDocumentFileAsArrayBuffer(file)]);
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const pageTexts = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-
-    await page.render({ canvasContext: context, viewport }).promise;
-    const dataUrl = canvas.toDataURL("image/png");
-    const text = await ocrTaskDocumentImageDataUrl(dataUrl);
-    pageTexts.push(text);
-  }
-
-  return pageTexts.join("\n\n");
-};
-
-const buildTaskDocumentDetails = (parsedContact = {}) => {
-  const details = [];
-
-  if (parsedContact.treatmentRequested) {
-    details.push(`Treatment Requested: ${parsedContact.treatmentRequested}`);
-  }
-
-  if (parsedContact.comments) {
-    details.push(`Comments: ${parsedContact.comments}`);
-  }
-
-  return details.join("\n");
-};
-
 
 const compactMultilineText = (value) =>
   String(value || "")
@@ -432,7 +250,7 @@ const AutoResizeTextarea = ({
   ...props
 }) => {
   const textareaRef = useRef(null);
-  const displayValue = compactOnChange ? compactMultilineText(value) : String(value || "");
+  const displayValue = String(value || "");
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -453,7 +271,11 @@ const AutoResizeTextarea = ({
     <textarea
       ref={textareaRef}
       value={displayValue}
-      onChange={(event) => onChange(compactOnChange ? compactMultilineText(event.target.value) : event.target.value)}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={(event) => {
+        if (compactOnChange) onChange(compactMultilineText(event.target.value));
+        props.onBlur?.(event);
+      }}
       rows={getTextareaRows(displayValue, minRows, maxRows, charsPerRow)}
       className={`${className} resize-none`}
       {...props}
@@ -835,7 +657,7 @@ const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeho
 
   const updateValueFromEditor = () => {
     saveSelection();
-    const nextHtml = sanitizeFormattedHtml(editorRef.current?.innerHTML || "").trim();
+    const nextHtml = sanitizeFormattedHtml(editorRef.current?.innerHTML || "");
     onChange(nextHtml);
   };
 
@@ -882,6 +704,16 @@ const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeho
 
 const buildContactTaskDetails = (contact = {}) => {
   const details = [];
+  const officeLocations = Array.isArray(contact.officeLocations)
+    ? contact.officeLocations
+        .map((office, index) => ({
+          label: String(office?.label || `Office ${index + 1}`).trim(),
+          address: String(office?.address || "").trim(),
+          phone: String(office?.phone || "").trim(),
+          fax: String(office?.fax || "").trim(),
+        }))
+        .filter((office) => office.address || office.phone || office.fax)
+    : [];
 
   if (contact.treatmentRequested) {
     details.push(`Treatment Requested: ${contact.treatmentRequested}`);
@@ -891,29 +723,27 @@ const buildContactTaskDetails = (contact = {}) => {
     details.push(`Comments: ${contact.comments}`);
   }
 
+  if (officeLocations.length) {
+    details.push(
+      officeLocations
+        .map((office, index) => {
+          const lines = [office.label || `Office ${index + 1}`];
+          if (office.address) lines.push(office.address);
+          if (office.phone) lines.push(`Phone: ${office.phone}`);
+          if (office.fax) lines.push(`Fax: ${office.fax}`);
+          return lines.join("\n");
+        })
+        .join("\n\n")
+    );
+  } else if (contact.fax) {
+    details.push(`Fax: ${contact.fax}`);
+  }
+
+  if (contact.scannedDocumentName) {
+    details.push(`Scanned Document: ${contact.scannedDocumentName}`);
+  }
+
   return details.join("\n");
-};
-
-const getContactOfficeLocationsForTask = (contact = {}) => {
-  const locations = Array.isArray(contact.officeLocations) ? contact.officeLocations : [];
-  const normalized = locations
-    .map((location, index) => ({
-      label: location?.label || `Office ${index + 1}`,
-      address: String(location?.address || "").trim(),
-      phone: String(location?.phone || "").trim(),
-      fax: String(location?.fax || "").trim(),
-    }))
-    .filter((location) => location.address || location.phone || location.fax);
-
-  if (normalized.length) return normalized.slice(0, 3);
-
-  const fallback = [
-    { label: "Office 1", address: contact.address || "", phone: contact.phone || "", fax: contact.fax || "" },
-    { label: "Office 2", address: contact.address2 || "", phone: contact.phone2 || "", fax: contact.fax2 || "" },
-    { label: "Office 3", address: contact.address3 || "", phone: contact.phone3 || "", fax: contact.fax3 || "" },
-  ];
-
-  return fallback.filter((location) => location.address || location.phone || location.fax);
 };
 
 const appendContactTaskDetails = (currentDetails = "", nextDetails = "") => {
@@ -944,36 +774,6 @@ const applyContactToTaskData = (task = {}, contact = {}, replaceExisting = false
   if (contact.directPhone && (replaceExisting || !String(next.phone || "").trim())) {
     next.phone = contact.directPhone;
   }
-
-  const officeLocations = getContactOfficeLocationsForTask(contact);
-  officeLocations.slice(0, 3).forEach((office, index) => {
-    const suffix = index === 0 ? "" : String(index + 1);
-    const addressField = suffix ? `address${suffix}` : "address";
-    const phoneField = suffix ? `phone${suffix}` : "phone";
-    const faxField = suffix ? `fax${suffix}` : "fax";
-
-    if (office.address && (replaceExisting || !String(next[addressField] || "").trim())) {
-      next[addressField] = office.address;
-    }
-
-    if (office.phone && (replaceExisting || !String(next[phoneField] || "").trim())) {
-      next[phoneField] = office.phone;
-    }
-
-    if (office.fax && (replaceExisting || !String(next[faxField] || "").trim())) {
-      next[faxField] = office.fax;
-    }
-  });
-
-  if (contact.scannedDocumentName && (replaceExisting || !String(next.documents || "").trim())) {
-    next.documents = contact.scannedDocumentName;
-  }
-
-  ["scannedDocumentName", "scannedDocumentType", "scannedDocumentDataUrl", "scannedDocumentText", "scannedAt"].forEach((field) => {
-    if (contact[field] && (replaceExisting || !String(next[field] || "").trim())) {
-      next[field] = contact[field];
-    }
-  });
 
   const contactTaskDetails = buildContactTaskDetails(contact);
   if (contactTaskDetails) {
@@ -1801,9 +1601,6 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const hasHydrated = useRef(false);
   const [tasks, setTasks] = useState(readStoredTasks);
   const [form, setForm] = useState(createEmptyTask);
-  const [taskDocumentScanStatus, setTaskDocumentScanStatus] = useState("");
-  const [taskDocumentScanError, setTaskDocumentScanError] = useState("");
-  const [taskDocumentScanText, setTaskDocumentScanText] = useState("");
   const [importText, setImportText] = useState("");
   const [parsedTasks, setParsedTasks] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -2032,65 +1829,12 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     const valuedFields = Object.keys(DEFAULT_FORM).filter((field) => form[field] && field !== "completed");
 
     return Array.from(new Set([...typeFields, ...valuedFields])).filter(
-      (field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field) && !HIDDEN_DOCUMENT_METADATA_FIELDS.has(field)
+      (field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field)
     );
   }, [form]);
 
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
-  };
-
-  const applyScannedDocumentToForm = (file, dataUrl, scannedText = "") => {
-    const parsedContact = parseContactText(scannedText);
-    const documentName = file?.name || "Scanned document";
-    const documentType = file?.type || (/.pdf$/i.test(documentName) ? "application/pdf" : "");
-    const taskDetails = buildTaskDocumentDetails(parsedContact);
-
-    setForm((current) =>
-      normalizeDerivedFields({
-        ...current,
-        documents: documentName,
-        scannedDocumentName: documentName,
-        scannedDocumentType: documentType,
-        scannedDocumentDataUrl: dataUrl,
-        scannedDocumentText: scannedText,
-        scannedAt: new Date().toISOString(),
-        details: appendContactTaskDetails(current.details, taskDetails),
-      })
-    );
-  };
-
-  const scanTaskDocumentFile = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setTaskDocumentScanError("");
-    setTaskDocumentScanStatus(`Scanning ${file.name}...`);
-    setTaskDocumentScanText("");
-
-    try {
-      const dataUrl = await readTaskDocumentFileAsDataUrl(file);
-      let scannedText = "";
-
-      if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-        scannedText = await ocrTaskDocumentPdfFile(file);
-      } else if (file.type.startsWith("image/")) {
-        scannedText = await ocrTaskDocumentImageDataUrl(dataUrl);
-      } else if (/\.txt$/i.test(file.name)) {
-        scannedText = await file.text();
-      } else {
-        throw new Error("Use an image, PDF, or text file.");
-      }
-
-      setTaskDocumentScanText(scannedText);
-      applyScannedDocumentToForm(file, dataUrl, scannedText);
-      setTaskDocumentScanStatus(`Scan complete. Document attached: ${file.name}`);
-    } catch (error) {
-      setTaskDocumentScanError(error?.message || "Could not scan document.");
-      setTaskDocumentScanStatus("");
-    } finally {
-      event.target.value = "";
-    }
   };
 
   const applyAutoLinks = (incomingTasks, existingTasks) => {
@@ -2170,6 +1914,84 @@ const addParsedTasks = () => {
   setImportText("");
   setIsImportOpen(false);
 };
+
+  const saveTaskContact = (task = {}) => {
+    const contactName = String(task.person || task.organization || task.company || task.taskName || "").trim();
+    const contactPhone = String(task.phone || "").trim();
+    const contactAddress = String(task.address || "").trim();
+
+    if (!contactName && !contactPhone && !contactAddress) {
+      window.alert("This task does not have enough contact information to save.");
+      return;
+    }
+
+    const noteParts = [
+      task.documents ? `Documents: ${stripTodoCalendarHtml(task.documents)}` : "",
+      task.questions ? `Questions: ${stripTodoCalendarHtml(task.questions)}` : "",
+      task.details ? `Details: ${stripTodoCalendarHtml(task.details)}` : "",
+      task.outcome ? `Outcome: ${stripTodoCalendarHtml(task.outcome)}` : "",
+      task.notes ? `Notes: ${stripTodoCalendarHtml(task.notes)}` : "",
+    ].filter(Boolean);
+
+    const taskContact = normalizeContact({
+      name: contactName || contactPhone || "Saved task contact",
+      category: task.type || task.typeOverride || "General",
+      person: task.person || contactName,
+      organization: task.organization || "",
+      company: task.company || "",
+      phone: contactPhone,
+      address: contactAddress,
+      website: task.website || task.systemLink || "",
+      notes: noteParts.join("\n"),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const normalizeMatch = (value = "") => String(value || "").toLowerCase().replace(/\D/g, "").trim();
+    const normalizeNameMatch = (value = "") => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const taskPhoneKey = normalizeMatch(taskContact.phone);
+    const taskNameKey = normalizeNameMatch(taskContact.name || taskContact.person || taskContact.organization);
+
+    setContacts((current) => {
+      const existingIndex = current.findIndex((contact) => {
+        const existingPhoneKey = normalizeMatch(contact.phone);
+        const existingNameKey = normalizeNameMatch(contact.name || contact.person || contact.organization);
+
+        if (taskPhoneKey && existingPhoneKey && taskPhoneKey === existingPhoneKey) return true;
+        if (taskNameKey && existingNameKey && taskNameKey === existingNameKey) return true;
+        return false;
+      });
+
+      if (existingIndex === -1) {
+        return [
+          {
+            ...taskContact,
+            createdAt: new Date().toISOString(),
+          },
+          ...current,
+        ];
+      }
+
+      return current.map((contact, index) => {
+        if (index !== existingIndex) return contact;
+
+        return normalizeContact({
+          ...contact,
+          name: contact.name || taskContact.name,
+          category: contact.category || taskContact.category,
+          person: contact.person || taskContact.person,
+          organization: contact.organization || taskContact.organization,
+          company: contact.company || taskContact.company,
+          phone: contact.phone || taskContact.phone,
+          address: contact.address || taskContact.address,
+          website: contact.website || taskContact.website,
+          notes: [contact.notes, taskContact.notes].filter(Boolean).join("\n"),
+          updatedAt: new Date().toISOString(),
+        });
+      });
+    });
+
+    window.alert(`Saved contact: ${taskContact.name}`);
+  };
 
   const editTask = (task) => {
     setForm({ ...createEmptyTask(), ...task });
@@ -2454,13 +2276,6 @@ const addParsedTasks = () => {
 
     writeSafetySnapshot("Before connected follow-up creation", tasks, archivedTasks);
 
-    const followUpEntryText = [
-      `Created from completed task: ${sourceTaskName}`,
-      sourceSummary ? `Source summary:\n${sourceSummary}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-
     const followUpTask = stampTask(
       {
         ...createEmptyTask(),
@@ -2483,7 +2298,7 @@ const addParsedTasks = () => {
         outcome: sourceTask.outcome || "",
         requiredAction: "",
         impact: "",
-        notes: "Connected follow-up. Source task summary is saved below.",
+        notes: "",
         completed: false,
         completedAt: "",
         blockedBy: "",
@@ -2493,15 +2308,7 @@ const addParsedTasks = () => {
         sourceTaskSnapshot: sourceSnapshot,
         sourceTaskArchivedAt: now,
         sourceTaskCompletedAt: now,
-        followUpEntries: followUpEntryText
-          ? [
-              {
-                id: createId(),
-                createdAt: now,
-                text: followUpEntryText,
-              },
-            ]
-          : [],
+        followUpEntries: [],
       },
       "Connected follow-up created",
       `Source task: ${sourceTaskName}`
@@ -3530,14 +3337,22 @@ const addParsedTasks = () => {
               {!isCollapsed && (
                 <div className="rounded-b-xl border-2 border-green-700 bg-green-50">
                   <table className="w-full table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-8" />
+                      <col className="w-[24%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[10%]" />
+                      <col />
+                      <col style={{ width: "188px" }} />
+                    </colgroup>
                     <thead className="bg-green-100 text-green-950">
                       <tr className="border-b-2 border-green-700">
-                        <th className="w-8 px-1 py-2 text-left font-medium text-gray-700"></th>
-                        <th className="w-[25%] px-2 py-2 text-left font-medium text-gray-700">Task</th>
-                        <th className="w-[14%] px-2 py-2 text-left font-medium text-gray-700">Due Date</th>
-                        <th className="w-[11%] px-2 py-2 text-left font-medium text-gray-700">Status</th>
-                        <th className="w-[28%] px-2 py-2 text-left font-medium text-gray-700">Details</th>
-                        <th className="w-[22%] px-2 py-2 text-left font-medium text-gray-700">Actions</th>
+                        <th className="px-1 py-2 text-left font-medium text-gray-700"></th>
+                        <th className="px-2 py-2 text-left font-medium text-gray-700">Task</th>
+                        <th className="px-2 py-2 text-left font-medium text-gray-700">Due Date</th>
+                        <th className="px-2 py-2 text-left font-medium text-gray-700">Status</th>
+                        <th className="px-2 py-2 text-left font-medium text-gray-700">Details</th>
+                        <th className="px-2 py-2 text-left font-medium text-gray-700">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3633,87 +3448,66 @@ const addParsedTasks = () => {
                                     className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                   />
                                 </td>
-                                <td className="align-top px-2 py-2">
-                                  <div className="flex flex-wrap items-center gap-2">
+                                <td className="align-top px-2 py-2 text-left">
+                                  <div
+                                    className="grid justify-items-center"
+                                    style={{ gridTemplateColumns: "repeat(5, 28px)", gap: "6px", width: "164px" }}
+                                  >
                                     <button
                                       type="button"
                                       onClick={() => toggleTask(task.id)}
-                                      className={`inline-flex items-center justify-center rounded px-2 py-1 text-xs font-semibold text-white ${
+                                      className={`inline-flex h-7 w-7 items-center justify-center rounded p-0 text-white transition-colors ${
                                         task.completed ? "bg-slate-600 hover:bg-slate-700" : "bg-green-600 hover:bg-green-700"
                                       }`}
                                       title={task.completed ? "Reopen task" : "Mark task done"}
                                       aria-label={task.completed ? "Reopen task" : "Mark task done"}
                                     >
                                       {task.completed ? <RotateCcw className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
-                                      <span className="ml-1">{task.completed ? "Reopen" : "Done"}</span>
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => duplicateTask(task)}
-                                      className="inline-flex items-center justify-center rounded bg-blue-600 px-2 py-1 text-white hover:bg-blue-700"
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-blue-600 p-0 text-white transition-colors hover:bg-blue-700"
                                       aria-label="Copy task"
                                       title="Copy task"
                                     >
-                                      <Copy className="h-4 w-4" />
+                                      <Copy className="h-3.5 w-3.5" />
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => createConnectedFollowUpTask(task)}
-                                      className="inline-flex items-center justify-center rounded bg-indigo-600 px-2 py-1 text-white hover:bg-indigo-700"
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-indigo-600 p-0 text-white transition-colors hover:bg-indigo-700"
                                       aria-label="Create connected follow-up task"
                                       title="Create connected follow-up, mark this done, and archive the source task"
                                     >
-                                      <Plus className="h-4 w-4" />
+                                      <span className="flex h-4 w-5 items-center justify-center" aria-hidden="true">
+                                        <Plus className="h-3.5 w-3.5 -mr-1" />
+                                        <Plus className="h-3.5 w-3.5" />
+                                      </span>
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => archiveTask(task)}
-                                      className="inline-flex items-center justify-center rounded bg-purple-600 px-2 py-1 text-white hover:bg-purple-700"
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-purple-600 p-0 text-white transition-colors hover:bg-purple-700"
                                       aria-label="Archive task"
                                       title="Archive task"
                                     >
-                                      <Archive className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => deleteTask(task.id)}
-                                      className="inline-flex items-center justify-center rounded bg-red-600 px-2 py-1 text-white hover:bg-red-700"
-                                      aria-label="Delete task"
-                                      title="Delete task"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => clearTask(task.id)}
-                                      className="inline-flex items-center justify-center rounded bg-slate-400 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-500"
-                                      title="Clear task fields"
-                                      aria-label="Clear task fields"
-                                    >
-                                      Clr
+                                      <Archive className="h-3.5 w-3.5" />
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => setMovingTaskId((current) => (current === task.id ? null : task.id))}
-                                      className="inline-flex items-center justify-center rounded bg-amber-600 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-700"
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-amber-600 p-0 text-white transition-colors hover:bg-amber-700"
                                       title="Change task category"
+                                      aria-label="Change task category"
                                     >
-                                      Move
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedTaskId(task.id)}
-                                      className="inline-flex items-center justify-center rounded bg-cyan-700 px-2 py-1 text-white hover:bg-cyan-800"
-                                      aria-label="Open task detail drawer"
-                                      title="Open task detail drawer"
-                                    >
-                                      <PanelRightOpen className="h-4 w-4" />
+                                      <Truck className="h-3.5 w-3.5" />
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => createTaskGoogleCalendarEvent(task)}
                                       disabled={calendarAddingTaskId === task.id}
-                                      className={`inline-flex items-center justify-center rounded px-2 py-1 text-white ${
+                                      className={`inline-flex h-7 w-7 items-center justify-center rounded p-0 text-white transition-colors ${
                                         calendarAddedIds.includes(task.id)
                                           ? "bg-green-700 hover:bg-green-800"
                                           : "bg-emerald-700 hover:bg-emerald-800"
@@ -3721,16 +3515,34 @@ const addParsedTasks = () => {
                                       aria-label="Add task to Google Calendar"
                                       title={calendarAddedIds.includes(task.id) ? "Added to Google Calendar" : "Add task to Google Calendar"}
                                     >
-                                      {calendarAddedIds.includes(task.id) ? <Check className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
+                                      {calendarAddedIds.includes(task.id) ? <Check className="h-3.5 w-3.5" /> : <CalendarPlus className="h-3.5 w-3.5" />}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => saveTaskContact(task)}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-teal-600 p-0 text-white transition-colors hover:bg-teal-700"
+                                      aria-label="Save task contact"
+                                      title="Save task contact"
+                                    >
+                                      <Phone className="h-3.5 w-3.5" />
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => editTask(task)}
-                                      className="inline-flex items-center justify-center rounded bg-slate-700 px-2 py-1 text-white hover:bg-slate-800"
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-slate-700 p-0 text-white transition-colors hover:bg-slate-800"
                                       aria-label="Edit task"
                                       title="Edit task"
                                     >
-                                      <Edit2 className="h-4 w-4" />
+                                      <Edit2 className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteTask(task.id)}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-red-600 p-0 text-white transition-colors hover:bg-red-700"
+                                      aria-label="Delete task"
+                                      title="Delete task"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
                                     </button>
                                   </div>
                                   {movingTaskId === task.id && (
@@ -3798,16 +3610,6 @@ const addParsedTasks = () => {
                                                 )
                                               )}
                                             </div>
-                                            {field === "documents" && hasTaskScannedDocument(task) && (
-                                              <button
-                                                type="button"
-                                                onClick={() => openTaskScannedDocument(task)}
-                                                className="mt-2 inline-flex w-fit items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-bold normal-case tracking-normal text-blue-800 hover:bg-blue-100"
-                                              >
-                                                <FileText className="h-3 w-3" />
-                                                Open document
-                                              </button>
-                                            )}
                                           </label>
                                         ))}
                                       </div>
@@ -4007,56 +3809,6 @@ const addParsedTasks = () => {
               <div className="grid gap-3 md:grid-cols-2">
                 {renderContactPicker("form")}
 
-                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 md:col-span-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-black text-blue-950">Scan Document for Task</div>
-                      <div className="text-xs font-semibold text-blue-800">
-                        Upload a referral, lab order, blood draw order, image, PDF, or text file. The document attaches to this task without creating a duplicate contact.
-                      </div>
-                    </div>
-                    {hasTaskScannedDocument(form) && (
-                      <button
-                        type="button"
-                        onClick={() => openTaskScannedDocument(form)}
-                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-800 hover:bg-blue-100"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        Open document
-                      </button>
-                    )}
-                  </div>
-
-                  <label className="mt-3 block text-xs font-black text-blue-950">
-                    Scan image/PDF/text
-                    <input
-                      type="file"
-                      accept="image/*,.pdf,.txt"
-                      onChange={scanTaskDocumentFile}
-                      className="mt-1 block w-full text-xs text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-700 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white hover:file:bg-blue-800"
-                    />
-                  </label>
-
-                  {taskDocumentScanStatus && (
-                    <div className="mt-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-900">
-                      {taskDocumentScanStatus}
-                    </div>
-                  )}
-
-                  {taskDocumentScanError && (
-                    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
-                      {taskDocumentScanError}
-                    </div>
-                  )}
-
-                  {taskDocumentScanText && (
-                    <details className="mt-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs text-slate-700">
-                      <summary className="cursor-pointer font-bold text-blue-900">View extracted text</summary>
-                      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-sans">{taskDocumentScanText}</pre>
-                    </details>
-                  )}
-                </div>
-
                 <label className="text-sm font-medium md:col-span-2">
                   Task name
                   <input value={form.taskName} onChange={(event) => updateForm("taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -4091,16 +3843,6 @@ const addParsedTasks = () => {
                   <label key={field} className="text-sm font-medium">
                     {getFieldLabel(form, field)}
                     <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
-                    {field === "documents" && hasTaskScannedDocument(form) && (
-                      <button
-                        type="button"
-                        onClick={() => openTaskScannedDocument(form)}
-                        className="mt-2 inline-flex w-fit items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        Open document: {getTaskDocumentName(form)}
-                      </button>
-                    )}
                   </label>
                 ))}
               </div>
@@ -4112,22 +3854,12 @@ const addParsedTasks = () => {
               {showAdvanced && (
                 <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3 md:grid-cols-2">
                   {Object.keys(DEFAULT_FORM)
-                    .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field) && !HIDDEN_DOCUMENT_METADATA_FIELDS.has(field))
+                    .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
                     .filter((field) => !visibleFormFields.includes(field))
                     .map((field) => (
                       <label key={field} className="text-sm font-medium">
                         {getFieldLabel(form, field)}
                         <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
-                        {field === "documents" && hasTaskScannedDocument(form) && (
-                          <button
-                            type="button"
-                            onClick={() => openTaskScannedDocument(form)}
-                            className="mt-2 inline-flex w-fit items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                            Open document: {getTaskDocumentName(form)}
-                          </button>
-                        )}
                       </label>
                     ))}
                 </div>
@@ -4310,7 +4042,7 @@ const addParsedTasks = () => {
                 </label>
 
                 {Array.from(new Set([...(TYPE_FIELDS[selectedTask.type] || []), ...Object.keys(DEFAULT_FORM).filter((field) => selectedTask[field])]))
-                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field) && !HIDDEN_DOCUMENT_METADATA_FIELDS.has(field))
+                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
                   .map((field) => (
                     <label key={field} className="text-sm font-semibold">
                       {getFieldLabel(selectedTask, field)}
@@ -4331,16 +4063,6 @@ const addParsedTasks = () => {
                           <input value={selectedTask[field] || ""} onChange={(event) => updateTaskField(selectedTask.id, field, event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                         )}
                       </div>
-                      {field === "documents" && hasTaskScannedDocument(selectedTask) && (
-                        <button
-                          type="button"
-                          onClick={() => openTaskScannedDocument(selectedTask)}
-                          className="mt-2 inline-flex w-fit items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100"
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                          Open document: {getTaskDocumentName(selectedTask)}
-                        </button>
-                      )}
                     </label>
                   ))}
               </div>

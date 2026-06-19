@@ -94,10 +94,33 @@ async function ocrPdfFile(file) {
   return pageTexts.join("\n\n");
 }
 
+function officeHasAnyField(location = {}) {
+  return Boolean(
+    location.address ||
+      location.city ||
+      location.state ||
+      location.zip ||
+      location.phone ||
+      location.fax
+  );
+}
+
+function formatCityStateZip(location = {}) {
+  const city = location.city || "";
+  const state = location.state || "";
+  const zip = location.zip || "";
+  const stateZip = [state, zip].filter(Boolean).join(" ");
+  return [city, stateZip].filter(Boolean).join(", ");
+}
+
+function formatOfficeAddress(location = {}) {
+  return [location.address, formatCityStateZip(location)].filter(Boolean).join("\n");
+}
+
 function joinAddressFields(contact = {}) {
   const officeLocations = getVisibleOfficeLocations(contact);
   if (officeLocations.length) {
-    return officeLocations.map((location) => location.address).filter(Boolean).join("\n");
+    return officeLocations.map((location) => formatOfficeAddress(location)).filter(Boolean).join("\n");
   }
   return [contact.address, contact.address2, contact.address3].filter(Boolean).join("\n");
 }
@@ -105,23 +128,52 @@ function joinAddressFields(contact = {}) {
 function getOfficeLocationsForForm(contact = {}) {
   const currentLocations = Array.isArray(contact.officeLocations) ? contact.officeLocations : [];
   const fallbacks = [
-    { label: "Office 1", address: contact.address || "", phone: contact.phone || "", fax: contact.fax || "" },
-    { label: "Office 2", address: contact.address2 || "", phone: "", fax: "" },
-    { label: "Office 3", address: contact.address3 || "", phone: "", fax: "" },
+    {
+      label: "Office",
+      address: contact.address || "",
+      city: contact.city || "",
+      state: contact.state || "",
+      zip: contact.zip || "",
+      phone: contact.phone || "",
+      fax: contact.fax || "",
+    },
+    {
+      label: "Office 2",
+      address: contact.address2 || "",
+      city: contact.city2 || "",
+      state: contact.state2 || "",
+      zip: contact.zip2 || "",
+      phone: "",
+      fax: "",
+    },
+    {
+      label: "Office 3",
+      address: contact.address3 || "",
+      city: contact.city3 || "",
+      state: contact.state3 || "",
+      zip: contact.zip3 || "",
+      phone: "",
+      fax: "",
+    },
   ];
 
-  return [0, 1, 2].map((index) => ({
-    label: currentLocations[index]?.label || fallbacks[index].label,
-    address: currentLocations[index]?.address || fallbacks[index].address,
-    phone: currentLocations[index]?.phone || fallbacks[index].phone,
-    fax: currentLocations[index]?.fax || fallbacks[index].fax,
+  const savedLocations = currentLocations.length
+    ? currentLocations
+    : fallbacks.filter((location, index) => index === 0 || officeHasAnyField(location));
+
+  return (savedLocations.length ? savedLocations : [fallbacks[0]]).map((location, index) => ({
+    label: index === 0 ? "Office" : location.label || `Office ${index + 1}`,
+    address: location.address || "",
+    city: location.city || "",
+    state: location.state || "",
+    zip: location.zip || "",
+    phone: location.phone || "",
+    fax: location.fax || "",
   }));
 }
 
 function getVisibleOfficeLocations(contact = {}) {
-  return getOfficeLocationsForForm(contact).filter(
-    (location) => location.address || location.phone || location.fax
-  );
+  return getOfficeLocationsForForm(contact).filter((location) => officeHasAnyField(location));
 }
 
 function updateContactOfficeField(setContactForm, officeIndex, field, value) {
@@ -134,20 +186,77 @@ function updateContactOfficeField(setContactForm, officeIndex, field, value) {
 
     const next = {
       ...current,
-      officeLocations: nextLocations.filter(
-        (location) => location.address || location.phone || location.fax
-      ),
+      officeLocations: nextLocations.filter((location, index) => index === 0 || officeHasAnyField(location)),
     };
 
     if (officeIndex === 0) {
       if (field === "address") next.address = value;
+      if (field === "city") next.city = value;
+      if (field === "state") next.state = value;
+      if (field === "zip") next.zip = value;
       if (field === "phone") next.phone = value;
       if (field === "fax") next.fax = value;
     }
-    if (officeIndex === 1 && field === "address") next.address2 = value;
-    if (officeIndex === 2 && field === "address") next.address3 = value;
+    if (officeIndex === 1) {
+      if (field === "address") next.address2 = value;
+      if (field === "city") next.city2 = value;
+      if (field === "state") next.state2 = value;
+      if (field === "zip") next.zip2 = value;
+    }
+    if (officeIndex === 2) {
+      if (field === "address") next.address3 = value;
+      if (field === "city") next.city3 = value;
+      if (field === "state") next.state3 = value;
+      if (field === "zip") next.zip3 = value;
+    }
 
     return next;
+  });
+}
+
+function addContactOffice(setContactForm) {
+  setContactForm((current) => {
+    const nextLocations = getOfficeLocationsForForm(current);
+    const nextIndex = nextLocations.length;
+
+    return {
+      ...current,
+      officeLocations: [
+        ...nextLocations,
+        { label: `Office ${nextIndex + 1}`, address: "", city: "", state: "", zip: "", phone: "", fax: "" },
+      ],
+    };
+  });
+}
+
+function removeContactOffice(setContactForm, officeIndex) {
+  if (officeIndex === 0) return;
+
+  setContactForm((current) => {
+    const nextLocations = getOfficeLocationsForForm(current).filter((_, index) => index !== officeIndex);
+    const normalizedLocations = nextLocations.map((location, index) => ({
+      ...location,
+      label: index === 0 ? "Office" : `Office ${index + 1}`,
+    }));
+
+    return {
+      ...current,
+      address: normalizedLocations[0]?.address || "",
+      city: normalizedLocations[0]?.city || "",
+      state: normalizedLocations[0]?.state || "",
+      zip: normalizedLocations[0]?.zip || "",
+      phone: normalizedLocations[0]?.phone || "",
+      fax: normalizedLocations[0]?.fax || "",
+      address2: normalizedLocations[1]?.address || "",
+      city2: normalizedLocations[1]?.city || "",
+      state2: normalizedLocations[1]?.state || "",
+      zip2: normalizedLocations[1]?.zip || "",
+      address3: normalizedLocations[2]?.address || "",
+      city3: normalizedLocations[2]?.city || "",
+      state3: normalizedLocations[2]?.state || "",
+      zip3: normalizedLocations[2]?.zip || "",
+      officeLocations: normalizedLocations,
+    };
   });
 }
 
@@ -441,7 +550,18 @@ export default function ContactManager({
               <div className="grid gap-3">
                 {getOfficeLocationsForForm(contactForm).map((location, index) => (
                   <div key={`contact-form-office-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="mb-2 text-sm font-black text-slate-900">{location.label || `Office ${index + 1}`}</div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-sm font-black text-slate-900">{index === 0 ? "Office" : location.label || `Office ${index + 1}`}</div>
+                      {index > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => removeContactOffice(setContactForm, index)}
+                          className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-50"
+                        >
+                          Remove Office
+                        </button>
+                      )}
+                    </div>
                     <div className="grid gap-2">
                       <label className="text-xs font-bold uppercase tracking-wide text-slate-600">
                         Address
@@ -454,6 +574,32 @@ export default function ContactManager({
                           className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
                         />
                       </label>
+                      <div className="grid gap-2 sm:grid-cols-[1fr_80px_100px]">
+                        <label className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                          City
+                          <input
+                            value={location.city || ""}
+                            onChange={(event) => updateContactOfficeField(setContactForm, index, "city", event.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                          />
+                        </label>
+                        <label className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                          State
+                          <input
+                            value={location.state || ""}
+                            onChange={(event) => updateContactOfficeField(setContactForm, index, "state", event.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                          />
+                        </label>
+                        <label className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                          Zip
+                          <input
+                            value={location.zip || ""}
+                            onChange={(event) => updateContactOfficeField(setContactForm, index, "zip", event.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
+                          />
+                        </label>
+                      </div>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <label className="text-xs font-bold uppercase tracking-wide text-slate-600">
                           Phone
@@ -475,6 +621,14 @@ export default function ContactManager({
                     </div>
                   </div>
                 ))}
+
+                <button
+                  type="button"
+                  onClick={() => addContactOffice(setContactForm)}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  Add Office
+                </button>
               </div>
 
               <label className="text-sm font-bold text-slate-800">
@@ -584,8 +738,8 @@ export default function ContactManager({
                                 <div className="mt-1 grid gap-2">
                                   {getVisibleOfficeLocations(contact).map((location, index) => (
                                     <div key={`${contact.id}-office-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                                      <div className="font-bold text-slate-900">{location.label || `Office ${index + 1}`}</div>
-                                      {location.address && <div>{location.address}</div>}
+                                      <div className="font-bold text-slate-900">{index === 0 ? "Office" : location.label || `Office ${index + 1}`}</div>
+                                      {formatOfficeAddress(location) && <div>{formatOfficeAddress(location)}</div>}
                                       {(location.phone || location.fax) && (
                                         <div className="text-xs text-slate-600">
                                           {location.phone ? `Phone: ${location.phone}` : ""}
