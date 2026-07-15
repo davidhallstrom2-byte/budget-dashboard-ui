@@ -94,6 +94,204 @@ async function ocrPdfFile(file) {
   return pageTexts.join("\n\n");
 }
 
+
+const US_STATE_CODES = new Set([
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+  "DC",
+]);
+
+function cleanScannedAddressText(value = "") {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+,\s+/g, ", ")
+    .replace(/,+/g, ",")
+    .trim();
+}
+
+function parseAddressCityStateZip(value = "") {
+  const text = cleanScannedAddressText(value);
+  if (!text) return null;
+
+  const stateZipMatch = text.match(/^(.*?)[,\s]+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+  if (!stateZipMatch) return null;
+
+  const state = stateZipMatch[2].toUpperCase();
+  if (!US_STATE_CODES.has(state)) return null;
+
+  const beforeState = cleanScannedAddressText(stateZipMatch[1]).replace(/[,\s]+$/, "");
+  const zip = stateZipMatch[3];
+  if (!beforeState) return null;
+
+  const commaParts = beforeState.split(",").map((part) => part.trim()).filter(Boolean);
+  if (commaParts.length >= 2) {
+    const city = commaParts[commaParts.length - 1];
+    const address = commaParts.slice(0, -1).join(", ");
+    if (address && city) return { address, city, state, zip };
+  }
+
+  const cityPatterns = [
+    "Los Angeles",
+    "San Gabriel",
+    "Monterey Park",
+    "El Monte",
+    "Montebello",
+    "Torrance",
+    "Glendale",
+    "Pasadena",
+    "Long Beach",
+    "Santa Monica",
+    "Culver City",
+    "Inglewood",
+    "Vernon",
+  ];
+
+  const matchedCity = cityPatterns.find((cityName) => new RegExp(`\\b${cityName.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}$`, "i").test(beforeState));
+  if (matchedCity) {
+    const address = cleanScannedAddressText(beforeState.replace(new RegExp(`${matchedCity.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}$`, "i"), ""));
+    if (address) return { address, city: matchedCity, state, zip };
+  }
+
+  return null;
+}
+
+function normalizeOfficeLocationAddress(location = {}) {
+  const parsed = parseAddressCityStateZip(location.address || "");
+  if (!parsed) {
+    return {
+      ...location,
+      address: location.address || "",
+      city: location.city || "",
+      state: location.state || "",
+      zip: location.zip || "",
+      phone: location.phone || "",
+      fax: location.fax || "",
+    };
+  }
+
+  return {
+    ...location,
+    address: parsed.address || location.address || "",
+    city: location.city || parsed.city || "",
+    state: location.state || parsed.state || "",
+    zip: location.zip || parsed.zip || "",
+    phone: location.phone || "",
+    fax: location.fax || "",
+  };
+}
+
+function normalizeScannedContactAddresses(contact = {}) {
+  const normalizedPrimary = normalizeOfficeLocationAddress({
+    label: "Office",
+    address: contact.address || "",
+    city: contact.city || "",
+    state: contact.state || "",
+    zip: contact.zip || "",
+    phone: contact.phone || "",
+    fax: contact.fax || "",
+  });
+
+  const normalizedSecondary = normalizeOfficeLocationAddress({
+    label: "Office 2",
+    address: contact.address2 || "",
+    city: contact.city2 || "",
+    state: contact.state2 || "",
+    zip: contact.zip2 || "",
+    phone: "",
+    fax: "",
+  });
+
+  const normalizedThird = normalizeOfficeLocationAddress({
+    label: "Office 3",
+    address: contact.address3 || "",
+    city: contact.city3 || "",
+    state: contact.state3 || "",
+    zip: contact.zip3 || "",
+    phone: "",
+    fax: "",
+  });
+
+  const sourceOfficeLocations = Array.isArray(contact.officeLocations) ? contact.officeLocations : [];
+  const normalizedOfficeLocations = (sourceOfficeLocations.length
+    ? sourceOfficeLocations.map((location, index) => normalizeOfficeLocationAddress({
+        ...location,
+        label: index === 0 ? "Office" : location.label || `Office ${index + 1}`,
+      }))
+    : [normalizedPrimary, normalizedSecondary, normalizedThird]
+  ).filter((location, index) => index === 0 || officeHasAnyField(location));
+
+  const firstOffice = normalizedOfficeLocations[0] || normalizedPrimary;
+  const secondOffice = normalizedOfficeLocations[1] || normalizedSecondary;
+  const thirdOffice = normalizedOfficeLocations[2] || normalizedThird;
+
+  return {
+    ...contact,
+    address: firstOffice.address || "",
+    city: firstOffice.city || "",
+    state: firstOffice.state || "",
+    zip: firstOffice.zip || "",
+    phone: firstOffice.phone || contact.phone || "",
+    fax: firstOffice.fax || contact.fax || "",
+    address2: secondOffice.address || "",
+    city2: secondOffice.city || "",
+    state2: secondOffice.state || "",
+    zip2: secondOffice.zip || "",
+    address3: thirdOffice.address || "",
+    city3: thirdOffice.city || "",
+    state3: thirdOffice.state || "",
+    zip3: thirdOffice.zip || "",
+    officeLocations: normalizedOfficeLocations,
+  };
+}
+
 function officeHasAnyField(location = {}) {
   return Boolean(
     location.address ||
@@ -290,6 +488,7 @@ export default function ContactManager({
   editContact,
   deleteContact,
   taskTypes,
+  onAddTaskCategory,
   AutoResizeTextarea = NativeTextarea,
 }) {
   const [scanText, setScanText] = useState("");
@@ -304,11 +503,25 @@ export default function ContactManager({
     scannedDocumentText: "",
     scannedAt: "",
   });
+  const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   if (!isOpen) return null;
 
+  const addContactCategory = () => {
+    const typedCategory = String(newCategoryName || "").replace(/\s+/g, " ").trim();
+    if (!typedCategory) return;
+
+    const savedCategory = typeof onAddTaskCategory === "function" ? onAddTaskCategory(typedCategory) : typedCategory;
+    const nextCategory = savedCategory || typedCategory;
+
+    setContactForm((current) => ({ ...current, category: nextCategory }));
+    setNewCategoryName("");
+    setIsAddCategoryOpen(false);
+  };
+
   const fillContactForm = (contact) => {
-    const withMetadata = applyScanMetadata(contact, scanMetadata);
+    const withMetadata = applyScanMetadata(normalizeScannedContactAddresses(contact), scanMetadata);
     setContactForm((current) => ({
       ...current,
       ...withMetadata,
@@ -318,14 +531,14 @@ export default function ContactManager({
   };
 
   const scanContact = () => {
-    const candidates = parseContactCandidatesFromText(scanText).map((candidate) => applyScanMetadata(candidate, {
+    const candidates = parseContactCandidatesFromText(scanText).map((candidate) => applyScanMetadata(normalizeScannedContactAddresses(candidate), {
       ...scanMetadata,
       scannedDocumentText: scanText || scanMetadata.scannedDocumentText,
       scannedAt: scanMetadata.scannedAt || new Date().toISOString(),
     }));
 
     if (!candidates.length) {
-      const parsedContact = parseContactText(scanText);
+      const parsedContact = normalizeScannedContactAddresses(parseContactText(scanText));
       fillContactForm(parsedContact);
       setScanCandidates([]);
       setIsScanOpen(false);
@@ -370,7 +583,7 @@ export default function ContactManager({
       setScanMetadata(metadata);
       setScanText(text);
 
-      const candidates = parseContactCandidatesFromText(text).map((candidate) => applyScanMetadata(candidate, metadata));
+      const candidates = parseContactCandidatesFromText(text).map((candidate) => applyScanMetadata(normalizeScannedContactAddresses(candidate), metadata));
       setScanCandidates(candidates);
       if (candidates[0]) fillContactForm(candidates[0]);
 
@@ -413,7 +626,7 @@ export default function ContactManager({
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
           <div>
             <h3 className="text-lg font-black text-slate-900">Manage Contacts</h3>
-            <p className="text-sm font-semibold text-slate-600">Add, edit, delete, search, scan, and use saved contacts.</p>
+            <p className="text-sm font-semibold text-slate-600">Add, edit, delete, search, scan documents/images, and use saved contacts.</p>
           </div>
           <button
             type="button"
@@ -436,28 +649,29 @@ export default function ContactManager({
             <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-black text-blue-950">Scan Contact</div>
-                  <div className="text-xs font-semibold text-blue-800">Upload an image/PDF or paste raw contact info, then review before saving.</div>
+                  <div className="text-sm font-black text-blue-950">Scan Document / Image</div>
+                  <div className="text-xs font-semibold text-blue-800">Upload a PDF, image, or text file, or paste raw contact info. Review before saving.</div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsScanOpen((current) => !current)}
                   className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
                 >
-                  {isScanOpen ? "Hide" : "Scan"}
+                  {isScanOpen ? "Hide Scan" : "Scan Document / Image"}
                 </button>
               </div>
 
               {isScanOpen && (
                 <div className="mt-3 grid gap-2">
                   <label className="text-xs font-black text-blue-950">
-                    Scan image/PDF
+                    Document or image
                     <input
                       type="file"
-                      accept="image/*,.pdf,.txt"
+                      accept="image/*,application/pdf,.pdf,.txt"
                       onChange={scanFile}
                       className="mt-1 block w-full text-xs text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-700 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white hover:file:bg-blue-800"
                     />
+                    <span className="mt-1 block text-[11px] font-semibold text-blue-800">Supports PDF, JPG, PNG, HEIC, and TXT. Scan from a scanner first, then upload the saved file here.</span>
                   </label>
 
                   {scanMetadata.scannedDocumentName && (
@@ -527,16 +741,58 @@ export default function ContactManager({
                 />
               </label>
 
-              <label className="text-sm font-bold text-slate-800">
+              <div className="text-sm font-bold text-slate-800">
                 Category
-                <select
-                  value={contactForm.category || "General"}
-                  onChange={(event) => setContactForm((current) => ({ ...current, category: event.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  {taskTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-                </select>
-              </label>
+                <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <select
+                    value={contactForm.category || "General"}
+                    onChange={(event) => setContactForm((current) => ({ ...current, category: event.target.value }))}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    {taskTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddCategoryOpen((current) => !current)}
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                  >
+                    Add Category
+                  </button>
+                </div>
+                {isAddCategoryOpen && (
+                  <div className="mt-2 grid gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:grid-cols-[1fr_auto_auto]">
+                    <input
+                      value={newCategoryName}
+                      onChange={(event) => setNewCategoryName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          addContactCategory();
+                        }
+                      }}
+                      placeholder="New category name"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={addContactCategory}
+                      className="rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewCategoryName("");
+                        setIsAddCategoryOpen(false);
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <label className="text-sm font-bold text-slate-800">
                 Website

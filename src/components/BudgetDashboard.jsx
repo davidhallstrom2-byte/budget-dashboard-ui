@@ -6,7 +6,10 @@ import DashboardTab from './tabs/DashboardTab';
 import AnalysisTab from './tabs/AnalysisTab';
 import CalculatorTab from './tabs/CalculatorTab';
 import TodoTab from './tabs/TodoTab';
+import RidesTab from './tabs/RidesTab';
 import CscShiftsTab from './tabs/CscShiftsTab';
+import CscOpportunitiesTab from './tabs/CscOpportunitiesTab';
+import PaychecksTab from './tabs/PaychecksTab';
 import ArchivedDrawer from './ui/ArchivedDrawer';
 import StickyToolbar from './common/StickyToolbar.jsx';
 import StatementScanner from './statements/StatementScanner';
@@ -20,11 +23,18 @@ import {
   CheckCircle2,
   Archive,
   BarChart3,
+  BriefcaseBusiness,
+  CalendarDays,
+  Car,
+  CircleDollarSign,
+  ListTodo,
 } from 'lucide-react';
 
 const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
 const TODO_ARCHIVE_STORAGE_KEY = 'todoTab.tasks.archived.v1';
 const TODO_CONTACTS_STORAGE_KEY = 'todoTab.contacts.v1';
+const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
+const RIDES_STORAGE_EVENT = 'modivcareRides:updated';
 
 const getTodoTaskType = (task = {}) => task.typeOverride || task.type || '';
 
@@ -483,6 +493,7 @@ const BudgetDashboard = () => {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportFilename, setExportFilename] = useState('budget-data');
   const [todoEditTaskId, setTodoEditTaskId] = useState('');
+  const [, setToolbarRefreshKey] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -518,11 +529,68 @@ const BudgetDashboard = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const refreshToolbarCounts = () => setToolbarRefreshKey((current) => current + 1);
+
+    window.addEventListener(RIDES_STORAGE_EVENT, refreshToolbarCounts);
+    window.addEventListener('storage', refreshToolbarCounts);
+
+    return () => {
+      window.removeEventListener(RIDES_STORAGE_EVENT, refreshToolbarCounts);
+      window.removeEventListener('storage', refreshToolbarCounts);
+    };
+  }, []);
+
   const tabs = useMemo(
     () => [
-      { id: 'todo', label: 'To-Do', bgColor: 'bg-green-50', inactiveClass: 'bg-green-100 text-green-900 hover:bg-green-200' },
-      { id: 'cscShifts', label: 'CSC Shifts', bgColor: 'bg-yellow-100', inactiveClass: 'bg-yellow-100 text-yellow-900 hover:bg-yellow-200' },
-      { id: 'budget', label: 'Budget', bgColor: 'bg-blue-100', inactiveClass: 'bg-blue-100 text-blue-900 hover:bg-blue-200' },
+      {
+        id: 'todo',
+        label: 'To-Do',
+        icon: ListTodo,
+        bgColor: 'bg-green-50',
+        activeClass: 'bg-gradient-to-r from-emerald-600 to-green-500 text-white border-emerald-700 shadow-md shadow-emerald-200',
+        inactiveClass: 'bg-green-100 text-green-950 border-green-200 hover:bg-green-200 hover:border-green-300 hover:shadow-sm',
+      },
+      {
+        id: 'rides',
+        label: 'Rides',
+        icon: Car,
+        bgColor: 'bg-sky-50',
+        activeClass: 'bg-gradient-to-r from-sky-700 to-blue-600 text-white border-sky-800 shadow-md shadow-sky-200',
+        inactiveClass: 'bg-sky-100 text-sky-950 border-sky-200 hover:bg-sky-200 hover:border-sky-300 hover:shadow-sm',
+      },
+      {
+        id: 'cscShifts',
+        label: 'CSC Shifts',
+        icon: BriefcaseBusiness,
+        bgColor: 'bg-yellow-100',
+        activeClass: 'bg-gradient-to-r from-amber-600 to-yellow-500 text-white border-amber-700 shadow-md shadow-amber-200',
+        inactiveClass: 'bg-yellow-100 text-amber-950 border-yellow-300 hover:bg-yellow-200 hover:border-yellow-400 hover:shadow-sm',
+      },
+      {
+        id: 'cscOpportunities',
+        label: 'CSC Opportunities',
+        icon: CalendarDays,
+        bgColor: 'bg-indigo-50',
+        activeClass: 'bg-gradient-to-r from-indigo-700 to-violet-600 text-white border-indigo-800 shadow-md shadow-indigo-200',
+        inactiveClass: 'bg-indigo-100 text-indigo-950 border-indigo-200 hover:bg-indigo-200 hover:border-indigo-300 hover:shadow-sm',
+      },
+      {
+        id: 'paychecks',
+        label: 'Paychecks',
+        icon: CircleDollarSign,
+        bgColor: 'bg-slate-50',
+        activeClass: 'bg-gradient-to-r from-slate-800 to-slate-600 text-white border-slate-900 shadow-md shadow-slate-200',
+        inactiveClass: 'bg-slate-100 text-slate-950 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
+      },
+      {
+        id: 'budget',
+        label: 'Budget',
+        icon: WalletCards,
+        bgColor: 'bg-blue-100',
+        activeClass: 'bg-gradient-to-r from-blue-800 to-indigo-600 text-white border-blue-900 shadow-md shadow-blue-200',
+        inactiveClass: 'bg-blue-100 text-blue-950 border-blue-200 hover:bg-blue-200 hover:border-blue-300 hover:shadow-sm',
+      },
     ],
     []
   );
@@ -774,7 +842,9 @@ const BudgetDashboard = () => {
     const stamp = now
       .toISOString()
       .slice(0, 16)
-      .replace(/[-:T]/g, '');
+      .replace(/-/g, '')
+      .replace(/:/g, '')
+      .replace(/T/g, '');
     const filename = `budget-safety-snapshot-${stamp}.json`;
     const snapshot = {
       createdAt: now.toISOString(),
@@ -960,6 +1030,58 @@ const BudgetDashboard = () => {
       );
     }
 
+    if (activeTab === 'cscOpportunities') {
+      return (
+        <>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:add')} className={`${toolbarIconButtonClass} bg-slate-900 text-white hover:bg-slate-800`} title="Add CSC Opportunity" aria-label="Add CSC Opportunity">
+            {renderPlusIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="CSC Opportunities Safety Snapshot" aria-label="Create CSC Opportunities Safety Snapshot">
+            {renderHistoryIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:export')} className={`${toolbarIconButtonClass} bg-green-500 text-white hover:bg-green-600`} title="Export CSC Opportunities" aria-label="Export CSC Opportunities">
+            {renderDownloadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import CSC Opportunities" aria-label="Import CSC Opportunities">
+            {renderUploadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:save')} className={`${toolbarIconButtonClass} bg-blue-500 text-white hover:bg-blue-600`} title="Save CSC Opportunities Snapshot" aria-label="Save CSC Opportunities Snapshot">
+            {renderSaveIcon()}
+          </button>
+        </>
+      );
+    }
+
+    if (activeTab === 'rides') {
+      const ridesArchiveCount = getStoredArrayLength(RIDES_ARCHIVE_STORAGE_KEY);
+
+      return (
+        <>
+          <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:add')} className={`${toolbarIconButtonClass} bg-slate-900 text-white hover:bg-slate-800`} title="Add Ride" aria-label="Add Ride">
+            {renderPlusIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:archive')} className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`} title="Rides Archive Drawer" aria-label="Open Rides Archive Drawer">
+            {renderArchiveIcon()}
+            <span>({ridesArchiveCount})</span>
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:print')} className={`${toolbarIconButtonClass} bg-blue-600 text-white hover:bg-blue-700`} title="Print Rides" aria-label="Print Rides">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z" />
+            </svg>
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="Rides Safety Snapshot" aria-label="Create Rides Safety Snapshot">
+            {renderHistoryIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:export')} className={`${toolbarIconButtonClass} bg-green-500 text-white hover:bg-green-600`} title="Export Rides" aria-label="Export Rides">
+            {renderDownloadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import Rides" aria-label="Import Rides">
+            {renderUploadIcon()}
+          </button>
+        </>
+      );
+    }
+
     return (
       <>
         <button
@@ -1063,40 +1185,49 @@ const BudgetDashboard = () => {
         </div>
       )}
 
-      <StickyToolbar bgTint={activeTabConfig?.bgColor || ''}>
-        <div className="flex justify-between items-center gap-2 h-14">
-          <div className="flex items-center space-x-1 overflow-x-auto flex-shrink min-w-0">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  if (tab.id === 'budget') {
-                    setActiveBudgetTab((current) => current || 'overview');
-                  }
-                }}
-                title={`Open ${tab.label} tab`}
-                aria-label={`Open ${tab.label} tab`}
-                className={`px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0 ${
-                  activeTab === tab.id
-                    ? 'bg-black text-white'
-                    : tab.inactiveClass
-                }`}
-                aria-pressed={activeTab === tab.id}
-              >
-                {tab.label}
-              </button>
-            ))}
+      <StickyToolbar bgTint="bg-slate-950" contentClassName="w-full px-3 sm:px-4 lg:px-6">
+        <div className="flex min-h-14 flex-wrap items-center justify-between gap-2 py-2 xl:flex-nowrap">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 overflow-visible xl:flex-nowrap">
+            {tabs.map((tab) => {
+              const TabIcon = tab.icon;
+              const isActive = activeTab === tab.id;
+
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    if (tab.id === 'budget') {
+                      setActiveBudgetTab((current) => current || 'overview');
+                    }
+                  }}
+                  title={`Open ${tab.label} tab`}
+                  aria-label={`Open ${tab.label} tab`}
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-black whitespace-nowrap transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 sm:px-3 sm:text-sm ${
+                    isActive
+                      ? tab.activeClass
+                      : tab.inactiveClass
+                  }`}
+                  aria-pressed={isActive}
+                >
+                  <TabIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-            <NotificationPanel
-              state={state}
-              activeTab={activeTab}
-              onMarkPaid={handleMarkPaidFromNotification}
-            />
+          <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
+            {activeTab === 'budget' &&
+            (activeBudgetTab === 'overview' || activeBudgetTab === 'editor') ? (
+              <NotificationPanel
+                state={state}
+                activeTab={activeTab}
+                onMarkPaid={handleMarkPaidFromNotification}
+              />
+            ) : null}
 
-            <div className="relative w-48 hidden lg:block">
+            <div className="relative hidden w-44 2xl:block">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
@@ -1125,6 +1256,18 @@ const BudgetDashboard = () => {
       <div className={`${activeTabConfig?.bgColor || 'bg-white'} min-h-screen`}>
         {activeTab === 'cscShifts' && (
           <CscShiftsTab searchQuery={searchQuery} />
+        )}
+
+        {activeTab === 'cscOpportunities' && (
+          <CscOpportunitiesTab searchQuery={searchQuery} />
+        )}
+
+        {activeTab === 'paychecks' && (
+          <PaychecksTab searchQuery={searchQuery} />
+        )}
+
+        {activeTab === 'rides' && (
+          <RidesTab searchQuery={searchQuery} />
         )}
 
         {activeTab === 'todo' && (

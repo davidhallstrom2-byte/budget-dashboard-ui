@@ -38,8 +38,13 @@ const CSC_DELETED_SEED_STORAGE_KEY = 'cscShifts.deletedSeedIds.v1';
 const CSC_SNAPSHOT_STORAGE_KEY = 'cscShifts.safetySnapshot.v1';
 const CSC_CALENDAR_ADDED_STORAGE_KEY = 'cscShifts.googleCalendarAdded.v1';
 const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
-const DEFAULT_HOURLY_RATE = '20.50';
-const OLD_DEFAULT_HOURLY_RATE = '15.50';
+const CSC_OPEN_SHIFT_STORAGE_KEY = 'cscShifts.openLinkedShiftId.v1';
+const DEFAULT_HOURLY_RATE = '19.50';
+const OLD_DEFAULT_HOURLY_RATES = ['15.50', '20.50'];
+const OVERTIME_HOUR_THRESHOLD = 8;
+const DOUBLE_TIME_HOUR_THRESHOLD = 12;
+const OVERTIME_RATE_MULTIPLIER = 1.5;
+const DOUBLE_TIME_RATE_MULTIPLIER = 2;
 
 const CSC_COMPANY = {
   name: 'Contemporary Services Corporation',
@@ -53,22 +58,294 @@ const CSC_COMPANY = {
 
 const WISH_PORTAL_URL = 'https://ess.schedulingsite.com/login';
 
-const SHIFT_STATUS_OPTIONS = ['Scheduled', 'Confirmed', 'Cancelled', 'Done'];
+const SHIFT_STATUS_OPTIONS = ['Scheduled', 'Approved', 'Cancelled', 'Done'];
 
 const getShiftStatusColorClass = (status) => {
   if (status === 'Done') return 'bg-green-600 hover:bg-green-700';
-  if (status === 'Confirmed') return 'bg-blue-600 hover:bg-blue-700';
+  if (status === 'Approved') return 'bg-blue-600 hover:bg-blue-700';
   if (status === 'Cancelled') return 'bg-red-600 hover:bg-red-700';
   return 'bg-slate-600 hover:bg-slate-700';
 };
 
 const getShiftStatusOptionStyle = (status) => {
   if (status === 'Done') return { backgroundColor: '#16a34a', color: '#ffffff' };
-  if (status === 'Confirmed') return { backgroundColor: '#2563eb', color: '#ffffff' };
+  if (status === 'Approved') return { backgroundColor: '#2563eb', color: '#ffffff' };
   if (status === 'Cancelled') return { backgroundColor: '#dc2626', color: '#ffffff' };
   return { backgroundColor: '#475569', color: '#ffffff' };
 };
 const PAID_STATUS_OPTIONS = ['Unpaid', 'Paid'];
+
+const GENERIC_CSC_PARKING_PASS_TEXT =
+  'Parking will be dictated by your parking pass. If you have not received a parking pass, please contact scheduling with your email address to request a parking pass, and refer to your parking pass for parking instructions.';
+
+const normalizeParkingTextForCompare = (value = '') =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const isGenericCscParkingPassText = (value = '') => {
+  const normalized = normalizeParkingTextForCompare(value);
+  const generic = normalizeParkingTextForCompare(GENERIC_CSC_PARKING_PASS_TEXT);
+
+  if (!normalized) return false;
+  if (normalized === generic) return true;
+
+  const hasGenericCore =
+    normalized.includes('parking will be dictated by your parking pass') &&
+    normalized.includes('please contact scheduling with your email address') &&
+    normalized.includes('refer to your parking pass for parking instructions');
+
+  if (!hasGenericCore) return false;
+
+  const specificParkingPattern =
+    /\b(lot|garage|gate|entry|enter|corner|street|st|drive|dr|avenue|ave|boulevard|blvd|zone|pink|blue|green|red|yellow|pincay|varus|century|location|address)\b/i;
+
+  return !specificParkingPattern.test(String(value || ''));
+};
+
+const cleanCscParkingText = (value = '') => {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+
+  if (!text) return '';
+
+  const genericParkingPattern =
+    /Parking\s+will\s+be\s+dictated\s+by\s+your\s+parking\s+pass\.?\s+If\s+you\s+have\s+not\s+received\s+a\s+parking\s+pass,?\s+please\s+contact\s+scheduling\s+with\s+your\s+email\s+address\s+to\s+request\s+a\s+parking\s+pass,?\s+and\s+refer\s+to\s+your\s+parking\s+pass\s+for\s+parking\s+instructions\.?/gi;
+  const withoutGeneric = text
+    .replace(genericParkingPattern, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (withoutGeneric) return withoutGeneric;
+  if (isGenericCscParkingPassText(text)) return '';
+
+  return text;
+};
+
+const normalizeCscUniformType = (value = '') => {
+  const text = String(value || '').toLowerCase();
+
+  if (!text) return '';
+
+  if (
+    /\bcoat\s*(?:&|and)\s*tie\b/i.test(text) ||
+    /\bsuit\s*(?:&|and)\s*tie\b/i.test(text) ||
+    /\bdress\s+shirt\b/i.test(text) ||
+    /\bdress\s+pants\b/i.test(text) ||
+    /\bblack\s+suit\b/i.test(text)
+  ) {
+    return 'Coat & tie';
+  }
+
+  if (
+    /\ball[-\s]?black\b/i.test(text) ||
+    /\ball\s+black\s+everything\b/i.test(text) ||
+    /\bsolid\s+black\b/i.test(text) ||
+    /\bblack\s+pants\b/i.test(text) ||
+    /\bblack\s+t-?shirt\b/i.test(text) ||
+    /\bblack\s+shoes\b/i.test(text) ||
+    /\bblack\s+socks\b/i.test(text) ||
+    /\bcsc\s*\/\s*sofi\s+uniform\b/i.test(text)
+  ) {
+    return 'All black uniform';
+  }
+
+  return '';
+};
+
+const stripCscEmailFluff = (value = '') => {
+  let text = String(value || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+
+  if (!text) return '';
+
+  text = cleanCscParkingText(text);
+
+  const fluffPatterns = [
+    /(?:\*+)?\s*TIMES\s+MAY\s+CHANGE,?\s+PLEASE\s+CHECK\s+ESS\s+BEFORE\s+SHIFT(?:\*+)?\.?/gi,
+    /\bONE\s+LUNCH\s+PER\s+PERSON,?\s+PER\s+SHIFT\s+WORKED\.?/gi,
+    /\bTeam\s+Member\s+Uniform\s+Requirements\s*:?\s*/gi,
+    /\bAll\s+team\s+members\s+are\s+required\s+to\s+wear[\s\S]*?(?:for\s+your\s+shift\.?|$)/gi,
+    /\bPlease\s+wear\s+an?\s+all[-\s]?black[\s\S]*?(?=(?:\n\s*\n|Sign[-\s]?in|Parking|Entry|Location|$))/gi,
+    /\bThe\s+following\s+items\s+are\s+NOT\s+PERMITTED\s*:[\s\S]*?(?:covered\.?|$)/gi,
+    /\bJeans,?\s+faded\s+pants[\s\S]*?(?:covered\.?|$)/gi,
+    /\bHats\s+must\s+be\s+solid\s+black[\s\S]*?(?:provided\s+at\s+sign[-\s]?in\.?|$)/gi,
+    /\bBring\s+a\s+working\s+flashlight\s+and\s+pen\.?/gi,
+    /\bCompliance\s+with\s+these\s+uniform\s+requirements[\s\S]*?(?:for\s+your\s+shift\.?|$)/gi,
+    /\bAttendance\s+Policy\s+Reminder\s*:?\s*[\s\S]*?(?=(?:\n\s*\n|Special Notes|Venue|Shift|Job|Role|$))/gi,
+    /\bPre[-\s]?Shift\s+Health\s+and\s+Wellness\s+Announcements\s*:?\s*[\s\S]*?(?=(?:\n\s*\n|Schedule for|Special Notes|Venue|Shift|Job|Role|$))/gi,
+    /\bProhibited\s+Items\s*:?\s*[\s\S]*?(?=(?:\n\s*\n|Special Notes|Venue|Shift|Job|Role|$))/gi,
+    /\bWe\s+hope\s+you\s+have\s+an\s+amazing\s+shift[^\n.!?]*[.!?]?/gi,
+  ];
+
+  fluffPatterns.forEach((pattern) => {
+    text = text.replace(pattern, ' ');
+  });
+
+  return text
+    .replace(/^\s*Special\s+Notes\s*:?\s*/i, '')
+    .replace(/^\s*Uniform\s+Requirements\s*:?\s*/i, '')
+    .replace(/^\s*Uniform\s+Notes\s*:?\s*/i, '')
+    .replace(/\s+([,.])/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+};
+
+
+const isCscNoteFluffLine = (value = '') => {
+  const line = String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  if (!line) return true;
+  if (/^(email type|sender|schedule for|shift no|role|role name|shift name|post\/area|uniform|links)\s*:/i.test(line)) return true;
+  if (/^(special notes|uniform requirements|uniform notes|attendance policy reminder|pre-shift health|prohibited items)\s*:?/i.test(line)) return true;
+
+  return /all black everything|no hoodies|black shoes|black socks|black pants|black belt|black shirt|short sleeve|long sleeve|no marking on the sleeves|written up|sent home|flashlight and pen|hats with logos|csc logo|team member uniform|solid black|uniform requirements|not permitted|prohibited items|jeans|faded pants|sweats|athletic pants|cargo pants|tights|leggings|hoodies|sweatshirts|piercings|facial tattoos|attendance policy|health and wellness|one lunch|times may change|check ess|compliance with these uniform/i.test(line);
+};
+
+const dedupeCscNoteLines = (lines = []) => {
+  const seenLines = new Set();
+  const seenLabels = new Set();
+
+  return lines.filter((line) => {
+    const normalizedLine = String(line || '').replace(/\s+/g, ' ').trim();
+    const normalizedKey = normalizedLine.toLowerCase();
+    const labelMatch = normalizedLine.match(/^([A-Za-z][A-Za-z\s/-]*?)\s*:/);
+    const labelKey = labelMatch?.[1]?.toLowerCase() || '';
+
+    if (!normalizedLine) return false;
+    if (seenLines.has(normalizedKey)) return false;
+    if (labelKey && seenLabels.has(labelKey)) return false;
+
+    seenLines.add(normalizedKey);
+    if (labelKey) seenLabels.add(labelKey);
+
+    return true;
+  });
+};
+
+const escapeCscNoteLabel = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const CSC_NOTE_FIELD_LABELS = [
+  'Email type',
+  'Sender',
+  'Schedule for',
+  'Shift No',
+  'Role',
+  'Role Name',
+  'Shift Name',
+  'Shift name',
+  'Post/area',
+  'Sign-in location',
+  'Sign in location',
+  'Special Notes',
+  'Uniform',
+  'Links',
+  'Parking',
+  'Notes',
+];
+
+const normalizeExtractedCscNoteValue = (value = '') =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s:.-]+|[\s.]+$/g, '')
+    .trim();
+
+const getCscNoteFieldValue = (value = '', labels = []) => {
+  const text = String(value || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\r/g, '\n')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!text) return '';
+
+  const loweredLabels = labels.map((label) => String(label).toLowerCase());
+  const nextLabels = CSC_NOTE_FIELD_LABELS.filter((label) => !loweredLabels.includes(label.toLowerCase()));
+  const nextPattern = nextLabels.map(escapeCscNoteLabel).join('|');
+
+  for (const label of labels) {
+    const pattern = new RegExp(
+      `(?:^|\\s)${escapeCscNoteLabel(label)}\\s*:\\s*([\\s\\S]*?)(?=\\s+(?:${nextPattern})\\s*:|$)`,
+      'i'
+    );
+    const match = text.match(pattern);
+    const valueText = normalizeExtractedCscNoteValue(match?.[1] || '');
+
+    if (valueText) return valueText;
+  }
+
+  return '';
+};
+
+const removeCscNoteFields = (value = '', labels = []) => {
+  let text = String(value || '');
+
+  labels.forEach((label) => {
+    const nextLabels = CSC_NOTE_FIELD_LABELS.filter((nextLabel) => nextLabel.toLowerCase() !== label.toLowerCase());
+    const nextPattern = nextLabels.map(escapeCscNoteLabel).join('|');
+    const fieldPattern = new RegExp(
+      `(?:^|\\s)${escapeCscNoteLabel(label)}\\s*:\\s*[\\s\\S]*?(?=\\s+(?:${nextPattern})\\s*:|$)`,
+      'gi'
+    );
+
+    text = text.replace(fieldPattern, ' ');
+  });
+
+  return text;
+};
+
+const getShiftNameFromCscNotes = (value = '') =>
+  getCscNoteFieldValue(value, ['Shift Name', 'Shift name', 'Post/area']);
+
+const getRoleNameFromCscNotes = (value = '') =>
+  getCscNoteFieldValue(value, ['Role Name', 'Role']);
+
+const cleanCscShiftNotes = (value = '', uniformSource = '') => {
+  let text = stripCscEmailFluff(value);
+
+  if (!text) return '';
+
+  text = text
+    .replace(/\bCSC\s+shift\s+email\s+imported\.?\s*Special\s+Notes\s*:\s*/gi, '')
+    .replace(/\bSpecial\s+Notes\s*:\s*(?=Email\s+type\s*:)/gi, '')
+    .replace(/\s+(Email\s+type|Sender|Schedule\s+for|Shift\s+No|Role\s+Name|Role|Shift\s+Name|Shift\s+name|Post\/area|Sign[-\s]?in\s+location|Uniform|Links|Parking|Notes)\s*:/gi, '\n$1:');
+
+  text = removeCscNoteFields(text, [
+    'Email type',
+    'Sender',
+    'Schedule for',
+    'Shift No',
+    'Role',
+    'Role Name',
+    'Shift Name',
+    'Shift name',
+    'Post/area',
+    'Uniform',
+    'Links',
+  ]);
+
+  const cleanedLines = text
+    .replace(/\bUniform\s*:\s*(?:All\s+black\s+uniform|Coat\s*&\s*tie)\.?\s*/gi, '')
+    .replace(/^\s*Special\s+Notes\s*:?\s*/i, '')
+    .replace(/\s+([,.])/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((line) => !isCscNoteFluffLine(line));
+
+  return dedupeCscNoteLines(cleanedLines).join('\n').trim();
+};
+
+
 
 const BASE_CSC_SHIFTS = [
   {
@@ -184,7 +461,7 @@ const BASE_CSC_SHIFTS = [
 const normalizeHourlyRate = (value) => {
   const rate = String(value ?? '').trim();
 
-  if (!rate || rate === OLD_DEFAULT_HOURLY_RATE) return DEFAULT_HOURLY_RATE;
+  if (!rate || OLD_DEFAULT_HOURLY_RATES.includes(rate)) return DEFAULT_HOURLY_RATE;
 
   return rate;
 };
@@ -194,32 +471,43 @@ const normalizeShiftStatus = (value) => {
 
   if (!status) return 'Scheduled';
   if (status === 'Worked') return 'Scheduled';
+  if (status === 'Confirmed') return 'Approved';
   if (status === 'Paid') return 'Done';
   if (status === 'Complete' || status === 'Completed') return 'Done';
 
   return SHIFT_STATUS_OPTIONS.includes(status) ? status : 'Scheduled';
 };
 
-const normalizeShift = (shift = {}) => ({
-  id: shift.id || `csc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-  startDate: shift.startDate || '',
-  startTime: shift.startTime || '',
-  finishDate: shift.finishDate || shift.startDate || '',
-  finishTime: shift.finishTime || '',
-  venue: shift.venue || '',
-  city: shift.city || '',
-  address: shift.address || '',
-  event: shift.event || '',
-  jobName: shift.jobName || '',
-  shiftStatus: normalizeShiftStatus(shift.shiftStatus),
-  hourlyRate: normalizeHourlyRate(shift.hourlyRate),
-  paidStatus: shift.paidStatus || 'Unpaid',
-  paymentDate: shift.paymentDate || '',
-  notes: shift.notes || '',
-  parking: shift.parking || '',
-  uniform: shift.uniform || '',
-  supervisor: shift.supervisor || '',
-});
+const normalizeShift = (shift = {}) => {
+  const rawNotes = shift.notes || '';
+  const uniform = normalizeCscUniformType(shift.uniform || rawNotes || '');
+  const shiftName = shift.shiftName || getShiftNameFromCscNotes(rawNotes);
+  const roleName = shift.roleName || getRoleNameFromCscNotes(rawNotes);
+
+  return {
+    id: shift.id || `csc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    startDate: shift.startDate || '',
+    startTime: shift.startTime || '',
+    finishDate: shift.finishDate || shift.startDate || '',
+    finishTime: shift.finishTime || '',
+    venue: shift.venue || '',
+    city: shift.city || '',
+    address: shift.address || '',
+    event: shift.event || '',
+    jobName: shift.jobName || '',
+    shiftName,
+    roleName,
+    shiftStatus: normalizeShiftStatus(shift.shiftStatus),
+    hourlyRate: normalizeHourlyRate(shift.hourlyRate),
+    paidStatus: shift.paidStatus || 'Unpaid',
+    paymentDate: shift.paymentDate || '',
+    notes: cleanCscShiftNotes(rawNotes, uniform),
+    parking: cleanCscParkingText(shift.parking || ''),
+    uniform,
+    supervisor: shift.supervisor || '',
+    archivedAt: shift.archivedAt || '',
+  };
+};
 
 const seedShifts = BASE_CSC_SHIFTS.map(normalizeShift);
 
@@ -235,6 +523,8 @@ const createBlankShift = () =>
     address: '',
     event: '',
     jobName: '',
+    shiftName: '',
+    roleName: '',
     shiftStatus: 'Scheduled',
     hourlyRate: DEFAULT_HOURLY_RATE,
     paidStatus: 'Unpaid',
@@ -308,7 +598,15 @@ const getEstimatedPay = (shift) => {
   const rate = Number.parseFloat(shift.hourlyRate);
   if (!Number.isFinite(rate) || rate <= 0) return 0;
 
-  return Math.round(getShiftHours(shift) * rate * 100) / 100;
+  const hours = getShiftHours(shift);
+  const regularHours = Math.min(hours, OVERTIME_HOUR_THRESHOLD);
+  const overtimeHours = Math.min(Math.max(hours - OVERTIME_HOUR_THRESHOLD, 0), DOUBLE_TIME_HOUR_THRESHOLD - OVERTIME_HOUR_THRESHOLD);
+  const doubleTimeHours = Math.max(hours - DOUBLE_TIME_HOUR_THRESHOLD, 0);
+  const regularPay = regularHours * rate;
+  const overtimePay = overtimeHours * rate * OVERTIME_RATE_MULTIPLIER;
+  const doubleTimePay = doubleTimeHours * rate * DOUBLE_TIME_RATE_MULTIPLIER;
+
+  return Math.round((regularPay + overtimePay + doubleTimePay) * 100) / 100;
 };
 
 const getDeletedSeedShiftIds = () => {
@@ -346,6 +644,157 @@ const removeDeletedSeedShiftId = (id) => {
   }
 };
 
+
+const normalizeShiftIdentityText = (value = '') =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const shiftIdentityTextMatches = (firstValue = '', secondValue = '') => {
+  const first = normalizeShiftIdentityText(firstValue);
+  const second = normalizeShiftIdentityText(secondValue);
+
+  return Boolean(first && second && (first === second || first.includes(second) || second.includes(first)));
+};
+
+const getShiftStartKey = (shift = {}) =>
+  [shift.startDate, shift.startTime]
+    .map((value) => String(value || '').trim())
+    .join('|');
+
+const getShiftFinishTimestamp = (shift = {}) => {
+  const finishDate = shift.finishDate || shift.startDate;
+  const finishTime = shift.finishTime || '';
+
+  if (!finishDate || !finishTime) return Number.NaN;
+
+  return new Date(`${finishDate}T${finishTime}:00`).getTime();
+};
+
+const areLikelyDuplicateShifts = (firstShift = {}, secondShift = {}) => {
+  if (!firstShift?.id || !secondShift?.id) return false;
+  if (firstShift.id === secondShift.id) return true;
+  if (!firstShift.startDate || !firstShift.startTime || !secondShift.startDate || !secondShift.startTime) return false;
+  if (getShiftStartKey(firstShift) !== getShiftStartKey(secondShift)) return false;
+  if (!shiftIdentityTextMatches(firstShift.venue, secondShift.venue)) return false;
+
+  const bothHaveJobNames = Boolean(firstShift.jobName && secondShift.jobName);
+  const bothHaveShiftNames = Boolean(firstShift.shiftName && secondShift.shiftName);
+  const bothHaveRoleNames = Boolean(firstShift.roleName && secondShift.roleName);
+
+  const jobMatches = shiftIdentityTextMatches(firstShift.jobName, secondShift.jobName);
+  const shiftNameMatches = shiftIdentityTextMatches(firstShift.shiftName, secondShift.shiftName);
+  const roleNameMatches = shiftIdentityTextMatches(firstShift.roleName, secondShift.roleName);
+  const eventMatches = shiftIdentityTextMatches(firstShift.event, secondShift.event);
+
+  if (bothHaveJobNames && !jobMatches) return false;
+  if (bothHaveShiftNames && !shiftNameMatches) return false;
+  if (bothHaveRoleNames && !roleNameMatches) return false;
+
+  if (jobMatches && (shiftNameMatches || roleNameMatches || eventMatches)) return true;
+  if (shiftNameMatches && (roleNameMatches || eventMatches || jobMatches)) return true;
+  if (roleNameMatches && eventMatches && (!bothHaveJobNames || jobMatches)) return true;
+
+  return false;
+};
+
+const appendUniqueShiftTextBlock = (existingText = '', nextText = '') => {
+  const existing = String(existingText || '').trim();
+  const next = String(nextText || '').trim();
+
+  if (!next) return existing;
+  if (!existing) return next;
+  if (normalizeShiftIdentityText(existing).includes(normalizeShiftIdentityText(next))) return existing;
+  if (normalizeShiftIdentityText(next).includes(normalizeShiftIdentityText(existing))) return next;
+
+  return `${existing}\n\n${next}`;
+};
+
+const mergeDuplicateShiftRecords = (existingShift = {}, incomingShift = {}, preferIncomingSchedule = false) => {
+  const existingStatus = normalizeShiftStatus(existingShift.shiftStatus);
+  const incomingStatus = normalizeShiftStatus(incomingShift.shiftStatus);
+  const existingLocked = existingStatus === 'Done' || existingStatus === 'Cancelled';
+  const incomingLocked = incomingStatus === 'Done' || incomingStatus === 'Cancelled';
+  const existingPaid = existingShift.paidStatus === 'Paid';
+  const incomingPaid = incomingShift.paidStatus === 'Paid';
+  const existingFinishTimestamp = getShiftFinishTimestamp(existingShift);
+  const incomingFinishTimestamp = getShiftFinishTimestamp(incomingShift);
+  const useIncomingFinish = preferIncomingSchedule
+    ? Boolean(incomingShift.finishTime)
+    : Number.isFinite(incomingFinishTimestamp) &&
+      (!Number.isFinite(existingFinishTimestamp) || incomingFinishTimestamp > existingFinishTimestamp);
+  const safeIncomingEvent =
+    incomingShift.event && incomingShift.event !== 'CSC courtesy shift reminder' ? incomingShift.event : '';
+  const safeIncomingJobName =
+    incomingShift.jobName && incomingShift.jobName !== 'Accepted CSC shift' ? incomingShift.jobName : '';
+
+  return normalizeShift({
+    ...existingShift,
+    id: existingShift.id || incomingShift.id,
+    startDate: existingShift.startDate || incomingShift.startDate,
+    startTime: existingShift.startTime || incomingShift.startTime,
+    finishDate: useIncomingFinish
+      ? incomingShift.finishDate || incomingShift.startDate
+      : existingShift.finishDate || existingShift.startDate || incomingShift.finishDate || incomingShift.startDate,
+    finishTime: useIncomingFinish ? incomingShift.finishTime : existingShift.finishTime || incomingShift.finishTime,
+    venue: incomingShift.venue || existingShift.venue,
+    city: incomingShift.city || existingShift.city,
+    address: incomingShift.address || existingShift.address,
+    event: safeIncomingEvent || existingShift.event || incomingShift.event,
+    jobName: safeIncomingJobName || existingShift.jobName || incomingShift.jobName,
+    shiftName: incomingShift.shiftName || existingShift.shiftName,
+    roleName: incomingShift.roleName || existingShift.roleName,
+    shiftStatus: existingLocked ? existingStatus : incomingLocked ? incomingStatus : incomingStatus || existingStatus,
+    hourlyRate: existingShift.hourlyRate || incomingShift.hourlyRate || DEFAULT_HOURLY_RATE,
+    paidStatus: existingPaid || incomingPaid ? 'Paid' : existingShift.paidStatus || incomingShift.paidStatus || 'Unpaid',
+    paymentDate: existingShift.paymentDate || incomingShift.paymentDate,
+    notes: cleanCscShiftNotes(
+      appendUniqueShiftTextBlock(existingShift.notes, incomingShift.notes),
+      existingShift.uniform || incomingShift.uniform || ''
+    ),
+    parking: incomingShift.parking || existingShift.parking,
+    uniform: normalizeCscUniformType(
+      incomingShift.uniform || existingShift.uniform || incomingShift.notes || existingShift.notes || ''
+    ),
+    supervisor: incomingShift.supervisor || existingShift.supervisor,
+    archivedAt: existingShift.archivedAt || incomingShift.archivedAt || '',
+  });
+};
+
+const dedupeShiftRecords = (records = []) => {
+  const deduped = [];
+  const removedIds = [];
+  const replacementIds = new Map();
+
+  records.forEach((rawShift) => {
+    const shift = normalizeShift(rawShift);
+    const duplicateIndex = deduped.findIndex((existingShift) => areLikelyDuplicateShifts(existingShift, shift));
+
+    if (duplicateIndex < 0) {
+      deduped.push(shift);
+      return;
+    }
+
+    const existingShift = deduped[duplicateIndex];
+    deduped[duplicateIndex] = mergeDuplicateShiftRecords(existingShift, shift, false);
+
+    if (shift.id && shift.id !== existingShift.id) {
+      removedIds.push(shift.id);
+      replacementIds.set(shift.id, existingShift.id);
+    }
+  });
+
+  return {
+    shifts: deduped.sort((first, second) =>
+      `${first.startDate}T${first.startTime}`.localeCompare(`${second.startDate}T${second.startTime}`)
+    ),
+    removedIds,
+    replacementIds,
+  };
+};
+
 const loadSavedShifts = () => {
   try {
     const saved = localStorage.getItem(CSC_STORAGE_KEY);
@@ -360,9 +809,41 @@ const loadSavedShifts = () => {
       .map((shift) => ({ ...shift, ...(savedById.get(shift.id) || {}) }));
     const seedIds = new Set(seedShifts.map((shift) => shift.id));
     const imported = parsed.filter((shift) => shift?.id && !seedIds.has(shift.id)).map(normalizeShift);
+    const mergedShifts = [...mergedSeeds, ...imported].sort((first, second) =>
+      `${first.startDate}T${first.startTime}`.localeCompare(`${second.startDate}T${second.startTime}`)
+    );
+    const dedupeResult = dedupeShiftRecords(mergedShifts);
 
-    return [...mergedSeeds, ...imported].sort((a, b) => `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`));
-  } catch {
+    if (dedupeResult.removedIds.length) {
+      const archivedSaved = localStorage.getItem(CSC_ARCHIVE_STORAGE_KEY);
+      const archivedParsed = archivedSaved ? JSON.parse(archivedSaved) : [];
+      const snapshot = {
+        id: `csc-snapshot-${Date.now()}`,
+        label: 'Before automatic CSC duplicate cleanup',
+        createdAt: new Date().toISOString(),
+        activeShifts: mergedShifts,
+        archivedShifts: Array.isArray(archivedParsed) ? archivedParsed : [],
+      };
+
+      localStorage.setItem(CSC_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+      localStorage.setItem(CSC_STORAGE_KEY, JSON.stringify(dedupeResult.shifts));
+
+      const calendarSaved = localStorage.getItem(CSC_CALENDAR_ADDED_STORAGE_KEY);
+      const calendarIds = calendarSaved ? JSON.parse(calendarSaved) : [];
+
+      if (Array.isArray(calendarIds)) {
+        const nextCalendarIds = new Set(calendarIds);
+        dedupeResult.replacementIds.forEach((keptId, removedId) => {
+          if (nextCalendarIds.has(removedId)) nextCalendarIds.add(keptId);
+          nextCalendarIds.delete(removedId);
+        });
+        localStorage.setItem(CSC_CALENDAR_ADDED_STORAGE_KEY, JSON.stringify(Array.from(nextCalendarIds)));
+      }
+    }
+
+    return dedupeResult.shifts;
+  } catch (error) {
+    console.error('Failed to load and deduplicate CSC shifts:', error);
     return seedShifts;
   }
 };
@@ -459,15 +940,22 @@ const slashDateToIso = (value = '') => {
 };
 
 const createShiftIdFromEmail = (shift) => {
-  const slug = [shift.venue, shift.jobName, shift.startDate, shift.startTime]
+  const descriptorSlug = [shift.venue, shift.jobName || shift.event, shift.shiftName, shift.roleName]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 90);
+    .slice(0, 70);
+  const windowSlug = [shift.startDate, shift.startTime, shift.finishDate || shift.startDate, shift.finishTime]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const slug = [descriptorSlug, windowSlug || Date.now()].filter(Boolean).join('-');
 
-  return `csc-email-${slug || Date.now()}`;
+  return `csc-email-${slug}`;
 };
 
 const inferVenueFromAcceptanceEmail = (jobText = '', roleText = '') => {
@@ -514,24 +1002,89 @@ const cleanEventNameFromJob = (jobText = '') => {
 };
 
 const ACCEPTANCE_EMAIL_LABELS = [
+  'Scheduled Start Time',
+  'Scheduled Finish Time',
+  'Scheduled Start',
+  'Scheduled Finish',
+  'Schedule for',
+  'Attendance Policy Reminder',
+  'Pre-Shift Health and Wellness Announcements',
+  'Uniform Requirements',
+  'Prohibited Items',
+  'Uniform Notes',
+  'ID Badge',
   'Event Date',
-  'Job Name',
-  'Event Name',
-  'Venue Name',
-  'Venue Address',
-  'Shift Name',
-  'Role Name',
   'Job Start Time',
   'Job End Time',
   'Special Notes',
+  'Venue Address',
+  'Venue Name',
+  'Event Name',
+  'Shift Name',
+  'Role Name',
+  'Job Name',
+  'Shift No',
+  'Venue',
+  'Shift',
   'Job',
   'Role',
 ];
 
 const escapeRegExp = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const normalizeEmailSource = (value = '') =>
+  String(value || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/\r/g, '\n')
+    .trim();
+
+const cleanScannedTextBlock = (value = '') =>
+  String(value || '')
+    .replace(/\s+-\s+/g, '\n- ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .replace(/\s+-\s*$/g, '')
+    .trim();
+
+const cleanScannedInlineText = (value = '') =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const truncateScannedTextAt = (value = '', phrases = []) => {
+  let result = String(value || '');
+
+  phrases.forEach((phrase) => {
+    const index = result.toLowerCase().indexOf(String(phrase || '').toLowerCase());
+    if (index >= 0) result = result.slice(0, index);
+  });
+
+  return result.trim();
+};
+
 const getAcceptanceField = (source = '', labels = []) => {
-  const lines = String(source || '')
+  const normalizedSource = normalizeEmailSource(source);
+  const compact = normalizedSource.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+  const orderedLabels = [...ACCEPTANCE_EMAIL_LABELS].sort((first, second) => second.length - first.length);
+
+  for (const label of labels) {
+    const startPattern = new RegExp(`(?:^|\\s)${escapeRegExp(label)}\\s*:\\s*`, 'i');
+    const startMatch = startPattern.exec(compact);
+    if (!startMatch) continue;
+
+    const startIndex = startMatch.index + startMatch[0].length;
+    const remaining = compact.slice(startIndex);
+    const nextLabels = orderedLabels.filter((nextLabel) => nextLabel.toLowerCase() !== label.toLowerCase());
+    const nextPattern = new RegExp(`\\s(?:${nextLabels.map(escapeRegExp).join('|')})\\s*:\\s*`, 'i');
+    const nextMatch = nextPattern.exec(remaining);
+    const endIndex = nextMatch ? nextMatch.index : remaining.length;
+    const value = remaining.slice(0, endIndex).trim();
+
+    if (value) return value.replace(/^[-:]+\s*/, '').trim();
+  }
+
+  const lines = normalizedSource
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -544,34 +1097,12 @@ const getAcceptanceField = (source = '', labels = []) => {
     if (value) return value.replace(/^[-:]+\s*/, '').trim();
   }
 
-  const compact = String(source || '').replace(/\r/g, '\n');
-
-  for (const label of labels) {
-    const startPattern = new RegExp(`${escapeRegExp(label)}\\s*:?\\s*`, 'i');
-    const startMatch = startPattern.exec(compact);
-    if (!startMatch) continue;
-
-    const startIndex = startMatch.index + startMatch[0].length;
-    const remaining = compact.slice(startIndex);
-    const nextIndexes = ACCEPTANCE_EMAIL_LABELS
-      .filter((nextLabel) => nextLabel.toLowerCase() !== label.toLowerCase())
-      .map((nextLabel) => {
-        const nextMatch = new RegExp(`(?:\\n|\\s{2,})${escapeRegExp(nextLabel)}\\s*:?`, 'i').exec(remaining);
-        return nextMatch ? nextMatch.index : -1;
-      })
-      .filter((index) => index >= 0);
-    const endIndex = nextIndexes.length ? Math.min(...nextIndexes) : remaining.length;
-    const value = remaining.slice(0, endIndex).trim();
-
-    if (value) return value.replace(/^[-:]+\s*/, '').trim();
-  }
-
   return '';
 };
 
 const parseDateTimeText = (value = '') => {
   const match = String(value || '').trim().match(
-    /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2})\s*(AM|PM)?/i
+    /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2})(?::\d{2})?\s*(AM|PM)?/i
   );
 
   if (!match) {
@@ -594,6 +1125,14 @@ const inferVenueCityFromFields = (venueName = '', venueAddress = '') => {
       venue: venueText || 'Rose Bowl',
       city: 'Pasadena',
       address: addressText || '1001 Rose Bowl Dr',
+    };
+  }
+
+  if (/kia\s+forum|the\s+forum|3600\s+pincay/i.test(combined)) {
+    return {
+      venue: venueText || 'The Kia Forum',
+      city: 'Inglewood',
+      address: addressText || '3600 Pincay Dr, Inglewood, CA 90305',
     };
   }
 
@@ -620,11 +1159,288 @@ const inferVenueCityFromFields = (venueName = '', venueAddress = '') => {
   };
 };
 
-const parseAcceptanceEmail = (text) => {
-  const source = String(text || '')
-    .replace(/\u00a0/g, ' ')
-    .replace(/[\t ]+/g, ' ')
+const buildScannedEmailNotes = ({
+  source,
+  titleText,
+  scheduleForText,
+  shiftNumberText,
+  specialNotesText,
+}) => {
+  const emailMatch = source.match(/\b[A-Z0-9._%+-]+@csc-usa\.com\b/i);
+  const urls = Array.from(new Set(source.match(/https?:\/\/[^\s)]+/gi) || []));
+  const uniformType = normalizeCscUniformType(`${source} ${specialNotesText || ''}`);
+  const cleanedSpecialNotes = stripCscEmailFluff(specialNotesText);
+
+  return cleanCscShiftNotes(
+    [
+      titleText ? `Email type: ${titleText}.` : 'CSC shift email imported.',
+      emailMatch ? `Sender: ${emailMatch[0]}.` : '',
+      shiftNumberText ? `Shift No: ${shiftNumberText}.` : '',
+      uniformType ? `Uniform: ${uniformType}.` : '',
+      cleanedSpecialNotes ? `Special Notes:\n${cleanedSpecialNotes}` : '',
+      urls.length ? `Links:\n${urls.join('\n')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    uniformType
+  );
+};
+
+const extractKiaForumEntryAddress = (value = '') => {
+  const text = cleanScannedTextBlock(value);
+  const stripped = text.replace(/^ENTRY\s+POINT\s+ADDRESS\s*:\s*/i, '').trim();
+  const parkingIndex = stripped.search(/\bParking\s+will\s+be\b/i);
+  const rawAddress = parkingIndex >= 0 ? stripped.slice(0, parkingIndex).trim() : stripped;
+
+  return rawAddress
+    .replace(/,\s*(CA),\s*(\d{5}(?:-\d{4})?)/i, ', $1 $2')
+    .replace(/\s+/g, ' ')
     .trim();
+};
+
+const extractKiaForumParking = (value = '') => {
+  const text = cleanScannedTextBlock(value);
+  const match = text.match(/\b(Parking\s+will\s+be.*)$/i);
+
+  return cleanCscParkingText(match?.[1]?.trim() || '');
+};
+
+const cleanKiaForumSignIn = (value = '') =>
+  cleanScannedTextBlock(value)
+    .replace(/^SIGN[-\s]?IN\s+(?:IS\s+|LOCATION\s*:?\s*)/i, '')
+    .trim();
+
+const normalizeKiaForumVenueName = (value = '') => {
+  const venueText = cleanScannedTextBlock(value);
+
+  if (/^(the\s+forum|forum)$/i.test(venueText)) return 'The Kia Forum';
+
+  return venueText;
+};
+
+const parseKiaForumScheduleEmail = (text) => {
+  const source = String(text || '').replace(/\u00a0/g, ' ').replace(/\r/g, '\n').trim();
+
+  if (
+    !source ||
+    !/\b(the\s+forum|kia\s+forum)\b/i.test(source) ||
+    !/\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?/i.test(source)
+  ) {
+    return [];
+  }
+
+  const lines = source
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const candidateLines = lines.filter((line) => {
+    const cells = line.split(/\t+/).map((cell) => cell.trim()).filter(Boolean);
+
+    return (
+      cells.length >= 8 &&
+      /\b(the\s+forum|kia\s+forum)\b/i.test(cells.join(' ')) &&
+      cells.some((cell) => /\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}/i.test(cell))
+    );
+  });
+
+  return candidateLines
+    .map((line) => {
+      const cells = line.split(/\t+/).map((cell) => cell.trim()).filter(Boolean);
+
+      if (cells.length < 8) return null;
+
+      const [
+        jobNameCell,
+        venueCell,
+        shiftNameCell,
+        roleNameCell,
+        startTimeCell,
+        endTimeCell,
+        entryPointCell,
+        signInCell,
+        ...uniformCells
+      ] = cells;
+      const startDateTime = parseDateTimeText(startTimeCell);
+      const finishDateTime = parseDateTimeText(endTimeCell);
+
+      if (!startDateTime.date && !finishDateTime.date) return null;
+
+      const cleanedJobName = cleanScannedInlineText(jobNameCell);
+      const cleanedShiftName = cleanScannedInlineText(shiftNameCell);
+      const cleanedRoleName = cleanScannedInlineText(roleNameCell);
+      const venueName = normalizeKiaForumVenueName(venueCell);
+      const entryAddress = extractKiaForumEntryAddress(entryPointCell);
+      const parking = extractKiaForumParking(entryPointCell);
+      const signIn = cleanKiaForumSignIn(signInCell);
+      const uniform = normalizeCscUniformType(`${uniformCells.join(' ')} ${line}`);
+      const venueInfo = inferVenueCityFromFields(venueName, entryAddress);
+      const notes = cleanCscShiftNotes(
+        [
+          'Email type: Kia Forum schedule import.',
+          uniform ? `Uniform: ${uniform}.` : '',
+          signIn ? `Sign-in location:\n${signIn}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+        uniform
+      );
+
+      const parsedShift = normalizeShift({
+        ...venueInfo,
+        startDate: startDateTime.date,
+        startTime: startDateTime.time,
+        finishDate: finishDateTime.date || startDateTime.date,
+        finishTime: finishDateTime.time,
+        event: cleanedJobName || 'Kia Forum event',
+        jobName: cleanedJobName || cleanedRoleName || 'Kia Forum shift',
+        shiftName: cleanedShiftName,
+        roleName: cleanedRoleName,
+        shiftStatus: 'Approved',
+        hourlyRate: DEFAULT_HOURLY_RATE,
+        paidStatus: 'Unpaid',
+        notes,
+        parking,
+        uniform,
+      });
+
+      return normalizeShift({
+        ...parsedShift,
+        id: createShiftIdFromEmail(parsedShift),
+      });
+    })
+    .filter(Boolean);
+};
+
+const getScheduleTableCell = (cells = [], index = 0) => String(cells[index] || '').trim();
+
+const normalizeScheduleVenueName = (value = '') => {
+  const venueText = cleanScannedTextBlock(value);
+
+  if (/^(the\s+forum|forum)$/i.test(venueText)) return 'The Kia Forum';
+  if (/^sofi\s+stadium\s+and\s+hollywood\s+park$/i.test(venueText)) return 'SoFi Stadium and Hollywood Park';
+
+  return venueText;
+};
+
+const extractScheduleEntryAddress = (parkingText = '') => {
+  const cleaned = cleanScannedTextBlock(parkingText);
+  const entryMatch = cleaned.match(/ENTRY\s+POINT\s+ADDRESS\s*:\s*([\s\S]*?)(?:\s+Parking\s+will\s+be\b|\s+Location\s*:|\s+SIGN[-\s]?IN\b|$)/i);
+
+  if (!entryMatch) return '';
+
+  return entryMatch[1]
+    .replace(/,\s*(CA),\s*(\d{5}(?:-\d{4})?)/i, ', $1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const extractScheduleParking = (parkingText = '') => {
+  const cleaned = cleanScannedTextBlock(parkingText);
+  const parkingWillBeMatch = cleaned.match(/\b(Parking\s+will\s+be[\s\S]*)$/i);
+  const locationMatch = cleaned.match(/\b(Location\s*:\s*[\s\S]*)$/i);
+  const parking = (parkingWillBeMatch?.[1] || locationMatch?.[1] || cleaned)
+    .replace(/^ENTRY\s+POINT\s+ADDRESS\s*:\s*[\s\S]*?(?=\b(?:Parking\s+will\s+be|Location\s*:))/i, '')
+    .trim();
+
+  return cleanCscParkingText(parking);
+};
+
+const parseSchedulingDetailsTableEmail = (text) => {
+  const source = String(text || '').replace(/\u00a0/g, ' ').replace(/\r/g, '\n').trim();
+
+  if (!source) return [];
+
+  const lines = source
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const headerIndex = lines.findIndex((line) =>
+    /Job Name/i.test(line) &&
+    /Venue/i.test(line) &&
+    /Shift Name/i.test(line) &&
+    /Start Time/i.test(line) &&
+    /End Time/i.test(line)
+  );
+
+  if (headerIndex < 0) return [];
+
+  const emailMatch = source.match(/\b[A-Z0-9._%+-]+@csc-usa\.com\b/i);
+  const scheduleForText = source.match(/Dear\s+([^,\n]+),/i)?.[1]?.trim() || '';
+  const titleText = source.match(/Your Scheduling Details/i)?.[0] || 'CSC schedule table';
+  const dataLines = lines.slice(headerIndex + 1);
+
+  return dataLines
+    .map((line) => {
+      const cells = line.split('\t').map((cell) => cell.trim());
+
+      if (cells.length < 6) return null;
+
+      const jobNameCell = getScheduleTableCell(cells, 0);
+      const venueCell = getScheduleTableCell(cells, 1);
+      const shiftNameCell = getScheduleTableCell(cells, 2);
+      const roleNameCell = getScheduleTableCell(cells, 3);
+      const startTimeCell = getScheduleTableCell(cells, 4);
+      const endTimeCell = getScheduleTableCell(cells, 5);
+      const parkingCell = getScheduleTableCell(cells, 6);
+      const signInCell = getScheduleTableCell(cells, 7);
+      const uniformCell = getScheduleTableCell(cells, 8);
+      const startDateTime = parseDateTimeText(startTimeCell);
+      const finishDateTime = parseDateTimeText(endTimeCell);
+
+      if (!startDateTime.date || !startDateTime.time || !finishDateTime.time) return null;
+
+      const venueName = normalizeScheduleVenueName(venueCell);
+      const entryAddress = extractScheduleEntryAddress(parkingCell);
+      const venueInfoFromFields = inferVenueCityFromFields(venueName, entryAddress);
+      const venueInfoFromText = inferVenueFromAcceptanceEmail(`${jobNameCell} ${shiftNameCell}`, venueCell);
+      const venueInfo = venueInfoFromFields.venue || venueInfoFromFields.address ? venueInfoFromFields : venueInfoFromText;
+      const cleanedJobName = cleanScannedInlineText(jobNameCell);
+      const cleanedShiftName = cleanScannedInlineText(shiftNameCell);
+      const cleanedRoleName = cleanScannedInlineText(roleNameCell);
+      const cleanedSignIn = cleanKiaForumSignIn(signInCell);
+      const parking = extractScheduleParking(parkingCell);
+      const uniform = normalizeCscUniformType(`${uniformCell} ${line}`);
+      const eventText = /fifa|world\s*cup/i.test(cleanedJobName) ? '2026 FIFA World Cup' : cleanEventNameFromJob(cleanedJobName);
+      const notes = cleanCscShiftNotes(
+        [
+          `Email type: ${titleText}.`,
+          emailMatch ? `Sender: ${emailMatch[0]}.` : '',
+              uniform ? `Uniform: ${uniform}.` : '',
+          cleanedSignIn ? `Sign-in location:\n${cleanedSignIn}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+        uniform
+      );
+
+      const parsedShift = normalizeShift({
+        ...venueInfo,
+        startDate: startDateTime.date,
+        startTime: startDateTime.time,
+        finishDate: finishDateTime.date || startDateTime.date,
+        finishTime: finishDateTime.time,
+        event: eventText,
+        jobName: cleanedJobName || cleanedRoleName || 'CSC scheduled shift',
+        shiftName: cleanedShiftName,
+        roleName: cleanedRoleName,
+        shiftStatus: 'Approved',
+        hourlyRate: DEFAULT_HOURLY_RATE,
+        paidStatus: 'Unpaid',
+        notes,
+        parking,
+        uniform,
+      });
+
+      return normalizeShift({
+        ...parsedShift,
+        id: createShiftIdFromEmail(parsedShift),
+      });
+    })
+    .filter(Boolean);
+};
+
+const parseAcceptanceEmail = (text) => {
+  const source = normalizeEmailSource(text);
 
   if (!source) return null;
 
@@ -633,54 +1449,87 @@ const parseAcceptanceEmail = (text) => {
   const oldRoleText = getAcceptanceField(source, ['Role']);
   const jobNameText = getAcceptanceField(source, ['Job Name']);
   const eventNameText = getAcceptanceField(source, ['Event Name']);
-  const venueNameText = getAcceptanceField(source, ['Venue Name']);
+  const venueNameText = getAcceptanceField(source, ['Venue Name', 'Venue']);
   const venueAddressText = getAcceptanceField(source, ['Venue Address']);
   const shiftNameText = getAcceptanceField(source, ['Shift Name']);
   const roleNameText = getAcceptanceField(source, ['Role Name']);
-  const jobStartText = getAcceptanceField(source, ['Job Start Time']);
-  const jobEndText = getAcceptanceField(source, ['Job End Time']);
+  const inlineShiftText = getAcceptanceField(source, ['Shift']);
+  const shiftNumberText = getAcceptanceField(source, ['Shift No']);
+  const scheduleForText = getAcceptanceField(source, ['Schedule for']);
+  const jobStartText = getAcceptanceField(source, ['Job Start Time', 'Scheduled Start Time', 'Scheduled Start']);
+  const jobEndText = getAcceptanceField(source, ['Job End Time', 'Scheduled Finish Time', 'Scheduled Finish']);
   const specialNotesText = getAcceptanceField(source, ['Special Notes']);
-  const titleMatch = source.match(/APPROVED\s*[–-]\s*Schedule\s+Update/i);
+  const uniformRequirementsText = getAcceptanceField(source, ['Uniform Requirements', 'Uniform Notes']);
+  const attendanceText = getAcceptanceField(source, ['Attendance Policy Reminder']);
+  const healthText = truncateScannedTextAt(getAcceptanceField(source, ['Pre-Shift Health and Wellness Announcements']), [
+    'We hope you have an amazing shift',
+    'Schedule for',
+  ]);
+  const approvedTitleMatch = source.match(/APPROVED\s*[–-]\s*Schedule\s+Update/i);
+  const courtesyTitleMatch = source.match(/Courtesy\s+Shift\s+Reminder\s*&\s*Important\s+Info/i);
+  const titleText = approvedTitleMatch?.[0] || courtesyTitleMatch?.[0] || '';
 
   const jobText = jobNameText || oldJobText || '';
+  const shiftText = shiftNameText || inlineShiftText || '';
   const eventText = eventNameText || cleanEventNameFromJob(oldJobText || jobNameText || '');
   const roleText = oldRoleText || roleNameText || '';
   const eventDate = slashDateToIso(eventDateText || '');
   const startDateTime = parseDateTimeText(jobStartText);
   const finishDateTime = parseDateTimeText(jobEndText);
   const timeMatch = roleText.match(
-    /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2})\s*(AM|PM)?\s+to\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2})\s*(AM|PM)?/i
+    /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2})(?::\d{2})?\s*(AM|PM)?\s+to\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2})(?::\d{2})?\s*(AM|PM)?/i
   );
 
-  if (!jobText && !eventText && !roleText && !eventDate && !startDateTime.date) return null;
+  const hasUsefulData = Boolean(
+    jobText ||
+    eventText ||
+    roleText ||
+    shiftText ||
+    venueNameText ||
+    eventDate ||
+    startDateTime.date ||
+    finishDateTime.date ||
+    scheduleForText ||
+    attendanceText ||
+    healthText
+  );
+
+  if (!hasUsefulData) return null;
 
   const inferredFromFields = inferVenueCityFromFields(venueNameText, venueAddressText);
-  const inferredFromText = inferVenueFromAcceptanceEmail(jobText, roleText || `${eventText} ${venueNameText}`);
+  const inferredFromText = inferVenueFromAcceptanceEmail(`${jobText} ${shiftText} ${eventText}`, roleText || `${eventText} ${venueNameText}`);
   const venueInfo = inferredFromFields.venue || inferredFromFields.address ? inferredFromFields : inferredFromText;
   const startDate = startDateTime.date || slashDateToIso(timeMatch?.[1] || '') || eventDate;
   const startTime = startDateTime.time || normalizeTimeValue(timeMatch?.[2] || '', timeMatch?.[3] || '');
   const finishDate = finishDateTime.date || slashDateToIso(timeMatch?.[4] || '') || startDate;
   const finishTime = finishDateTime.time || normalizeTimeValue(timeMatch?.[5] || '', timeMatch?.[6] || '');
   const parsedRoleName = roleNameText || roleText.split(/\s+[–-]\s+\d{1,2}\/\d{1,2}\/\d{4}\s+/i)[0]?.trim() || '';
+  const uniform = normalizeCscUniformType(`${source} ${uniformRequirementsText} ${specialNotesText}`);
+  const notes = buildScannedEmailNotes({
+    source,
+    titleText,
+    scheduleForText,
+    shiftNumberText,
+    specialNotesText: [specialNotesText, uniformRequirementsText].filter(Boolean).join('\n\n'),
+    attendanceText,
+    healthText,
+  });
   const parsedShift = normalizeShift({
     ...venueInfo,
     startDate,
     startTime,
     finishDate,
     finishTime,
-    event: eventText || cleanEventNameFromJob(jobText),
-    jobName: jobText || shiftNameText || parsedRoleName || 'Accepted CSC shift',
-    shiftStatus: 'Confirmed',
+    event: eventText || (courtesyTitleMatch ? 'CSC courtesy shift reminder' : cleanEventNameFromJob(jobText)),
+    jobName: jobText || shiftText || parsedRoleName || 'Accepted CSC shift',
+    shiftName: shiftText,
+    roleName: parsedRoleName,
+    shiftStatus: 'Approved',
     hourlyRate: DEFAULT_HOURLY_RATE,
     paidStatus: 'Unpaid',
-    notes: [
-      titleMatch ? 'Accepted shift email: APPROVED - Schedule Update.' : 'Accepted shift email imported.',
-      shiftNameText ? `Shift: ${shiftNameText}.` : '',
-      parsedRoleName ? `Role: ${parsedRoleName}.` : '',
-      specialNotesText || '',
-    ]
-      .filter(Boolean)
-      .join('\n'),
+    notes,
+    parking: '',
+    uniform,
   });
 
   return normalizeShift({
@@ -688,6 +1537,121 @@ const parseAcceptanceEmail = (text) => {
     id: createShiftIdFromEmail(parsedShift),
   });
 };
+
+const parseAcceptanceEmails = (text) => {
+  const tableShifts = parseSchedulingDetailsTableEmail(text);
+
+  if (tableShifts.length) return tableShifts;
+
+  const kiaForumShifts = parseKiaForumScheduleEmail(text);
+
+  if (kiaForumShifts.length) return kiaForumShifts;
+
+  const singleShift = parseAcceptanceEmail(text);
+
+  return singleShift ? [singleShift] : [];
+};
+
+const normalizeForScanCompare = (value = '') =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const appendUniqueTextBlock = (existingText = '', nextText = '') => {
+  const existing = String(existingText || '').trim();
+  const next = String(nextText || '').trim();
+
+  if (!next) return existing;
+  if (!existing) return next;
+  if (existing.includes(next)) return existing;
+
+  return `${existing}\n\n${next}`;
+};
+
+const getShiftWindowKey = (shift = {}) =>
+  [shift.startDate, shift.startTime, shift.finishDate || shift.startDate, shift.finishTime]
+    .map((value) => String(value || '').trim())
+    .join('|');
+
+const hasCompleteShiftWindow = (shift = {}) =>
+  Boolean(shift.startDate && shift.startTime && (shift.finishDate || shift.startDate) && shift.finishTime);
+
+const shiftWindowsMatch = (firstShift = {}, secondShift = {}) =>
+  hasCompleteShiftWindow(firstShift) &&
+  hasCompleteShiftWindow(secondShift) &&
+  getShiftWindowKey(firstShift) === getShiftWindowKey(secondShift);
+
+const scanTextIncludes = (firstValue = '', secondValue = '') => {
+  const first = normalizeForScanCompare(firstValue);
+  const second = normalizeForScanCompare(secondValue);
+
+  return Boolean(first && second && (first.includes(second) || second.includes(first)));
+};
+
+const getScannedShiftMatchScore = (existingShift = {}, scannedShift = {}) => {
+  let score = 0;
+
+  if (scanTextIncludes(existingShift.venue, scannedShift.venue)) score += 2;
+  if (scanTextIncludes(existingShift.address, scannedShift.address)) score += 2;
+  if (scanTextIncludes(existingShift.jobName, scannedShift.jobName)) score += 2;
+  if (scanTextIncludes(existingShift.shiftName, scannedShift.shiftName)) score += 2;
+  if (scanTextIncludes(existingShift.roleName, scannedShift.roleName)) score += 1;
+  if (scanTextIncludes(existingShift.event, scannedShift.event)) score += 1;
+  if (scanTextIncludes(existingShift.city, scannedShift.city)) score += 1;
+
+  return score;
+};
+
+const findMatchingShiftIdForScannedEmail = (currentShifts = [], scannedShift = {}) => {
+  if (!scannedShift?.startDate || !scannedShift?.startTime) return '';
+
+  const exactIdMatch = currentShifts.find((shift) => shift.id === scannedShift.id);
+  if (exactIdMatch && areLikelyDuplicateShifts(exactIdMatch, scannedShift)) return exactIdMatch.id;
+
+  if (hasCompleteShiftWindow(scannedShift)) {
+    const sameWindowShifts = currentShifts.filter((shift) => shiftWindowsMatch(shift, scannedShift));
+    const strongWindowMatch = sameWindowShifts.find(
+      (shift) => areLikelyDuplicateShifts(shift, scannedShift) || getScannedShiftMatchScore(shift, scannedShift) >= 4
+    );
+
+    if (strongWindowMatch) return strongWindowMatch.id;
+  }
+
+  const sameStartDuplicate = currentShifts.find((shift) => areLikelyDuplicateShifts(shift, scannedShift));
+
+  return sameStartDuplicate?.id || '';
+};
+
+const createUniqueScannedShiftId = (currentById, scannedShift = {}) => {
+  const baseId = scannedShift.id || createShiftIdFromEmail(scannedShift);
+  const existingShift = currentById.get(baseId);
+
+  if (!existingShift) return baseId;
+
+  if (shiftWindowsMatch(existingShift, scannedShift)) return baseId;
+
+  const suffix = [scannedShift.startDate, scannedShift.startTime, scannedShift.finishDate, scannedShift.finishTime]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const trimmedBaseId = baseId.slice(0, Math.max(24, 110 - suffix.length));
+  let uniqueId = `${trimmedBaseId}-${suffix || Date.now()}`;
+  let counter = 2;
+
+  while (currentById.has(uniqueId)) {
+    uniqueId = `${trimmedBaseId}-${suffix || Date.now()}-${counter}`;
+    counter += 1;
+  }
+
+  return uniqueId;
+};
+
+const mergeScannedShiftWithExisting = (existingShift = {}, scannedShift = {}) =>
+  mergeDuplicateShiftRecords(existingShift, scannedShift, true);
 
 const parseCsv = (text) => {
   const lines = text
@@ -718,6 +1682,8 @@ const parseCsv = (text) => {
       address: row.address,
       event: row.event,
       jobName: row.jobName,
+      shiftName: row.shiftName,
+      roleName: row.roleName,
       shiftStatus: row.shiftStatus,
       hourlyRate: row.hourlyRate,
       paidStatus: row.paidStatus,
@@ -742,6 +1708,8 @@ const buildCsv = (shifts) => {
     'address',
     'event',
     'jobName',
+    'shiftName',
+    'roleName',
     'hours',
     'shiftStatus',
     'hourlyRate',
@@ -793,12 +1761,13 @@ const buildPremiumScheduleHtml = (shifts, summary) => {
               <tr><th>Finish</th><td>${escapeHtml(formatDate(shift.finishDate))} ${escapeHtml(formatTime(shift.finishTime))}</td></tr>
               <tr><th>Venue Address</th><td>${escapeHtml(shift.address || 'Address not shown')}${shift.city ? `, ${escapeHtml(shift.city)}` : ''}</td></tr>
               <tr><th>Job Name</th><td>${escapeHtml(shift.jobName || 'Job name not entered')}</td></tr>
+              ${shift.shiftName ? `<tr><th>Shift Name</th><td>${escapeHtml(shift.shiftName)}</td></tr>` : ''}
+              ${shift.roleName ? `<tr><th>Role Name</th><td>${escapeHtml(shift.roleName)}</td></tr>` : ''}
               <tr><th>Hours</th><td>${getShiftHours(shift).toFixed(1)}</td></tr>
               <tr><th>Hourly Rate</th><td>${escapeHtml(formatCurrency(Number(shift.hourlyRate) || 0))}</td></tr>
               <tr><th>Estimated Pay</th><td>${escapeHtml(formatCurrency(getEstimatedPay(shift)))}</td></tr>
               <tr><th>Paid Status</th><td>${escapeHtml(shift.paidStatus)}${shift.paymentDate ? `, ${escapeHtml(formatShortDate(shift.paymentDate))}` : ''}</td></tr>
               ${shift.parking ? `<tr><th>Parking</th><td>${escapeHtml(shift.parking)}</td></tr>` : ''}
-              ${shift.uniform ? `<tr><th>Uniform</th><td>${escapeHtml(shift.uniform)}</td></tr>` : ''}
               ${shift.supervisor ? `<tr><th>Supervisor</th><td>${escapeHtml(shift.supervisor)}</td></tr>` : ''}
               ${shift.notes ? `<tr><th>Notes</th><td>${escapeHtml(shift.notes)}</td></tr>` : ''}
             </tbody>
@@ -876,7 +1845,7 @@ const buildPremiumScheduleHtml = (shifts, summary) => {
       <div class="summary-card"><strong>${summary.totalShifts}</strong><span>Shifts</span></div>
       <div class="summary-card"><strong>${summary.totalHours.toFixed(1)}</strong><span>Hours</span></div>
       <div class="summary-card"><strong>${escapeHtml(formatCurrency(summary.estimatedPay))}</strong><span>Est. Pay</span></div>
-      <div class="summary-card"><strong>${escapeHtml(formatCurrency(summary.unpaidAmount))}</strong><span>Unpaid</span></div>
+      <div class="summary-card"><strong>${escapeHtml(formatCurrency(summary.owedAmount || summary.unpaidAmount))}</strong><span>Still Owed</span></div>
     </section>
     ${rows ? `<section class="shifts-grid">${rows}</section>` : '<p>No shifts match the current filters.</p>'}
   </main>
@@ -898,6 +1867,21 @@ const getMonthLabel = (monthKey) => {
   });
 };
 
+const getMonthKeyWithOffset = (offset = 0) => {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + offset);
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const MONTH_RANGE_OPTIONS = [
+  { value: 'focus', label: 'Past, Current, Next' },
+  { value: 'prior', label: 'Prior Months' },
+  { value: 'currentYear', label: 'Current Year' },
+  { value: 'historical', label: 'Historical All-Time' },
+];
+
 const toGoogleCalendarDateTime = (dateValue, timeValue) => {
   if (!dateValue || !timeValue) return '';
   return `${dateValue.replaceAll('-', '')}T${String(timeValue).replace(':', '')}00`;
@@ -916,8 +1900,9 @@ const getGoogleCalendarUrl = (shift) => {
     `Hourly rate: ${formatCurrency(Number(shift.hourlyRate) || 0)}`,
     `Estimated pay: ${formatCurrency(getEstimatedPay(shift))}`,
     shift.jobName ? `Job: ${shift.jobName}` : '',
+    shift.shiftName ? `Shift Name: ${shift.shiftName}` : '',
+    shift.roleName ? `Role Name: ${shift.roleName}` : '',
     shift.parking ? `Parking: ${shift.parking}` : '',
-    shift.uniform ? `Uniform: ${shift.uniform}` : '',
     shift.supervisor ? `Supervisor: ${shift.supervisor}` : '',
     shift.notes ? `Notes: ${shift.notes}` : '',
   ].filter(Boolean).join('\n');
@@ -953,6 +1938,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [paidFilter, setPaidFilter] = useState('All');
   const [selectedMonth, setSelectedMonth] = useState('All');
+  const [monthRangeMode, setMonthRangeMode] = useState('focus');
   const [saveMessage, setSaveMessage] = useState('');
   const [showAddDrawer, setShowAddDrawer] = useState(false);
   const [showScanDrawer, setShowScanDrawer] = useState(false);
@@ -960,7 +1946,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [archiveSearch, setArchiveSearch] = useState('');
   const [archiveStatusFilter, setArchiveStatusFilter] = useState('All');
   const [shiftEmailText, setShiftEmailText] = useState('');
-  const [scannedShift, setScannedShift] = useState(null);
+  const [scannedShifts, setScannedShifts] = useState([]);
+  const scannedShift = scannedShifts[0] || null;
+  const setScannedShift = (nextShift) => setScannedShifts(nextShift ? [nextShift] : []);
   const [archivedShifts, setArchivedShifts] = useState(() => loadArchivedShifts());
   const [premiumView] = useState(false);
   const [showPremiumOverlay, setShowPremiumOverlay] = useState(false);
@@ -973,7 +1961,57 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [expandedNoteIds, setExpandedNoteIds] = useState(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [calendarAddedIds, setCalendarAddedIds] = useState(() => new Set(loadCalendarAddedIds()));
+  const [selectedPaidMonthKey, setSelectedPaidMonthKey] = useState('');
   const toolbarImportInputRef = useRef(null);
+
+  useEffect(() => {
+    const openLinkedShift = (event) => {
+      let shiftId = String(event?.detail?.shiftId || '').trim();
+
+      if (!shiftId) {
+        try {
+          shiftId =
+            sessionStorage.getItem(CSC_OPEN_SHIFT_STORAGE_KEY) ||
+            localStorage.getItem(CSC_OPEN_SHIFT_STORAGE_KEY) ||
+            '';
+          sessionStorage.removeItem(CSC_OPEN_SHIFT_STORAGE_KEY);
+          localStorage.removeItem(CSC_OPEN_SHIFT_STORAGE_KEY);
+        } catch (error) {
+          console.error('Failed to read linked CSC shift request:', error);
+        }
+      }
+
+      if (!shiftId) return;
+
+      const linkedShift =
+        shifts.find((shift) => shift.id === shiftId) ||
+        archivedShifts.find((shift) => shift.id === shiftId);
+
+      if (!linkedShift) {
+        setSaveMessage('The linked CSC shift could not be found.');
+        setTimeout(() => setSaveMessage(''), 3000);
+        return;
+      }
+
+      setLocalSearch('');
+      setVenueFilter('All');
+      setStatusFilter('All');
+      setPaidFilter('All');
+      setSelectedMonth('All');
+      setShowActiveOnly(false);
+      setIsShiftTableCollapsed(false);
+      setSelectedDetailShiftId(shiftId);
+      setSaveMessage('Linked CSC shift opened.');
+      setTimeout(() => setSaveMessage(''), 2500);
+    };
+
+    openLinkedShift();
+    window.addEventListener('csc-shifts:open-linked-shift', openLinkedShift);
+
+    return () => {
+      window.removeEventListener('csc-shifts:open-linked-shift', openLinkedShift);
+    };
+  }, [archivedShifts, shifts]);
 
   useEffect(() => {
     try {
@@ -1008,6 +2046,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     });
     setSaveMessage('Google Calendar opened. Shift marked as calendar added.');
     setTimeout(() => setSaveMessage(''), 2500);
+  };
+
+  const handleShowFullShiftList = () => {
+    setSelectedMonth('All');
+    setVenueFilter('All');
+    setStatusFilter('All');
+    setPaidFilter('All');
+    setLocalSearch('');
+    setShowActiveOnly(false);
+    setIsShiftTableCollapsed(false);
   };
 
   const toggleShiftNotes = (id) => {
@@ -1046,7 +2094,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           nextShift.shiftStatus = normalizeShiftStatus(updates.shiftStatus);
         }
 
-        if (updates.shiftStatus === 'Scheduled' || updates.shiftStatus === 'Confirmed' || updates.shiftStatus === 'Cancelled') {
+        if (updates.shiftStatus === 'Scheduled' || updates.shiftStatus === 'Approved' || updates.shiftStatus === 'Confirmed' || updates.shiftStatus === 'Cancelled') {
           if (nextShift.paidStatus === 'Paid') {
             nextShift.paidStatus = 'Unpaid';
             nextShift.paymentDate = '';
@@ -1143,10 +2191,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const shift = shifts.find((item) => item.id === id);
     const label = shift?.jobName || shift?.event || 'this shift';
 
-    if (!window.confirm(`Clear notes, parking, uniform, and supervisor for ${label}?`)) return;
+    if (!window.confirm(`Clear notes, parking, and supervisor for ${label}?`)) return;
 
     writeCscSafetySnapshot('Before CSC shift clear', shifts, archivedShifts);
-    updateShift(id, { notes: '', parking: '', uniform: '', supervisor: '' });
+    updateShift(id, { notes: '', parking: '', supervisor: '' });
     setSaveMessage('CSC shift notes cleared.');
     setTimeout(() => setSaveMessage(''), 2500);
   };
@@ -1220,6 +2268,140 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     setSaveMessage('CSC shift unarchived.');
     setTimeout(() => setSaveMessage(''), 2500);
   };
+
+  const updateArchivedShift = (id, updates) => {
+    const existingShift = archivedShifts.find((item) => item.id === id);
+
+    if (!existingShift) return;
+
+    writeCscSafetySnapshot('Before archived CSC paid update', shifts, archivedShifts);
+
+    setArchivedShifts((currentArchived) =>
+      currentArchived.map((shift) => {
+        if (shift.id !== id) return shift;
+
+        const nextShift = { ...shift, ...updates };
+
+        if (updates.paidStatus === 'Paid') {
+          nextShift.paymentDate = nextShift.paymentDate || new Date().toISOString().slice(0, 10);
+        }
+
+        if (updates.paidStatus === 'Unpaid') {
+          nextShift.paymentDate = '';
+        }
+
+        if (updates.paymentDate !== undefined) {
+          nextShift.paymentDate = updates.paymentDate;
+          nextShift.paidStatus = updates.paymentDate ? 'Paid' : 'Unpaid';
+        }
+
+        return normalizeShift(nextShift);
+      })
+    );
+
+    setSaveMessage('Archived CSC paid status updated.');
+    setTimeout(() => setSaveMessage(''), 2500);
+  };
+
+  const handleToggleArchivedPaidStatus = (shift) => {
+    updateArchivedShift(shift.id, {
+      paidStatus: shift.paidStatus === 'Paid' ? 'Unpaid' : 'Paid',
+    });
+  };
+
+  const handleToggleActivePaidStatus = (shift) => {
+    updateShift(shift.id, {
+      paidStatus: shift.paidStatus === 'Paid' ? 'Unpaid' : 'Paid',
+    });
+  };
+
+  const renderActivePaidControls = (shift) => (
+    <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={shift.paidStatus || 'Unpaid'}
+          onChange={(event) => updateShift(shift.id, { paidStatus: event.target.value })}
+          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-bold text-slate-900 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+          title="Update paid status"
+          aria-label="Update paid status"
+        >
+          {PAID_STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={shift.paymentDate || ''}
+          onChange={(event) =>
+            updateShift(shift.id, {
+              paymentDate: event.target.value,
+              paidStatus: event.target.value ? 'Paid' : 'Unpaid',
+            })
+          }
+          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-bold text-slate-900 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+          title="Payment date"
+          aria-label="Payment date"
+        />
+        <button
+          type="button"
+          onClick={() => handleToggleActivePaidStatus(shift)}
+          className={`inline-flex h-8 items-center justify-center rounded-md px-2.5 text-xs font-extrabold text-white ${
+            shift.paidStatus === 'Paid' ? 'bg-slate-700 hover:bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-700'
+          }`}
+          title={shift.paidStatus === 'Paid' ? 'Mark shift unpaid' : 'Mark shift paid'}
+          aria-label={shift.paidStatus === 'Paid' ? 'Mark shift unpaid' : 'Mark shift paid'}
+        >
+          {shift.paidStatus === 'Paid' ? 'Mark Unpaid' : 'Mark Paid'}
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderArchivedPaidControls = (shift, compact = false) => (
+    <div className={compact ? 'mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3' : 'mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3'}>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={shift.paidStatus || 'Unpaid'}
+          onChange={(event) => updateArchivedShift(shift.id, { paidStatus: event.target.value })}
+          className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+          title="Update archived paid status"
+          aria-label="Update archived paid status"
+        >
+          {PAID_STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={shift.paymentDate || ''}
+          onChange={(event) => updateArchivedShift(shift.id, { paymentDate: event.target.value })}
+          className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-900 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+          title="Archived payment date"
+          aria-label="Archived payment date"
+        />
+        <button
+          type="button"
+          onClick={() => handleToggleArchivedPaidStatus(shift)}
+          className={`inline-flex h-9 items-center justify-center rounded-lg px-3 text-sm font-extrabold text-white ${
+            shift.paidStatus === 'Paid' ? 'bg-slate-700 hover:bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-700'
+          }`}
+          title={shift.paidStatus === 'Paid' ? 'Mark archived shift unpaid' : 'Mark archived shift paid'}
+          aria-label={shift.paidStatus === 'Paid' ? 'Mark archived shift unpaid' : 'Mark archived shift paid'}
+        >
+          {shift.paidStatus === 'Paid' ? 'Mark Unpaid' : 'Mark Paid'}
+        </button>
+      </div>
+      {!compact ? (
+        <p className="mt-2 text-xs font-semibold text-slate-600">
+          Use this after the paycheck lands. This updates archived records and the Monthly Pay Summary.
+        </p>
+      ) : null}
+    </div>
+  );
 
   const handleDeleteArchivedShift = (id) => {
     const shift = archivedShifts.find((item) => item.id === id);
@@ -1355,6 +2537,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         shift.address,
         shift.event,
         shift.jobName,
+        shift.shiftName,
+        shift.roleName,
         shift.shiftStatus,
         shift.paidStatus,
         shift.paymentDate,
@@ -1389,6 +2573,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         shift.address,
         shift.event,
         shift.jobName,
+        shift.shiftName,
+        shift.roleName,
         shift.shiftStatus,
         shift.paidStatus,
         shift.paymentDate,
@@ -1407,20 +2593,19 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   }, [archiveSearch, archiveStatusFilter, archivedShifts]);
 
   const summary = useMemo(() => {
-    const totalHours = filteredShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0);
-    const estimatedPay = filteredShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0);
-    const paidAmount = filteredShifts.reduce(
+    const payableShifts = filteredShifts.filter((shift) => shift.shiftStatus !== 'Cancelled');
+    const doneShifts = payableShifts.filter((shift) => shift.shiftStatus === 'Done');
+    const totalHours = payableShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0);
+    const estimatedPay = payableShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0);
+    const paidAmount = payableShifts.reduce(
       (sum, shift) => sum + (shift.paidStatus === 'Paid' ? getEstimatedPay(shift) : 0),
       0
     );
-    const unpaidAmount = filteredShifts.reduce(
-      (sum, shift) => sum + (shift.paidStatus !== 'Paid' && shift.shiftStatus !== 'Cancelled' ? getEstimatedPay(shift) : 0),
+    const owedAmount = doneShifts.reduce(
+      (sum, shift) => sum + (shift.paidStatus !== 'Paid' ? getEstimatedPay(shift) : 0),
       0
     );
-    const workedHours = filteredShifts.reduce(
-      (sum, shift) => sum + (shift.shiftStatus === 'Done' ? getShiftHours(shift) : 0),
-      0
-    );
+    const workedHours = doneShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0);
     const soFiCount = filteredShifts.filter((shift) => /sofi/i.test(shift.venue)).length;
     const firstShift = filteredShifts[0];
     const lastShift = filteredShifts[filteredShifts.length - 1];
@@ -1431,7 +2616,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       workedHours,
       estimatedPay,
       paidAmount,
-      unpaidAmount,
+      unpaidAmount: owedAmount,
+      owedAmount,
       soFiCount,
       firstShift,
       lastShift,
@@ -1440,30 +2626,120 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
   const monthlySummary = useMemo(() => {
     const grouped = new Map();
+    const combinedShifts = [
+      ...shifts.map((shift) => ({ ...shift, recordSource: 'active' })),
+      ...archivedShifts.map((shift) => ({ ...shift, recordSource: 'archived' })),
+    ];
 
-    shifts.forEach((shift) => {
+    combinedShifts.forEach((shift) => {
       const key = getMonthKey(shift.startDate);
+      const isArchivedRecord = shift.recordSource === 'archived';
+      const isCancelled = shift.shiftStatus === 'Cancelled';
+      const isDone = shift.shiftStatus === 'Done';
+      const estimatedPay = isCancelled ? 0 : getEstimatedPay(shift);
+      const hours = isCancelled ? 0 : getShiftHours(shift);
       const current = grouped.get(key) || {
         monthKey: key,
         label: getMonthLabel(key),
-        shifts: 0,
+        totalRecords: 0,
+        activeRecords: 0,
+        archivedRecords: 0,
+        cancelledRecords: 0,
+        payableRecords: 0,
         hours: 0,
         workedHours: 0,
-        estimatedPay: 0,
-        unpaidAmount: 0,
+        projectedPay: 0,
+        earnedPay: 0,
+        paidAmount: 0,
+        owedAmount: 0,
       };
 
-      current.shifts += 1;
-      current.hours += getShiftHours(shift);
-      current.workedHours += shift.shiftStatus === 'Done' ? getShiftHours(shift) : 0;
-      current.estimatedPay += getEstimatedPay(shift);
-      current.unpaidAmount += shift.paidStatus !== 'Paid' && shift.shiftStatus !== 'Cancelled' ? getEstimatedPay(shift) : 0;
+      current.totalRecords += 1;
+      current.activeRecords += isArchivedRecord ? 0 : 1;
+      current.archivedRecords += isArchivedRecord ? 1 : 0;
+      current.cancelledRecords += isCancelled ? 1 : 0;
+      current.payableRecords += isCancelled ? 0 : 1;
+      current.hours += hours;
+      current.workedHours += isDone ? hours : 0;
+      current.projectedPay += estimatedPay;
+      current.earnedPay += isDone ? estimatedPay : 0;
+      current.paidAmount += shift.paidStatus === 'Paid' && !isCancelled ? estimatedPay : 0;
+      current.owedAmount += isDone && shift.paidStatus !== 'Paid' ? estimatedPay : 0;
 
       grouped.set(key, current);
     });
 
     return Array.from(grouped.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  }, [shifts]);
+  }, [archivedShifts, shifts]);
+
+  const visibleMonthlySummary = useMemo(() => {
+    const previousMonthKey = getMonthKeyWithOffset(-1);
+    const currentMonthKey = getMonthKeyWithOffset(0);
+    const nextMonthKey = getMonthKeyWithOffset(1);
+    const currentYear = currentMonthKey.slice(0, 4);
+
+    if (monthRangeMode === 'historical') return monthlySummary;
+
+    if (monthRangeMode === 'prior') {
+      return monthlySummary.filter((month) => month.monthKey < currentMonthKey);
+    }
+
+    if (monthRangeMode === 'currentYear') {
+      return monthlySummary.filter((month) => month.monthKey.startsWith(currentYear));
+    }
+
+    return monthlySummary.filter((month) =>
+      [previousMonthKey, currentMonthKey, nextMonthKey].includes(month.monthKey)
+    );
+  }, [monthRangeMode, monthlySummary]);
+
+  const monthlySummaryDateLabel = useMemo(() => {
+    if (!visibleMonthlySummary.length) return 'No months';
+
+    const firstMonth = visibleMonthlySummary[0];
+    const lastMonth = visibleMonthlySummary[visibleMonthlySummary.length - 1];
+
+    return firstMonth.monthKey === lastMonth.monthKey
+      ? firstMonth.label
+      : `${firstMonth.label} to ${lastMonth.label}`;
+  }, [visibleMonthlySummary]);
+
+  const selectedPaidMonth = useMemo(() => {
+    if (!selectedPaidMonthKey) return null;
+
+    const monthSummary = monthlySummary.find((month) => month.monthKey === selectedPaidMonthKey);
+    const monthShifts = [
+      ...shifts.map((shift) => ({ ...shift, recordSource: 'active' })),
+      ...archivedShifts.map((shift) => ({ ...shift, recordSource: 'archived' })),
+    ]
+      .filter((shift) => getMonthKey(shift.startDate) === selectedPaidMonthKey)
+      .sort((a, b) => `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`));
+
+    const payableShifts = monthShifts.filter((shift) => shift.shiftStatus !== 'Cancelled');
+    const doneShifts = payableShifts.filter((shift) => shift.shiftStatus === 'Done');
+    const paidShifts = payableShifts.filter((shift) => shift.paidStatus === 'Paid');
+    const owedShifts = doneShifts.filter((shift) => shift.paidStatus !== 'Paid');
+    const openShifts = payableShifts.filter((shift) => !['Done', 'Cancelled'].includes(shift.shiftStatus));
+    const cancelledShifts = monthShifts.filter((shift) => shift.shiftStatus === 'Cancelled');
+
+    return {
+      monthKey: selectedPaidMonthKey,
+      label: monthSummary?.label || getMonthLabel(selectedPaidMonthKey),
+      paidShifts: monthShifts,
+      activeCount: monthShifts.filter((shift) => shift.recordSource === 'active').length,
+      archivedCount: monthShifts.filter((shift) => shift.recordSource === 'archived').length,
+      paidCount: paidShifts.length,
+      owedCount: owedShifts.length,
+      openCount: openShifts.length,
+      cancelledCount: cancelledShifts.length,
+      totalHours: payableShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0),
+      workedHours: doneShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0),
+      projectedPay: payableShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
+      earnedPay: doneShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
+      totalPay: paidShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
+      owedAmount: owedShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
+    };
+  }, [archivedShifts, monthlySummary, selectedPaidMonthKey, shifts]);
 
   const activeShiftCount = useMemo(
     () => shifts.filter((shift) => !['Done', 'Cancelled'].includes(shift.shiftStatus)).length,
@@ -1538,41 +2814,90 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   };
 
   const handleScanAcceptanceEmail = () => {
-    const parsedShift = parseAcceptanceEmail(shiftEmailText);
+    const parsedShifts = parseAcceptanceEmails(shiftEmailText);
 
-    if (!parsedShift || !parsedShift.startDate || !parsedShift.startTime || !parsedShift.finishTime) {
-      setScannedShift(null);
-      setSaveMessage('Email scan needs Event Date, Job, and Role time range.');
+    if (!parsedShifts.length) {
+      setScannedShifts([]);
+      setSaveMessage('Email scan could not find CSC shift or Kia Forum schedule details. Paste the full email text and try again.');
       setTimeout(() => setSaveMessage(''), 3500);
       return;
     }
 
-    setScannedShift(parsedShift);
-    setSaveMessage('Acceptance email scanned. Review the preview, then add shift.');
-    setTimeout(() => setSaveMessage(''), 3000);
+    const missingFields = Array.from(new Set(parsedShifts.flatMap((parsedShift) => [
+      !parsedShift.startDate ? 'start date' : '',
+      !parsedShift.startTime ? 'start time' : '',
+      !parsedShift.finishTime ? 'finish time' : '',
+      !parsedShift.venue ? 'venue' : '',
+    ].filter(Boolean))));
+
+    setScannedShifts(parsedShifts);
+    setSaveMessage(
+      missingFields.length
+        ? `Email scanned ${parsedShifts.length} shift${parsedShifts.length === 1 ? '' : 's'} with missing ${missingFields.join(', ')}. Review before adding or updating.`
+        : `CSC email scanned ${parsedShifts.length} shift${parsedShifts.length === 1 ? '' : 's'}. Review the preview, then import.`
+    );
+    setTimeout(() => setSaveMessage(''), 4000);
   };
 
   const handleAddScannedShift = () => {
-    if (!scannedShift) {
-      setSaveMessage('Scan an acceptance email before adding the shift.');
+    if (!scannedShifts.length) {
+      setSaveMessage('Scan a CSC email before adding shifts.');
       setTimeout(() => setSaveMessage(''), 3000);
       return;
     }
 
-    setShifts((currentShifts) => {
-      const currentById = new Map(currentShifts.map((shift) => [shift.id, shift]));
-      currentById.set(scannedShift.id, normalizeShift({ ...(currentById.get(scannedShift.id) || {}), ...scannedShift }));
+    writeCscSafetySnapshot('Before CSC email scan import', shifts, archivedShifts);
 
-      return Array.from(currentById.values()).sort((a, b) =>
-        `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`)
-      );
+    let updatedCount = 0;
+    let addedCount = 0;
+    let collisionSafeCount = 0;
+    const currentById = new Map(shifts.map((shift) => [shift.id, shift]));
+
+    scannedShifts.forEach((scannedItem) => {
+      const normalizedScannedItem = normalizeShift(scannedItem);
+      const currentValues = Array.from(currentById.values());
+      const matchedShiftId = findMatchingShiftIdForScannedEmail(currentValues, normalizedScannedItem);
+
+      if (matchedShiftId) {
+        const existingShift = currentById.get(matchedShiftId);
+        currentById.set(matchedShiftId, mergeScannedShiftWithExisting(existingShift, normalizedScannedItem));
+        updatedCount += 1;
+        return;
+      }
+
+      const safeId = createUniqueScannedShiftId(currentById, normalizedScannedItem);
+      if (safeId !== normalizedScannedItem.id) collisionSafeCount += 1;
+
+      currentById.set(safeId, normalizeShift({ ...normalizedScannedItem, id: safeId }));
+      addedCount += 1;
+    });
+
+    const dedupeResult = dedupeShiftRecords(Array.from(currentById.values()));
+    const removedDuplicateCount = dedupeResult.removedIds.length;
+    setShifts(dedupeResult.shifts);
+
+    setCalendarAddedIds((current) => {
+      const next = new Set(current);
+      dedupeResult.replacementIds.forEach((keptId, removedId) => {
+        if (next.has(removedId)) next.add(keptId);
+        next.delete(removedId);
+      });
+      return next;
     });
 
     setShiftEmailText('');
-    setScannedShift(null);
+    setScannedShifts([]);
     setShowScanDrawer(false);
-    setSaveMessage('Accepted CSC shift added from email.');
-    setTimeout(() => setSaveMessage(''), 3000);
+
+    const details = [
+      `Updated ${updatedCount}`,
+      `added ${addedCount}`,
+      removedDuplicateCount ? `removed ${removedDuplicateCount} duplicate${removedDuplicateCount === 1 ? '' : 's'}` : '',
+      collisionSafeCount ? `prevented ${collisionSafeCount} ID collision${collisionSafeCount === 1 ? '' : 's'}` : '',
+    ].filter(Boolean);
+
+    setSaveMessage(`CSC email imported safely. ${details.join(', ')}.`);
+    setTimeout(() => setSaveMessage(''), 4000);
   };
 
   const handlePrintPremiumView = () => {
@@ -1724,7 +3049,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         <section className="rounded-xl border-2 border-yellow-200 bg-gradient-to-r from-yellow-50 to-yellow-100 px-6 py-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <h2 className="text-2xl font-bold text-slate-800">CSC Shifts</h2>
+              <div className="flex items-center gap-2">
+                <BriefcaseBusiness className="h-6 w-6 text-amber-700" />
+                <h2 className="text-2xl font-black text-slate-900">CSC Shifts</h2>
+              </div>
               <p className="mt-1 text-sm font-medium text-slate-600">
                 Manage CSC shifts here. Pay details stay on the CSC Shifts tab.
               </p>
@@ -1739,7 +3067,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <button
                 type="button"
                 onClick={() => setShowScanDrawer(true)}
-                title="Scan CSC shift acceptance email"
+                title="Scan CSC shift email"
                 className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700"
               >
                 <StickyNote className="h-4 w-4" />
@@ -1788,6 +3116,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleShowFullShiftList}
+                title="Show full CSC shift list"
+                aria-label="Show full CSC shift list"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-black px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+              >
+                <ListChecks className="h-4 w-4" />
+                <span>Show Full List</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowArchiveDrawer(true)}
@@ -1912,6 +3250,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       </div>
                       <p className="mt-1 text-sm font-bold text-slate-800">{shift.event || 'Event not entered'}</p>
                       <p className="mt-1 text-xs text-slate-600">{shift.jobName || 'Job name not entered'}</p>
+                      {shift.shiftName ? <p className="mt-1 text-xs text-slate-600">Shift Name: {shift.shiftName}</p> : null}
+                      {shift.roleName ? <p className="mt-1 text-xs text-slate-600">Role Name: {shift.roleName}</p> : null}
                     </div>
                     {renderShiftActions(shift)}
                   </div>
@@ -2020,6 +3360,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <div className="text-slate-600">{shift.city}</div>
                       <div className="mt-1 text-xs text-slate-500">{shift.address || 'Address not shown'}</div>
                       <div className="mt-2 text-xs font-semibold text-slate-500">{shift.jobName}</div>
+                      {shift.shiftName ? (
+                        <div className="mt-1 text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">Shift Name:</span> {shift.shiftName}
+                        </div>
+                      ) : null}
+                      {shift.roleName ? (
+                        <div className="mt-1 text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">Role Name:</span> {shift.roleName}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 align-top font-bold text-blue-700">
                       <div>{formatDate(shift.startDate)}</div>
@@ -2044,7 +3394,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         ) : null}
                         {shift.paymentDate ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Pay Date:</span> {formatDate(shift.paymentDate)}</div> : null}
                         {shift.parking ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Parking:</span> {shift.parking}</div> : null}
-                        {shift.uniform ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Uniform:</span> {shift.uniform}</div> : null}
                         {shift.supervisor ? <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Supervisor:</span> {shift.supervisor}</div> : null}
                       </div>
                       {shift.notes ? (
@@ -2134,66 +3483,128 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-950 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-bold">Unpaid Amount</p>
-                <p className="mt-1 text-2xl font-extrabold">{formatCurrency(summary.unpaidAmount)}</p>
-                <p className="mt-1 text-xs font-bold text-red-800">SoFi shifts: {summary.soFiCount}</p>
+                <p className="text-sm font-bold">Still Owed</p>
+                <p className="mt-1 text-2xl font-extrabold">{formatCurrency(summary.owedAmount)}</p>
+                <p className="mt-1 text-xs font-bold text-red-800">Done and unpaid only</p>
               </div>
               <CheckCircle2 className="h-8 w-8 opacity-80" />
             </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h2 className="text-xl font-extrabold text-slate-950">Monthly Summary</h2>
-              <p className="text-sm text-slate-600">
-                Compact monthly view for scheduled hours, worked hours, estimated pay, and unpaid pay.
+              <h2 className="text-lg font-extrabold text-slate-950">Monthly Pay Summary</h2>
+              <p className="text-xs text-slate-600">
+                Past, current, and next month are shown by default. Historical All-Time includes active and archived records.
               </p>
             </div>
 
-            <div className="text-sm font-bold text-slate-700">
-              {summary.firstShift && summary.lastShift
-                ? `${formatShortDate(summary.firstShift.startDate)} to ${formatShortDate(summary.lastShift.startDate)}`
-                : 'No shifts'}
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-800 shadow-sm">
+                <span>View month range</span>
+                <select
+                  value={monthRangeMode}
+                  onChange={(event) => setMonthRangeMode(event.target.value)}
+                  className="bg-transparent text-xs font-extrabold text-slate-900 outline-none"
+                  title="View month range"
+                  aria-label="View month range"
+                >
+                  {MONTH_RANGE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setMonthRangeMode('historical');
+                  setSelectedMonth('All');
+                }}
+                title="Show historical all-time monthly records"
+                aria-label="Show historical all-time monthly records"
+                className="inline-flex items-center gap-1.5 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800"
+              >
+                <History className="h-4 w-4" />
+                Historical All-Time
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedMonth('All')}
+                title="Show all months in the shift table"
+                aria-label="Show all CSC shift months in the shift table"
+                className={`rounded-full px-3 py-1.5 text-xs font-extrabold shadow-sm transition ${
+                  selectedMonth === 'All'
+                    ? 'bg-black text-white'
+                    : 'border border-slate-300 bg-white text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                All Months
+              </button>
+              <div className="text-xs font-bold text-slate-700">{monthlySummaryDateLabel}</div>
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {monthlySummary.map((month) => (
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {visibleMonthlySummary.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-xs font-semibold text-slate-600 md:col-span-2 lg:col-span-3">
+                No month records match this range. Use Historical All-Time to see every saved month.
+              </div>
+            ) : visibleMonthlySummary.map((month) => (
               <button
                 key={month.monthKey}
                 type="button"
-                onClick={() => setSelectedMonth(month.monthKey)}
-                className={`rounded-2xl border p-4 text-left shadow-sm transition hover:shadow-md ${
-                  selectedMonth === month.monthKey
+                onClick={() => {
+                  setSelectedMonth(month.monthKey);
+                  setSelectedPaidMonthKey(month.monthKey);
+                }}
+                title={`Show CSC shifts for ${month.label}`}
+                aria-label={`Show CSC shifts for ${month.label}`}
+                className={`rounded-xl border p-3 text-left shadow-sm transition hover:shadow-md ${
+                  selectedMonth === month.monthKey || selectedPaidMonthKey === month.monthKey
                     ? 'border-yellow-400 bg-yellow-50 text-yellow-950'
                     : 'border-slate-200 bg-slate-50 text-slate-900'
                 }`}
               >
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="font-extrabold">{month.label}</p>
-                    <p className="mt-1 text-sm text-slate-600">{month.shifts} shifts</p>
+                    <p className="text-sm font-extrabold leading-tight">{month.label}</p>
+                    <p className="mt-0.5 text-xs leading-tight text-slate-600">
+                      {month.totalRecords} total, {month.activeRecords} active, {month.archivedRecords} archived
+                    </p>
+                    <p className="mt-0.5 text-[11px] font-bold leading-tight text-slate-500">
+                      {month.payableRecords} payable{month.cancelledRecords ? `, ${month.cancelledRecords} cancelled` : ''}
+                    </p>
                   </div>
-                  <CalendarDays className="h-6 w-6" />
+                  <CalendarDays className="h-5 w-5" />
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs leading-tight">
                   <div>
-                    <p className="text-xs font-bold uppercase text-slate-500">Hours</p>
-                    <p className="font-extrabold">{month.hours.toFixed(1)}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Hours</p>
+                    <p className="text-sm font-extrabold">{month.hours.toFixed(1)}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-bold uppercase text-slate-500">Done</p>
-                    <p className="font-extrabold">{month.workedHours.toFixed(1)}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Done</p>
+                    <p className="text-sm font-extrabold">{month.workedHours.toFixed(1)}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-bold uppercase text-slate-500">Pay</p>
-                    <p className="font-extrabold">{formatCurrency(month.estimatedPay)}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Projected</p>
+                    <p className="text-sm font-extrabold">{formatCurrency(month.projectedPay)}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-bold uppercase text-slate-500">Unpaid</p>
-                    <p className="font-extrabold">{formatCurrency(month.unpaidAmount)}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Earned</p>
+                    <p className="text-sm font-extrabold">{formatCurrency(month.earnedPay)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Marked Paid</p>
+                    <p className="text-sm font-extrabold">{formatCurrency(month.paidAmount)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Still Owed</p>
+                    <p className="text-sm font-extrabold">{formatCurrency(month.owedAmount)}</p>
                   </div>
                 </div>
               </button>
@@ -2353,8 +3764,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   <p className="mt-1 text-xs font-extrabold uppercase tracking-wide text-slate-500">Estimated Pay</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-2xl font-extrabold">{formatCurrency(summary.unpaidAmount)}</p>
-                  <p className="mt-1 text-xs font-extrabold uppercase tracking-wide text-slate-500">Unpaid</p>
+                  <p className="text-2xl font-extrabold">{formatCurrency(summary.owedAmount)}</p>
+                  <p className="mt-1 text-xs font-extrabold uppercase tracking-wide text-slate-500">Still Owed</p>
                 </div>
               </section>
 
@@ -2372,6 +3783,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           <h3 className="csc-premium-shift-title text-xl font-extrabold text-slate-950">{shift.venue || 'CSC Shift'}</h3>
                           <p className="csc-premium-shift-meta mt-1 text-sm font-bold text-slate-700">{shift.event || 'Event not entered'}</p>
                           <p className="csc-premium-shift-meta mt-1 text-xs font-semibold text-slate-500">{shift.jobName || 'Job name not entered'}</p>
+                          {shift.shiftName ? <p className="csc-premium-shift-meta mt-1 text-xs font-semibold text-slate-500">Shift Name: {shift.shiftName}</p> : null}
+                          {shift.roleName ? <p className="csc-premium-shift-meta mt-1 text-xs font-semibold text-slate-500">Role Name: {shift.roleName}</p> : null}
                         </div>
                         <div className="rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs font-extrabold text-yellow-900">
                           {shift.shiftStatus}
@@ -2391,6 +3804,18 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           <div className="font-extrabold text-slate-700">Venue Address</div>
                           <div>{shift.address || 'Address not shown'}{shift.city ? `, ${shift.city}` : ''}</div>
                         </div>
+                        {shift.shiftName && (
+                          <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
+                            <div className="font-extrabold text-slate-700">Shift Name</div>
+                            <div>{shift.shiftName}</div>
+                          </div>
+                        )}
+                        {shift.roleName && (
+                          <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
+                            <div className="font-extrabold text-slate-700">Role Name</div>
+                            <div>{shift.roleName}</div>
+                          </div>
+                        )}
                         <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
                           <div className="font-extrabold text-slate-700">Hours</div>
                           <div>{getShiftHours(shift).toFixed(1)}</div>
@@ -2413,12 +3838,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                             <div>{shift.parking}</div>
                           </div>
                         )}
-                        {shift.uniform && (
-                          <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
-                            <div className="font-extrabold text-slate-700">Uniform</div>
-                            <div>{shift.uniform}</div>
-                          </div>
-                        )}
                         {shift.supervisor && (
                           <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
                             <div className="font-extrabold text-slate-700">Supervisor</div>
@@ -2436,6 +3855,179 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   ))
                 )}
               </section>
+            </div>
+          </div>
+        )}
+
+        {selectedPaidMonth && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-3">
+            <div className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-950">CSC Shifts - {selectedPaidMonth.label}</h2>
+                  <p className="text-xs text-slate-600">
+                    {selectedPaidMonth.paidShifts.length} shifts, {selectedPaidMonth.paidCount} paid, {selectedPaidMonth.owedCount} still owed, {selectedPaidMonth.activeCount} active, {selectedPaidMonth.archivedCount} archived.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaidMonthKey('')}
+                  className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-700 hover:bg-slate-50"
+                  aria-label="Close month CSC shifts drawer"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="grid gap-2 md:grid-cols-4">
+                  <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Month Shifts</p>
+                    <p className="mt-0.5 text-lg font-extrabold text-slate-950">{selectedPaidMonth.paidShifts.length}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Worked Hours</p>
+                    <p className="mt-0.5 text-lg font-extrabold text-slate-950">{selectedPaidMonth.workedHours.toFixed(1)}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Paid Amount</p>
+                    <p className="mt-0.5 text-lg font-extrabold text-emerald-700">{formatCurrency(selectedPaidMonth.totalPay)}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Still Owed</p>
+                    <p className="mt-0.5 text-lg font-extrabold text-red-700">{formatCurrency(selectedPaidMonth.owedAmount)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4">
+                {selectedPaidMonth.paidShifts.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-center text-xs font-semibold text-slate-600">
+                    No CSC shifts are saved for {selectedPaidMonth.label}.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+                    {selectedPaidMonth.paidShifts.map((shift) => (
+                      <article
+                        key={`${shift.recordSource}-${shift.id}`}
+                        className="rounded-xl border border-emerald-200 bg-white p-3 shadow-sm"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h3 className="text-base font-extrabold leading-tight text-slate-950">{shift.venue || 'CSC Shift'}</h3>
+                            <p className="mt-0.5 text-xs font-bold leading-tight text-slate-700">{shift.event || 'Event not entered'}</p>
+                            <p className="mt-0.5 text-[11px] font-semibold leading-tight text-slate-500">{shift.jobName || 'Job name not entered'}</p>
+                            {shift.shiftName ? <p className="mt-0.5 text-[11px] font-semibold leading-tight text-slate-500">Shift Name: {shift.shiftName}</p> : null}
+                            {shift.roleName ? <p className="mt-0.5 text-[11px] font-semibold leading-tight text-slate-500">Role Name: {shift.roleName}</p> : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <span
+                              className={`w-fit rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${
+                                shift.paidStatus === 'Paid'
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                  : 'border-red-200 bg-red-50 text-red-800'
+                              }`}
+                            >
+                              {shift.paidStatus === 'Paid' ? 'Paid' : 'Unpaid'}
+                            </span>
+                            {shift.shiftStatus === 'Done' && shift.paidStatus !== 'Paid' ? (
+                              <span className="w-fit rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-extrabold text-red-800">
+                                Still Owed
+                              </span>
+                            ) : null}
+                            <span className="w-fit rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-extrabold text-slate-700">
+                              {shift.recordSource === 'archived' ? 'Archived' : 'Active'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-1 text-xs leading-tight text-slate-700">
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Start</span>
+                            <span>{formatDate(shift.startDate)} {formatTime(shift.startTime)}</span>
+                          </div>
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Finish</span>
+                            <span>{formatDate(shift.finishDate)} {formatTime(shift.finishTime)}</span>
+                          </div>
+                          {shift.roleName ? (
+                            <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                              <span className="font-extrabold text-slate-950">Role Name</span>
+                              <span>{shift.roleName}</span>
+                            </div>
+                          ) : null}
+                          {shift.shiftName ? (
+                            <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                              <span className="font-extrabold text-slate-950">Shift Name</span>
+                              <span>{shift.shiftName}</span>
+                            </div>
+                          ) : null}
+                          {shift.uniform ? (
+                            <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                              <span className="font-extrabold text-slate-950">Uniform</span>
+                              <span>{shift.uniform}</span>
+                            </div>
+                          ) : null}
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Hours</span>
+                            <span>{getShiftHours(shift).toFixed(1)}</span>
+                          </div>
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Pay</span>
+                            <span>{formatCurrency(getEstimatedPay(shift))}</span>
+                          </div>
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Payment Date</span>
+                            <span>{shift.paymentDate ? formatShortDate(shift.paymentDate) : 'No payment date entered'}</span>
+                          </div>
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Paid Status</span>
+                            <span>{shift.paidStatus || 'Unpaid'}</span>
+                          </div>
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Status</span>
+                            <span>{shift.shiftStatus}</span>
+                          </div>
+                          <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                            <span className="font-extrabold text-slate-950">Location</span>
+                            <span>{[shift.address, shift.city].filter(Boolean).join(', ') || 'Address not shown'}</span>
+                          </div>
+                          {shift.parking ? (
+                            <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                              <span className="font-extrabold text-slate-950">Parking</span>
+                              <span className="whitespace-pre-wrap">{shift.parking}</span>
+                            </div>
+                          ) : null}
+                          {shift.notes ? (
+                            <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
+                              <span className="font-extrabold text-slate-950">Notes</span>
+                              <span className="whitespace-pre-wrap">{shift.notes}</span>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {shift.shiftStatus !== 'Cancelled' ? (
+                          shift.recordSource === 'archived' ? renderArchivedPaidControls(shift, true) : renderActivePaidControls(shift)
+                        ) : null}
+
+                        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenShiftDetails(shift)}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-bold text-cyan-800 hover:bg-cyan-100"
+                            aria-label="Open shift details"
+                            title="Open shift details"
+                          >
+                            <PanelRightOpen className="h-4 w-4" />
+                            Details
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -2460,6 +4052,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <h3 className="text-2xl font-extrabold text-slate-950">{selectedDetailShift.venue || 'CSC Shift'}</h3>
                       <p className="mt-1 font-bold text-slate-800">{selectedDetailShift.event || 'Event not entered'}</p>
                       <p className="mt-1 text-sm text-slate-600">{selectedDetailShift.jobName || 'Job name not entered'}</p>
+                      {selectedDetailShift.shiftName ? <p className="mt-1 text-sm text-slate-600">Shift Name: {selectedDetailShift.shiftName}</p> : null}
+                      {selectedDetailShift.roleName ? <p className="mt-1 text-sm text-slate-600">Role Name: {selectedDetailShift.roleName}</p> : null}
                     </div>
                     <div className="rounded-full border border-yellow-300 bg-white px-3 py-1 text-xs font-extrabold text-yellow-900">
                       {selectedDetailShift.shiftStatus}
@@ -2482,6 +4076,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     <p className="text-sm text-slate-600">{selectedDetailShift.city}</p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-extrabold uppercase text-slate-500">Shift / Role</p>
+                    <p className="mt-1 text-sm text-slate-700">Shift Name: {selectedDetailShift.shiftName || 'Not entered'}</p>
+                    <p className="text-sm text-slate-700">Role Name: {selectedDetailShift.roleName || 'Not entered'}</p>
+                    <p className="text-sm text-slate-700">Uniform: {selectedDetailShift.uniform || 'Not entered'}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <p className="text-xs font-extrabold uppercase text-slate-500">Pay</p>
                     <p className="mt-1 font-bold text-slate-950">{getShiftHours(selectedDetailShift).toFixed(1)} hours at {formatCurrency(Number(selectedDetailShift.hourlyRate) || 0)}</p>
                     <p className="text-sm font-bold text-emerald-700">Estimated Pay: {formatCurrency(getEstimatedPay(selectedDetailShift))}</p>
@@ -2490,12 +4090,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     <p className="text-xs font-extrabold uppercase text-slate-500">Paid Status</p>
                     <p className="mt-1 font-bold text-slate-950">{selectedDetailShift.paidStatus}</p>
                     <p className="text-sm text-slate-600">{selectedDetailShift.paymentDate ? formatShortDate(selectedDetailShift.paymentDate) : 'No payment date entered'}</p>
+                    {selectedDetailShiftIsArchived ? renderArchivedPaidControls(selectedDetailShift, true) : null}
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-extrabold uppercase text-slate-500">Supervisor / Parking / Uniform</p>
+                    <p className="text-xs font-extrabold uppercase text-slate-500">Supervisor / Parking</p>
                     <p className="mt-1 text-sm text-slate-700">Supervisor: {selectedDetailShift.supervisor || 'Not entered'}</p>
                     <p className="text-sm text-slate-700">Parking: {selectedDetailShift.parking || 'Not entered'}</p>
-                    <p className="text-sm text-slate-700">Uniform: {selectedDetailShift.uniform || 'Not entered'}</p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-white p-4 md:col-span-2">
                     <p className="text-xs font-extrabold uppercase text-slate-500">Notes</p>
@@ -2506,7 +4106,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
               <div className="border-t border-slate-200 bg-slate-50 p-4">
                 {selectedDetailShiftIsArchived ? (
-                  <div className="flex flex-wrap items-center justify-end gap-2">
+                  <div className="grid gap-3">
+                    {renderArchivedPaidControls(selectedDetailShift)}
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => handleRestoreArchivedShift(selectedDetailShift.id)}
@@ -2527,6 +4129,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <Trash2 className="h-4 w-4" />
                       Delete
                     </button>
+                    </div>
                   </div>
                 ) : (
                   renderShiftActions(selectedDetailShift)
@@ -2608,6 +4211,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                             <h3 className="text-lg font-extrabold text-slate-950">{shift.venue || 'CSC Shift'}</h3>
                             <p className="mt-1 text-sm font-bold text-slate-700">{shift.event || 'Event not entered'}</p>
                             <p className="mt-1 text-xs font-semibold text-slate-500">{shift.jobName || 'Job name not entered'}</p>
+                            {shift.shiftName ? <p className="mt-1 text-xs font-semibold text-slate-500">Shift Name: {shift.shiftName}</p> : null}
+                            {shift.roleName ? <p className="mt-1 text-xs font-semibold text-slate-500">Role Name: {shift.roleName}</p> : null}
                           </div>
                           <span className="w-fit rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs font-extrabold text-yellow-900">
                             {shift.shiftStatus}
@@ -2625,7 +4230,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           </div>
                           <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
                             <span className="font-extrabold text-slate-950">Pay</span>
-                            <span>{formatCurrency(getEstimatedPay(shift))} - {shift.paidStatus}</span>
+                            <span>{formatCurrency(getEstimatedPay(shift))} - {shift.paidStatus}{shift.paymentDate ? `, ${formatShortDate(shift.paymentDate)}` : ''}</span>
+                          </div>
+                          <div className="border-t border-slate-100 pt-2">
+                            <span className="block font-extrabold text-slate-950">Paid Controls</span>
+                            {renderArchivedPaidControls(shift, true)}
                           </div>
                           <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
                             <span className="font-extrabold text-slate-950">Archived</span>
@@ -2675,8 +4284,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <div>
-                  <h2 className="text-xl font-extrabold text-slate-950">Scan Acceptance Email</h2>
-                  <p className="text-sm text-slate-600">Paste the APPROVED schedule update email text, scan it, then add the shift.</p>
+                  <h2 className="text-xl font-extrabold text-slate-950">Scan CSC Email</h2>
+                  <p className="text-sm text-slate-600">Paste a CSC schedule update, acceptance, courtesy reminder, or Kia Forum schedule email. The scanner fills known fields and saves extra details to notes.</p>
                 </div>
                 <button
                   type="button"
@@ -2690,7 +4299,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
               <div className="flex-1 overflow-y-auto p-5">
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Acceptance email text
+                  CSC email text
                   <textarea
                     value={shiftEmailText}
                     onChange={(event) => {
@@ -2698,7 +4307,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       setScannedShift(null);
                     }}
                     rows={9}
-                    placeholder={'APPROVED - Schedule Update\n\nEvent Date: 06/13/2026\nJob: FIFA World Cup 2026 - Watch Party-6/13/2026 - Morning Shift\nRole: Event Staff - 06/13/2026 08:00 to 06/13/2026 16:00'}
+                    placeholder={'Courtesy Shift Reminder & Important Info\n\nSchedule for : David Gregory Hallstrom II\nVenue: SoFi Stadium and Hollywood Park Shift No: 2 Shift: Vertical - Elevator and Escalator - TC Scheduled Start Time: 6/21/2026 5:30:00 AM Scheduled Finish: 6/21/2026 4:30:00 PM\n\nDNS ROSALIA N1\tThe Forum\t1ST RAMPS\tSecurity Guard\t6/29/2026 4:00:00 PM\t6/29/2026 11:30:00 PM\tENTRY POINT ADDRESS: 3600 Pincay Dr, Inglewood, CA, 90305 Parking will be at SoFi lot D.\tSIGN-IN IS NEXT TO THE BIG WHITE HOUSE ON THE SOUTHEAST CORNER OF THE PROPERTY.\tAll Black Everything.'}
                     className="resize-y rounded-xl border border-slate-300 px-3 py-2 font-normal text-slate-950 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
                   />
                 </label>
@@ -2723,23 +4332,38 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   </button>
                 </div>
 
-                {scannedShift && (
+                {scannedShifts.length > 0 && (
                   <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-slate-900">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <h3 className="text-lg font-extrabold text-slate-950">Scanned Shift Preview</h3>
                       <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-extrabold text-amber-800">
-                        {scannedShift.shiftStatus}
+                        {scannedShifts.length} shift{scannedShifts.length === 1 ? '' : 's'}
                       </span>
                     </div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <p><strong>Start:</strong> {formatDate(scannedShift.startDate)} {formatTime(scannedShift.startTime)}</p>
-                      <p><strong>Finish:</strong> {formatDate(scannedShift.finishDate)} {formatTime(scannedShift.finishTime)}</p>
-                      <p><strong>Venue:</strong> {scannedShift.venue || 'Needs venue'}</p>
-                      <p><strong>Address:</strong> {[scannedShift.address, scannedShift.city].filter(Boolean).join(', ') || 'Needs address'}</p>
-                      <p className="md:col-span-2"><strong>Event:</strong> {scannedShift.event || 'Not detected'}</p>
-                      <p className="md:col-span-2"><strong>Job:</strong> {scannedShift.jobName || 'Not detected'}</p>
-                      <p><strong>Hours:</strong> {getShiftHours(scannedShift).toFixed(1)}</p>
-                      <p><strong>Estimated Pay:</strong> {formatCurrency(getEstimatedPay(scannedShift))}</p>
+                    <div className="grid gap-3">
+                      {scannedShifts.map((item) => (
+                        <article key={item.id} className="rounded-xl border border-amber-200 bg-white p-3">
+                          <div className="grid gap-2 md:grid-cols-2">
+                            <p><strong>Start:</strong> {formatDate(item.startDate)} {formatTime(item.startTime)}</p>
+                            <p><strong>Finish:</strong> {formatDate(item.finishDate)} {formatTime(item.finishTime)}</p>
+                            <p><strong>Venue:</strong> {item.venue || 'Needs venue'}</p>
+                            <p><strong>Address:</strong> {[item.address, item.city].filter(Boolean).join(', ') || 'Needs address'}</p>
+                            <p className="md:col-span-2"><strong>Event:</strong> {item.event || 'Not detected'}</p>
+                            <p className="md:col-span-2"><strong>Job:</strong> {item.jobName || 'Not detected'}</p>
+                            {item.shiftName ? <p className="md:col-span-2"><strong>Shift Name:</strong> {item.shiftName}</p> : null}
+                            {item.roleName ? <p className="md:col-span-2"><strong>Role Name:</strong> {item.roleName}</p> : null}
+                            {item.uniform ? <p className="md:col-span-2"><strong>Uniform:</strong> {item.uniform}</p> : null}
+                            {item.parking ? (
+                              <p className="md:col-span-2 whitespace-pre-wrap"><strong>Parking:</strong> {item.parking}</p>
+                            ) : null}
+                            {item.notes ? (
+                              <p className="md:col-span-2 whitespace-pre-wrap"><strong>Notes:</strong> {item.notes}</p>
+                            ) : null}
+                            <p><strong>Hours:</strong> {getShiftHours(item).toFixed(1)}</p>
+                            <p><strong>Estimated Pay:</strong> {formatCurrency(getEstimatedPay(item))}</p>
+                          </div>
+                        </article>
+                      ))}
                     </div>
                   </section>
                 )}
@@ -2759,7 +4383,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   disabled={!scannedShift}
                   className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
-                  Add Scanned Shift
+                  Import Scanned Shift
                 </button>
               </div>
             </div>
@@ -2785,7 +4409,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         setShowScanDrawer(true);
                       }}
                       className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700"
-                      title="Scan CSC shift acceptance email"
+                      title="Scan CSC shift email"
                     >
                       <StickyNote className="h-4 w-4" />
                       Scan Email
@@ -2910,6 +4534,28 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   />
                 </label>
 
+                <label className="grid gap-1 text-sm font-bold text-slate-700 md:col-span-2">
+                  Shift Name
+                  <input
+                    type="text"
+                    value={newShift.shiftName}
+                    onChange={(event) => setNewShift((current) => ({ ...current, shiftName: event.target.value }))}
+                    placeholder="FloorXStage, Vertical - Elevator and Escalator"
+                    className="rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700 md:col-span-2">
+                  Role Name
+                  <input
+                    type="text"
+                    value={newShift.roleName}
+                    onChange={(event) => setNewShift((current) => ({ ...current, roleName: event.target.value }))}
+                    placeholder="Security Guard, Event Staff, Workers"
+                    className="rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                  />
+                </label>
+
                 <label className="grid gap-1 text-sm font-bold text-slate-700">
                   Status
                   <select
@@ -2966,16 +4612,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     type="text"
                     value={newShift.parking}
                     onChange={(event) => setNewShift((current) => ({ ...current, parking: event.target.value }))}
-                    className="rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-                  />
-                </label>
-
-                <label className="grid gap-1 text-sm font-bold text-slate-700">
-                  Uniform
-                  <input
-                    type="text"
-                    value={newShift.uniform}
-                    onChange={(event) => setNewShift((current) => ({ ...current, uniform: event.target.value }))}
                     className="rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
                   />
                 </label>

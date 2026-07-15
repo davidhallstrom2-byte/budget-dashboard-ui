@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, Plus, Minus, Archive } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
-  CreditCard, Repeat, Package
+  CreditCard, Repeat, Package, WalletCards
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 import EmergencyFundWidget from '../modern/EmergencyFundWidget';
@@ -36,6 +36,14 @@ const DEFAULT_TITLES = {
 
 const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
+const PAYCHECK_STORAGE_KEY = 'paychecksTab.paychecks.v1';
+const PAYCHECK_UPDATE_EVENT = 'paychecksChanged';
+const GUARD_CARD_PROOF_SUBMITTED_DATE = '2026-06-22';
+const FUTURE_EXPECTED_CSC_RATE = 19.5;
+const OVERTIME_HOUR_THRESHOLD = 8;
+const DOUBLE_TIME_HOUR_THRESHOLD = 12;
+const OVERTIME_RATE_MULTIPLIER = 1.5;
+const DOUBLE_TIME_RATE_MULTIPLIER = 2;
 
 const loadCscBudgetShifts = () => {
   try {
@@ -44,6 +52,17 @@ const loadCscBudgetShifts = () => {
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     console.error('Failed to load CSC shifts for budget dashboard:', error);
+    return [];
+  }
+};
+
+const loadPaycheckBudgetItems = () => {
+  try {
+    const saved = localStorage.getItem(PAYCHECK_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Failed to load paychecks for budget dashboard:', error);
     return [];
   }
 };
@@ -64,7 +83,15 @@ const getCscEstimatedPay = (shift) => {
   const hourlyRate = Number.parseFloat(shift?.hourlyRate);
   if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) return 0;
 
-  return Math.round(getCscShiftHours(shift) * hourlyRate * 100) / 100;
+  const hours = getCscShiftHours(shift);
+  const regularHours = Math.min(hours, OVERTIME_HOUR_THRESHOLD);
+  const overtimeHours = Math.min(Math.max(hours - OVERTIME_HOUR_THRESHOLD, 0), DOUBLE_TIME_HOUR_THRESHOLD - OVERTIME_HOUR_THRESHOLD);
+  const doubleTimeHours = Math.max(hours - DOUBLE_TIME_HOUR_THRESHOLD, 0);
+  const regularPay = regularHours * hourlyRate;
+  const overtimePay = overtimeHours * hourlyRate * OVERTIME_RATE_MULTIPLIER;
+  const doubleTimePay = doubleTimeHours * hourlyRate * DOUBLE_TIME_RATE_MULTIPLIER;
+
+  return Math.round((regularPay + overtimePay + doubleTimePay) * 100) / 100;
 };
 
 const formatDashboardCurrency = (amount) =>
@@ -72,6 +99,60 @@ const formatDashboardCurrency = (amount) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+const getDashboardNumber = (value) => {
+  const number = Number(String(value || '').replace(/[$,\s]/g, ''));
+  return Number.isFinite(number) ? number : 0;
+};
+
+const getDashboardHourlyRate = (value) => {
+  const number = getDashboardNumber(value);
+  if (number > 100) return number / 100;
+  return number;
+};
+
+const getDashboardPaycheckHours = (paycheck = {}) => {
+  const hours = getDashboardNumber(paycheck?.hours);
+  const grossPay = getDashboardNumber(paycheck?.grossPay);
+  const rate = getDashboardHourlyRate(paycheck?.rate);
+
+  if (grossPay && rate) {
+    const calculatedHours = grossPay / rate;
+    if (!hours || Math.abs(hours - calculatedHours) > 0.25) {
+      return calculatedHours;
+    }
+  }
+
+  return hours;
+};
+
+const normalizeDashboardDate = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) return `${slashMatch[3]}-${slashMatch[1].padStart(2, '0')}-${slashMatch[2].padStart(2, '0')}`;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  return [
+    String(parsed.getFullYear()).padStart(4, '0'),
+    String(parsed.getMonth() + 1).padStart(2, '0'),
+    String(parsed.getDate()).padStart(2, '0'),
+  ].join('-');
+};
+
+const formatDashboardDate = (value = '') => {
+  const normalized = normalizeDashboardDate(value);
+  if (!normalized) return '';
+
+  const [year, month, day] = normalized.split('-');
+  return `${month}/${day}/${year}`;
+};
 
 const DashboardTab = ({
   state,
@@ -89,6 +170,7 @@ const DashboardTab = ({
   const [showBudgetOverview, setShowBudgetOverview] = useState(false);
   const [showPaymentAlerts, setShowPaymentAlerts] = useState(false);
   const [cscShifts, setCscShifts] = useState(() => loadCscBudgetShifts());
+  const [paychecks, setPaychecks] = useState(() => loadPaycheckBudgetItems());
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
@@ -105,6 +187,18 @@ const DashboardTab = ({
     return () => {
       window.removeEventListener('storage', refreshCscShifts);
       window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShifts);
+    };
+  }, []);
+
+  useEffect(() => {
+    const refreshPaychecks = () => setPaychecks(loadPaycheckBudgetItems());
+
+    window.addEventListener('storage', refreshPaychecks);
+    window.addEventListener(PAYCHECK_UPDATE_EVENT, refreshPaychecks);
+
+    return () => {
+      window.removeEventListener('storage', refreshPaychecks);
+      window.removeEventListener(PAYCHECK_UPDATE_EVENT, refreshPaychecks);
     };
   }, []);
 
@@ -178,20 +272,88 @@ const DashboardTab = ({
 
   const cscIncomeItem = useMemo(() => ({
     id: 'system-csc-shift-income',
-    category: 'CSC Shift Income',
-    estBudget: cscIncome.estimatedPay,
-    actualCost: cscIncome.paidPay,
+    category: 'CSC Unpaid Shift Projection',
+    estBudget: cscIncome.unpaidPay,
+    actualCost: 0,
     dueDate: '',
     status: cscIncome.unpaidPay > 0 ? 'pending' : 'paid',
-    note: `${cscIncome.activeShiftCount} active shifts · ${cscIncome.estimatedHours.toFixed(1)} estimated hours · unpaid ${formatDashboardCurrency(cscIncome.unpaidPay)}`,
+    note: `${cscIncome.unpaidShiftCount} unpaid shifts · paid shifts should come from scanned paychecks · projected unpaid ${formatDashboardCurrency(cscIncome.unpaidPay)}`,
     isSystemItem: true,
   }), [cscIncome]);
+
+  const paycheckIncome = useMemo(() => {
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const normalized = paychecks
+      .map((paycheck) => {
+        const checkDate = normalizeDashboardDate(paycheck?.checkDate);
+        const rate = getDashboardHourlyRate(paycheck?.rate);
+        const hours = getDashboardPaycheckHours(paycheck);
+        const grossPay = getDashboardNumber(paycheck?.grossPay);
+        const taxes = getDashboardNumber(paycheck?.taxes);
+        const netPay = getDashboardNumber(paycheck?.netPay || paycheck?.checkAmount);
+        const underExpectedRate = Boolean(checkDate && checkDate >= GUARD_CARD_PROOF_SUBMITTED_DATE && rate > 0 && rate < FUTURE_EXPECTED_CSC_RATE);
+
+        return {
+          ...paycheck,
+          checkDate,
+          rate,
+          hours,
+          grossPay,
+          taxes,
+          netPay,
+          underExpectedRate,
+        };
+      })
+      .filter((paycheck) => paycheck.checkDate || paycheck.netPay || paycheck.grossPay);
+
+    const currentMonthPaychecks = normalized.filter((paycheck) => paycheck.checkDate.startsWith(currentMonth));
+    const totalGrossPay = normalized.reduce((sum, paycheck) => sum + paycheck.grossPay, 0);
+    const totalTaxes = normalized.reduce((sum, paycheck) => sum + paycheck.taxes, 0);
+    const totalNetPay = normalized.reduce((sum, paycheck) => sum + paycheck.netPay, 0);
+    const totalHours = normalized.reduce((sum, paycheck) => sum + paycheck.hours, 0);
+    const currentMonthNetPay = currentMonthPaychecks.reduce((sum, paycheck) => sum + paycheck.netPay, 0);
+    const currentMonthGrossPay = currentMonthPaychecks.reduce((sum, paycheck) => sum + paycheck.grossPay, 0);
+    const currentMonthHours = currentMonthPaychecks.reduce((sum, paycheck) => sum + paycheck.hours, 0);
+    const rateWarnings = normalized.filter((paycheck) => paycheck.underExpectedRate);
+    const latestPaycheck = [...normalized].sort((a, b) => String(b.checkDate).localeCompare(String(a.checkDate)))[0] || null;
+
+    return {
+      paychecks: normalized,
+      paycheckCount: normalized.length,
+      currentMonthPaychecks,
+      currentMonthCount: currentMonthPaychecks.length,
+      totalGrossPay,
+      totalTaxes,
+      totalNetPay,
+      totalHours,
+      currentMonthNetPay,
+      currentMonthGrossPay,
+      currentMonthHours,
+      rateWarnings,
+      latestPaycheck,
+    };
+  }, [paychecks]);
+
+  const paycheckIncomeItem = useMemo(() => ({
+    id: 'system-csc-paycheck-income',
+    category: 'CSC Paycheck Income',
+    estBudget: paycheckIncome.totalGrossPay,
+    actualCost: paycheckIncome.totalNetPay,
+    dueDate: '',
+    status: 'paid',
+    note: `${paycheckIncome.paycheckCount} scanned paycheck${paycheckIncome.paycheckCount === 1 ? '' : 's'} · ${paycheckIncome.totalHours.toFixed(1)} hrs · taxes ${formatDashboardCurrency(paycheckIncome.totalTaxes)}${paycheckIncome.rateWarnings.length ? ` · ${paycheckIncome.rateWarnings.length} rate warning${paycheckIncome.rateWarnings.length === 1 ? '' : 's'}` : ''}`,
+    isSystemItem: true,
+  }), [paycheckIncome]);
 
   const getBudgetItemsForBucket = (bucketName) => {
     const items = state?.buckets?.[bucketName] || [];
     if (bucketName !== 'income') return items;
-    if (!cscIncome.activeShiftCount && !cscIncome.estimatedPay) return items;
-    return [...items, cscIncomeItem];
+    const systemIncomeItems = [];
+    if (paycheckIncome.paycheckCount || paycheckIncome.totalNetPay) systemIncomeItems.push(paycheckIncomeItem);
+    if (cscIncome.unpaidShiftCount || cscIncome.unpaidPay) systemIncomeItems.push(cscIncomeItem);
+    return [...items, ...systemIncomeItems];
   };
 
   const summary = useMemo(() => {
@@ -201,7 +363,7 @@ const DashboardTab = ({
       sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0
     );
 
-    const income = manualIncome + cscIncome.estimatedPay;
+    const income = manualIncome + paycheckIncome.totalNetPay + cscIncome.unpaidPay;
 
     const expenses = allItems
       .filter(item => {
@@ -222,11 +384,12 @@ const DashboardTab = ({
       income,
       manualIncome,
       cscIncome,
+      paycheckIncome,
       expenses,
       netIncome: income - expenses,
       budgetVariance: totalActual - totalBudgeted
     };
-  }, [state?.buckets, cscIncome]);
+  }, [state?.buckets, cscIncome, paycheckIncome]);
 
 
   const budgetOverview = useMemo(() => {
@@ -255,7 +418,7 @@ const DashboardTab = ({
       totalActual,
       archivedItems: state?.archived?.length || 0,
     };
-  }, [state?.buckets, state?.archived]);
+  }, [state?.buckets, state?.archived, categoryOrder, cscIncome, paycheckIncome]);
 
   const alerts = useMemo(() => {
     const allItems = [];
@@ -271,7 +434,7 @@ const DashboardTab = ({
     const upcoming = allItems.filter(item => getItemStatus(item) === 'dueSoon');
 
     return { overdue, upcoming };
-  }, [state?.buckets]);
+  }, [state?.buckets, categoryOrder, cscIncome, paycheckIncome]);
 
   const handleFilterChange = (filterId) => {
     setStatusFilter(filterId);
@@ -322,7 +485,7 @@ const DashboardTab = ({
   };
 
   const exportAllToCSV = () => {
-    const headers = ['Category', 'Item', 'Est. Budget', 'Actual Cost', 'Due Date', 'Status'];
+    const headers = ['Category', 'Item', 'Est. Budget', 'Paid', 'Due Date', 'Status'];
     const rows = [];
 
     categoryOrder.forEach(bucketName => {
@@ -394,7 +557,10 @@ const DashboardTab = ({
             <strong>Income:</strong> ${formatDashboardCurrency(summary.income)}
           </div>
           <div class="summary-card">
-            <strong>CSC Shift Income:</strong> ${formatDashboardCurrency(cscIncome.estimatedPay)}
+            <strong>CSC Paychecks:</strong> ${formatDashboardCurrency(paycheckIncome.totalNetPay)}
+          </div>
+          <div class="summary-card">
+            <strong>CSC Unpaid Shift Projection:</strong> ${formatDashboardCurrency(cscIncome.unpaidPay)}
           </div>
           <div class="summary-card">
             <strong>Expenses:</strong> $${summary.expenses.toFixed(2)}
@@ -414,7 +580,7 @@ const DashboardTab = ({
               <tr>
                 <th>Item</th>
                 <th>Est. Budget</th>
-                <th>Actual Cost</th>
+                <th>Paid</th>
                 <th>Due Date</th>
                 <th>Status</th>
                 <th>Notes</th>
@@ -561,7 +727,10 @@ const DashboardTab = ({
       <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border border-blue-200 bg-blue-50 shadow-sm">
         <div className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left">
           <div>
-            <h2 className="text-2xl font-bold text-slate-900">Budget Overview</h2>
+            <div className="flex items-center gap-2">
+              <WalletCards className="h-6 w-6 text-blue-700" />
+              <h2 className="text-2xl font-black text-slate-900">Budget Overview</h2>
+            </div>
             <p className="mt-1 text-sm font-medium text-slate-600">Budget status, due dates, saved items, and spending totals.</p>
           </div>
 
@@ -588,7 +757,7 @@ const DashboardTab = ({
                     <p className="text-sm font-bold text-green-700">Income</p>
                     <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(summary.income)}</p>
                     <p className="mt-1 text-xs font-semibold text-green-800">
-                      Budget: {formatDashboardCurrency(summary.manualIncome)} · CSC: {formatDashboardCurrency(cscIncome.estimatedPay)}
+                      Budget: {formatDashboardCurrency(summary.manualIncome)} · Paychecks: {formatDashboardCurrency(paycheckIncome.totalNetPay)} · Unpaid shifts: {formatDashboardCurrency(cscIncome.unpaidPay)}
                     </p>
                   </div>
                   <DollarSign className="h-8 w-8 text-green-600 opacity-80" />
@@ -645,10 +814,26 @@ const DashboardTab = ({
               <div className="rounded-2xl border border-yellow-300 bg-yellow-50 p-4 text-yellow-950 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-bold">CSC Shift Income</p>
-                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(cscIncome.estimatedPay)}</p>
+                    <p className="text-sm font-bold">CSC Unpaid Shift Projection</p>
+                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(cscIncome.unpaidPay)}</p>
                     <p className="mt-1 text-xs opacity-80">
-                      {cscIncome.activeShiftCount} shifts · {cscIncome.estimatedHours.toFixed(1)} hrs · paid {formatDashboardCurrency(cscIncome.paidPay)}
+                      {cscIncome.unpaidShiftCount} unpaid shifts · {cscIncome.estimatedHours.toFixed(1)} estimated hrs
+                    </p>
+                  </div>
+                  <DollarSign className="h-8 w-8 opacity-80" />
+                </div>
+              </div>
+
+              <div className={`${paycheckIncome.rateWarnings.length ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-green-200 bg-green-50 text-green-950'} rounded-2xl border p-4 shadow-sm`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold">CSC Paychecks</p>
+                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(paycheckIncome.currentMonthNetPay)}</p>
+                    <p className="mt-1 text-xs opacity-80">
+                      This month · {paycheckIncome.currentMonthCount} check{paycheckIncome.currentMonthCount === 1 ? '' : 's'} · {paycheckIncome.currentMonthHours.toFixed(1)} hrs
+                    </p>
+                    <p className="mt-1 text-xs opacity-80">
+                      All scanned net: {formatDashboardCurrency(paycheckIncome.totalNetPay)}
                     </p>
                   </div>
                   <DollarSign className="h-8 w-8 opacity-80" />
@@ -705,8 +890,49 @@ const DashboardTab = ({
                   Estimated: <span className="font-extrabold">${budgetOverview.totalEstimated.toFixed(2)}</span>
                 </p>
                 <p className="text-sm">
-                  Actual: <span className="font-extrabold">${budgetOverview.totalActual.toFixed(2)}</span>
+                  Paid: <span className="font-extrabold">${budgetOverview.totalActual.toFixed(2)}</span>
                 </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-green-950">
+                <h3 className="font-extrabold">Latest CSC Paycheck</h3>
+                {paycheckIncome.latestPaycheck ? (
+                  <>
+                    <p className="mt-2 text-sm">
+                      Check date: <span className="font-extrabold">{formatDashboardDate(paycheckIncome.latestPaycheck.checkDate)}</span>
+                    </p>
+                    <p className="text-sm">
+                      Net pay: <span className="font-extrabold">{formatDashboardCurrency(paycheckIncome.latestPaycheck.netPay)}</span>
+                    </p>
+                    <p className="text-sm">
+                      Rate: <span className="font-extrabold">${paycheckIncome.latestPaycheck.rate.toFixed(2)}/hr</span> · Hours: <span className="font-extrabold">{paycheckIncome.latestPaycheck.hours.toFixed(2)}</span>
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm text-green-800">No scanned paychecks yet.</p>
+                )}
+              </div>
+
+              <div className={`${paycheckIncome.rateWarnings.length ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-900'} rounded-2xl border p-4`}>
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5" />
+                  <h3 className="font-extrabold">Pay Rate Check</h3>
+                </div>
+                <p className="mt-2 text-sm">
+                  Guard card proof submitted: <span className="font-extrabold">06/22/2026</span>
+                </p>
+                <p className="text-sm">
+                  Expected future CSC rate: <span className="font-extrabold">$19.50/hr</span>
+                </p>
+                {paycheckIncome.rateWarnings.length ? (
+                  <p className="mt-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-bold text-amber-900">
+                    {paycheckIncome.rateWarnings.length} scanned paycheck{paycheckIncome.rateWarnings.length === 1 ? '' : 's'} below $19.50/hr after 06/22/2026.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-600">No post-guard-card rate warnings.</p>
+                )}
               </div>
             </div>
           </div>
@@ -801,7 +1027,7 @@ const DashboardTab = ({
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-48">Category</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Paid</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
@@ -827,19 +1053,25 @@ const DashboardTab = ({
                         <td className="px-3 py-2 text-sm">{item.dueDate || 'N/A'}</td>
                         <td className="px-3 py-2">{getStatusBadge(item)}</td>
                         <td className="px-3 py-2">
-                          <input
-                            type="text"
-                            value={item.note || ''}
-                            onChange={(e) => {
-                              const updatedBucket = state.buckets[item.bucketName].map(i =>
-                                i.id === item.id ? { ...i, note: e.target.value } : i
-                              );
-                              setState({ ...state, buckets: { ...state.buckets, [item.bucketName]: updatedBucket } });
-                            }}
-                            onBlur={saveBudget}
-                            placeholder="Add note..."
-                            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                          />
+                          {item.isSystemItem ? (
+                            <div className="rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-900">
+                              {item.note || 'Auto-calculated item.'}
+                            </div>
+                          ) : (
+                            <input
+                              type="text"
+                              value={item.note || ''}
+                              onChange={(e) => {
+                                const updatedBucket = state.buckets[item.bucketName].map(i =>
+                                  i.id === item.id ? { ...i, note: e.target.value } : i
+                                );
+                                setState({ ...state, buckets: { ...state.buckets, [item.bucketName]: updatedBucket } });
+                              }}
+                              onBlur={saveBudget}
+                              placeholder="Add note..."
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          )}
                         </td>
                       </tr>
                     );
@@ -900,7 +1132,7 @@ const DashboardTab = ({
 
                 <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm">
                   <span className="text-gray-600 hidden sm:inline">Budget: <strong>${totalBudgeted.toFixed(2)}</strong></span>
-                  <span className="text-gray-600">Actual: <strong>${totalActual.toFixed(2)}</strong></span>
+                  <span className="text-gray-600">Paid: <strong>${totalActual.toFixed(2)}</strong></span>
                 </div>
               </button>
 
@@ -914,7 +1146,7 @@ const DashboardTab = ({
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-48">Item</th>
                             <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Minimum</th>
                             <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Balance</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Paid</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Paid</th>
                             <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Available</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
@@ -923,7 +1155,7 @@ const DashboardTab = ({
                           <>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Item</th>
                             <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Est. Budget</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Actual Cost</th>
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-700 w-32">Paid</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-32">Due Date</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-40">Status</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-64">Notes</th>
@@ -1039,7 +1271,7 @@ const DashboardTab = ({
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600 mb-1">Total Actual Cost</p>
+              <p className="text-sm text-gray-600 mb-1">Total Paid</p>
               <p className="text-2xl font-bold text-purple-900">
                 ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
               </p>

@@ -49,6 +49,11 @@ const ARCHIVE_STORAGE_KEY = "todoTab.tasks.archived.v1";
 const SAFETY_SNAPSHOT_STORAGE_KEY = "todoTab.tasks.safetySnapshots.v1";
 const TODO_GOOGLE_CALENDAR_ADDED_STORAGE_KEY = "todoTab.googleCalendar.addedIds.v1";
 const MAX_SAFETY_SNAPSHOTS = 30;
+const MAX_TASK_SCAN_TEXT_LENGTH = 12000;
+const TASK_FILE_UPLOAD_ENDPOINT = "/budget-dashboard-fs/upload-task-file.php";
+const TASK_FILE_UPLOAD_LOCALWP_ENDPOINT = "http://main-dashboard.local/budget-dashboard-fs/upload-task-file.php";
+const TASK_FILE_PUBLIC_BASE_PATH = "/budget-dashboard-fs";
+const CUSTOM_TASK_CATEGORIES_STORAGE_KEY = "todoTab.taskCategories.custom.v1";
 
 const TASK_TYPES = [
   "General",
@@ -62,6 +67,56 @@ const TASK_TYPES = [
   "Dental",
   "Phone / Lifeline",
 ];
+
+const cleanTaskCategoryName = (value = "") => String(value || "").replace(/\s+/g, " ").trim();
+
+const mergeTaskCategories = (...categoryGroups) => {
+  const seen = new Set();
+  const merged = [];
+
+  categoryGroups.forEach((group) => {
+    const categories = Array.isArray(group) ? group : [group];
+
+    categories.forEach((category) => {
+      const name = cleanTaskCategoryName(category);
+      if (!name) return;
+
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+
+      seen.add(key);
+      merged.push(name);
+    });
+  });
+
+  return merged;
+};
+
+const readStoredCustomTaskCategories = () => {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const saved = localStorage.getItem(CUSTOM_TASK_CATEGORIES_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return mergeTaskCategories(Array.isArray(parsed) ? parsed : []).filter((category) => !TASK_TYPES.includes(category));
+  } catch {
+    return [];
+  }
+};
+
+const writeStoredCustomTaskCategories = (categories = []) => {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const cleaned = mergeTaskCategories(categories).filter((category) => !TASK_TYPES.includes(category));
+    localStorage.setItem(CUSTOM_TASK_CATEGORIES_STORAGE_KEY, JSON.stringify(cleaned));
+  } catch {
+    // Ignore storage write failures so task entry still works.
+  }
+};
+
+const extractTaskCategoryNames = (tasks = []) =>
+  mergeTaskCategories(
+    tasks.flatMap((task) => [task?.typeOverride, task?.type]).filter(Boolean)
+  ).filter((category) => category && category !== "General");
 
 const TODO_CATEGORY_ICONS = {
   General: { icon: ListTodo, color: "text-slate-300" },
@@ -82,6 +137,7 @@ const DEFAULT_FORM = {
   type: "General",
   typeOverride: "",
   date: "",
+  time: "",
   phone: "",
   address: "",
   deadline: "",
@@ -110,11 +166,16 @@ const DEFAULT_FORM = {
   completed: false,
 };
 
+const TASK_SCAN_FILL_FIELDS = Object.keys(DEFAULT_FORM).filter(
+  (field) => !["id", "completed", "details", "documents", "notes", "followUpNotes"].includes(field)
+);
+
 const FIELD_LABELS = {
   phone: ["phone", "tel", "telephone"],
   address: ["address", "location"],
   deadline: ["deadline", "due", "due date", "reg due", "registration due", "suspension"],
   date: ["date", "appointment date", "visit date", "order date"],
+  time: ["time", "appointment time", "start time"],
   caseNumber: ["case", "case #", "case number", "citation", "citation #", "citation number", "id"],
   amount: ["amount", "balance", "fee", "cost", "total", "payment"],
   plate: ["plate", "license plate"],
@@ -144,6 +205,7 @@ const FIELD_LABEL_DISPLAY = {
   type: "Type",
   typeOverride: "Category",
   date: "Date",
+  time: "Time",
   phone: "Phone",
   address: "Address",
   deadline: "Deadline",
@@ -172,8 +234,8 @@ const FIELD_LABEL_DISPLAY = {
 };
 
 const normalizeType = (value = "") => {
-  const candidate = String(value || "").trim();
-  return TASK_TYPES.includes(candidate) ? candidate : "General";
+  const candidate = cleanTaskCategoryName(value);
+  return candidate || "General";
 };
 
 const getFieldLabel = (task, field) => {
@@ -190,16 +252,16 @@ const getFieldLabel = (task, field) => {
 };
 
 const TYPE_FIELDS = {
-  General: ["date", "deadline", "phone", "website", "documents", "questions", "outcome", "notes"],
-  Medical: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
-  "DMV / Vehicle": ["plate", "vin", "vehicle", "date", "deadline", "amount", "caseNumber", "phone", "website", "systemLink", "documents", "requiredAction", "impact", "notes"],
-  Insurance: ["company", "policyNumber", "policyStatus", "effectiveDate", "phone", "website", "systemLink", "amount", "deadline", "requiredAction", "impact", "documents", "notes"],
-  "DPSS / Benefits": ["person", "organization", "caseNumber", "phone", "website", "systemLink", "deadline", "amount", "documents", "questions", "outcome", "notes"],
-  Legal: ["person", "organization", "caseNumber", "phone", "address", "date", "deadline", "amount", "website", "systemLink", "documents", "questions", "outcome", "notes"],
-  Moving: ["date", "deadline", "address", "phone", "amount", "documents", "questions", "outcome", "notes"],
-  Work: ["organization", "person", "phone", "website", "date", "deadline", "documents", "questions", "outcome", "notes"],
-  Dental: ["person", "organization", "phone", "address", "date", "deadline", "documents", "questions", "outcome", "notes"],
-  "Phone / Lifeline": ["person", "company", "phone", "website", "systemLink", "caseNumber", "deadline", "documents", "questions", "outcome", "notes"],
+  General: ["date", "deadline", "time", "phone", "website", "documents", "questions", "outcome", "notes"],
+  Medical: ["person", "organization", "phone", "address", "date", "deadline", "time", "documents", "questions", "outcome", "notes"],
+  "DMV / Vehicle": ["plate", "vin", "vehicle", "date", "deadline", "time", "amount", "caseNumber", "phone", "website", "systemLink", "documents", "requiredAction", "impact", "notes"],
+  Insurance: ["company", "policyNumber", "policyStatus", "effectiveDate", "time", "phone", "website", "systemLink", "amount", "deadline", "requiredAction", "impact", "documents", "notes"],
+  "DPSS / Benefits": ["person", "organization", "caseNumber", "phone", "website", "systemLink", "deadline", "time", "amount", "documents", "questions", "outcome", "notes"],
+  Legal: ["person", "organization", "caseNumber", "phone", "address", "date", "deadline", "time", "amount", "website", "systemLink", "documents", "questions", "outcome", "notes"],
+  Moving: ["date", "deadline", "time", "address", "phone", "amount", "documents", "questions", "outcome", "notes"],
+  Work: ["organization", "person", "phone", "website", "date", "deadline", "time", "documents", "questions", "outcome", "notes"],
+  Dental: ["person", "organization", "phone", "address", "date", "deadline", "time", "documents", "questions", "outcome", "notes"],
+  "Phone / Lifeline": ["person", "company", "phone", "website", "systemLink", "caseNumber", "deadline", "time", "documents", "questions", "outcome", "notes"],
 };
 
 const REQUIRED_FIELDS_BY_TYPE = {
@@ -217,7 +279,20 @@ const REQUIRED_FIELDS_BY_TYPE = {
 const MULTILINE_FIELDS = new Set(["details", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
 const FORMATTED_TEXT_FIELDS = new Set(["notes", "followUpNotes"]);
 const DATE_PICKER_FIELDS = new Set(["date", "deadline", "effectiveDate"]);
+const TIME_PICKER_FIELDS = new Set(["time"]);
 const shouldUseFormattingToolbar = (field) => FORMATTED_TEXT_FIELDS.has(field);
+const DOCUMENT_DETAIL_FIELDS = new Set(["fileName", "documents"]);
+const NOTE_DETAIL_FIELDS = new Set(["notes", "followUpNotes"]);
+
+const orderTaskFormFields = (fields = []) => {
+  const uniqueFields = Array.from(new Set(fields));
+  const noteFields = uniqueFields.filter((field) => NOTE_DETAIL_FIELDS.has(field));
+  const documentFields = uniqueFields.filter((field) => DOCUMENT_DETAIL_FIELDS.has(field));
+  const otherFields = uniqueFields.filter((field) => !NOTE_DETAIL_FIELDS.has(field) && !DOCUMENT_DETAIL_FIELDS.has(field));
+
+  return [...otherFields, ...noteFields, ...documentFields];
+};
+
 
 const getTextareaRows = (value, minRows = 1, maxRows = 10, charsPerRow = 72) => {
   const text = String(value || "");
@@ -706,13 +781,10 @@ const buildContactTaskDetails = (contact = {}) => {
   const details = [];
   const officeLocations = Array.isArray(contact.officeLocations)
     ? contact.officeLocations
-        .map((office, index) => ({
-          label: String(office?.label || `Office ${index + 1}`).trim(),
-          address: String(office?.address || "").trim(),
-          phone: String(office?.phone || "").trim(),
+        .map((office) => ({
           fax: String(office?.fax || "").trim(),
         }))
-        .filter((office) => office.address || office.phone || office.fax)
+        .filter((office) => office.fax)
     : [];
 
   if (contact.treatmentRequested) {
@@ -723,27 +795,23 @@ const buildContactTaskDetails = (contact = {}) => {
     details.push(`Comments: ${contact.comments}`);
   }
 
-  if (officeLocations.length) {
-    details.push(
-      officeLocations
-        .map((office, index) => {
-          const lines = [office.label || `Office ${index + 1}`];
-          if (office.address) lines.push(office.address);
-          if (office.phone) lines.push(`Phone: ${office.phone}`);
-          if (office.fax) lines.push(`Fax: ${office.fax}`);
-          return lines.join("\n");
-        })
-        .join("\n\n")
-    );
-  } else if (contact.fax) {
+  officeLocations.forEach((office) => {
+    if (office.fax) details.push(`Fax: ${office.fax}`);
+  });
+
+  if (contact.fax) {
     details.push(`Fax: ${contact.fax}`);
+  }
+
+  if (contact.email) {
+    details.push(`Email: ${contact.email}`);
   }
 
   if (contact.scannedDocumentName) {
     details.push(`Scanned Document: ${contact.scannedDocumentName}`);
   }
 
-  return details.join("\n");
+  return Array.from(new Set(details.map((item) => String(item || "").trim()).filter(Boolean))).join("\n");
 };
 
 const appendContactTaskDetails = (currentDetails = "", nextDetails = "") => {
@@ -760,9 +828,10 @@ const appendContactTaskDetails = (currentDetails = "", nextDetails = "") => {
 const applyContactToTaskData = (task = {}, contact = {}, replaceExisting = false) => {
   const next = { ...task };
 
-  if (TASK_TYPES.includes(contact.category) && (replaceExisting || !next.type || next.type === "General")) {
-    next.type = contact.category;
-    next.typeOverride = contact.category;
+  const contactCategory = cleanTaskCategoryName(contact.category);
+  if (contactCategory && (replaceExisting || !next.type || next.type === "General")) {
+    next.type = contactCategory;
+    next.typeOverride = contactCategory;
   }
 
   CONTACT_APPLY_FIELDS.forEach((field) => {
@@ -851,6 +920,7 @@ const buildConnectedFollowUpSourceSummary = (task = {}) => {
     getFirstFilledValue(task, ["phone"]) ? `Phone: ${getFirstFilledValue(task, ["phone"])}` : "",
     getFirstFilledValue(task, ["website", "systemLink"]) ? `Website: ${getFirstFilledValue(task, ["website", "systemLink"])}` : "",
     getFirstFilledValue(task, ["deadline", "date", "effectiveDate"]) ? `Date / deadline: ${getFirstFilledValue(task, ["deadline", "date", "effectiveDate"])}` : "",
+    task.time ? `Time: ${formatTodoTimeForTextInput(task.time)}` : "",
     getFirstFilledValue(task, ["amount"]) ? `Amount: ${getFirstFilledValue(task, ["amount"])}` : "",
     task.details ? `Details: ${stripTodoCalendarHtml(task.details).trim()}` : "",
     task.notes ? `Notes: ${stripTodoCalendarHtml(task.notes).trim()}` : "",
@@ -868,6 +938,7 @@ const buildConnectedFollowUpSourceSnapshot = (task = {}) => ({
   typeOverride: task.typeOverride || "",
   date: task.date || "",
   deadline: task.deadline || "",
+  time: task.time || "",
   person: task.person || "",
   organization: task.organization || task.company || "",
   phone: task.phone || "",
@@ -878,6 +949,7 @@ const buildConnectedFollowUpSourceSnapshot = (task = {}) => ({
   amount: task.amount || "",
   notes: task.notes || "",
   followUpEntries: getFollowUpEntries(task).slice(0, 10),
+  attachments: normalizeTaskAttachments(task.attachments),
   completedAt: task.completedAt || "",
   archivedAt: task.archivedAt || "",
 });
@@ -946,6 +1018,53 @@ const formatTodoDateForTextInput = (value = "") => {
   return `${month}/${day}/${year}`;
 };
 
+const normalizeTodoCalendarTime = (value = "") => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return "";
+
+  const browserTimeMatch = rawValue.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (browserTimeMatch) {
+    const hour = Number(browserTimeMatch[1]);
+    const minute = Number(browserTimeMatch[2]);
+    const second = Number(browserTimeMatch[3] || 0);
+
+    if (hour > 23 || minute > 59 || second > 59) return "";
+
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+  }
+
+  const meridiemMatch = rawValue.match(/\b(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\b/i);
+  if (!meridiemMatch) return "";
+
+  const hour = Number(meridiemMatch[1]);
+  const minute = Number(meridiemMatch[2] || 0);
+  const meridiem = meridiemMatch[3].toUpperCase();
+
+  if (!hour || hour > 12 || minute > 59) return "";
+
+  const hour24 =
+    meridiem === "PM" && hour !== 12
+      ? hour + 12
+      : meridiem === "AM" && hour === 12
+        ? 0
+        : hour;
+
+  return `${String(hour24).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+};
+
+const formatTodoTimeForTextInput = (value = "") => {
+  const normalized = normalizeTodoCalendarTime(value);
+  if (!normalized) return String(value || "");
+
+  const [hourValue, minuteValue] = normalized.split(":");
+  const hour = Number(hourValue);
+  const minute = Number(minuteValue);
+  const meridiem = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+
+  return `${displayHour}:${String(minute).padStart(2, "0")} ${meridiem}`;
+};
+
 const TodoDatePickerInput = ({ value, onChange, className = "", placeholder = "mm/dd/yyyy" }) => {
   const pickerRef = useRef(null);
   const normalizedValue = normalizeTodoCalendarDate(value);
@@ -993,6 +1112,153 @@ const TodoDatePickerInput = ({ value, onChange, className = "", placeholder = "m
   );
 };
 
+const TodoTimePickerInput = ({ value, onChange, className = "", placeholder = "h:mm AM" }) => {
+  const pickerRef = useRef(null);
+  const normalizedValue = normalizeTodoCalendarTime(value);
+  const pickerValue = normalizedValue ? normalizedValue.slice(0, 5) : "";
+
+  const openPicker = () => {
+    const picker = pickerRef.current;
+    if (!picker) return;
+
+    if (typeof picker.showPicker === "function") {
+      picker.showPicker();
+      return;
+    }
+
+    picker.focus();
+    picker.click();
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={(event) => onChange(formatTodoTimeForTextInput(event.target.value))}
+        placeholder={placeholder}
+        className={className}
+      />
+      <input
+        ref={pickerRef}
+        type="time"
+        value={pickerValue}
+        onChange={(event) => onChange(formatTodoTimeForTextInput(event.target.value))}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+      <button
+        type="button"
+        onClick={openPicker}
+        title="Pick time"
+        aria-label="Pick time"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-blue-600 shadow-sm hover:bg-slate-50"
+      >
+        <Clock className="h-4 w-4" />
+      </button>
+    </div>
+  );
+};
+
+
+function loadTodoScanScriptOnce(src, globalName) {
+  return new Promise((resolve, reject) => {
+    if (globalName && window[globalName]) {
+      resolve(window[globalName]);
+      return;
+    }
+
+    const existing = document.querySelector(`script[data-todo-scan-src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(globalName ? window[globalName] : true), { once: true });
+      existing.addEventListener("error", () => reject(new Error(`Could not load ${src}`)), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.todoScanSrc = src;
+    script.onload = () => resolve(globalName ? window[globalName] : true);
+    script.onerror = () => reject(new Error(`Could not load ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+function readTodoScanFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readTodoScanFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function getTodoScanTesseract() {
+  return loadTodoScanScriptOnce("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js", "Tesseract");
+}
+
+async function getTodoScanPdfJs() {
+  const pdfjsLib = await loadTodoScanScriptOnce("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js", "pdfjsLib");
+  if (pdfjsLib?.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  }
+  return pdfjsLib;
+}
+
+async function ocrTodoScanImageDataUrl(dataUrl) {
+  const Tesseract = await getTodoScanTesseract();
+  const result = await Tesseract.recognize(dataUrl, "eng");
+  return result?.data?.text || "";
+}
+
+async function ocrTodoScanPdfFile(file) {
+  const [pdfjsLib, arrayBuffer] = await Promise.all([getTodoScanPdfJs(), readTodoScanFileAsArrayBuffer(file)]);
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pageTexts = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+
+    await page.render({ canvasContext: context, viewport }).promise;
+    const dataUrl = canvas.toDataURL("image/png");
+    const text = await ocrTodoScanImageDataUrl(dataUrl);
+    pageTexts.push(text);
+  }
+
+  return pageTexts.join("\n\n");
+}
+
+const limitTodoScanText = (value = "") => {
+  const text = String(value || "").trim();
+  if (text.length <= MAX_TASK_SCAN_TEXT_LENGTH) return text;
+  return `${text.slice(0, MAX_TASK_SCAN_TEXT_LENGTH).trim()}\n\n[Scan text truncated to ${MAX_TASK_SCAN_TEXT_LENGTH.toLocaleString()} characters.]`;
+};
+
+const buildTodoScanDocumentBlock = (fileName = "", text = "") =>
+  [fileName ? `Scanned document: ${fileName}` : "Scanned document", limitTodoScanText(text)]
+    .filter(Boolean)
+    .join("\n");
+
+const appendTodoScanTextBlock = (currentValue = "", nextValue = "") =>
+  [String(currentValue || "").trim(), String(nextValue || "").trim()]
+    .filter(Boolean)
+    .join("\n\n");
 
 const addDaysToTodoCalendarDate = (dateValue, days = 1) => {
   const normalized = normalizeTodoCalendarDate(dateValue);
@@ -1010,10 +1276,10 @@ const addDaysToTodoCalendarDate = (dateValue, days = 1) => {
 };
 
 const findTodoCalendarTime = (task = {}) => {
+  const directTimeValue = normalizeTodoCalendarTime(task.time || task.startTime || task.appointmentTime || "");
+  if (directTimeValue) return directTimeValue;
+
   const haystack = [
-    task.time,
-    task.startTime,
-    task.appointmentTime,
     task.details,
     task.questions,
     task.notes,
@@ -1025,21 +1291,7 @@ const findTodoCalendarTime = (task = {}) => {
 
   const match = haystack.match(/\b(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\b/i);
   if (!match) return "";
-
-  const hour = Number(match[1]);
-  const minute = Number(match[2] || 0);
-  const meridiem = match[3].toUpperCase();
-
-  if (!hour || hour > 12 || minute > 59) return "";
-
-  const hour24 =
-    meridiem === "PM" && hour !== 12
-      ? hour + 12
-      : meridiem === "AM" && hour === 12
-        ? 0
-        : hour;
-
-  return `${String(hour24).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+  return normalizeTodoCalendarTime(match[0]);
 };
 
 const addHoursToTodoCalendarDateTime = (dateValue, timeValue, hours = 1) => {
@@ -1073,6 +1325,7 @@ const buildTodoGoogleCalendarEventPayload = (task = {}) => {
 
   const description = [
     task.details ? `Details:\n${task.details}` : "",
+    timeValue ? `Time: ${formatTodoTimeForTextInput(timeValue)}` : "",
     task.phone ? `Phone: ${task.phone}` : "",
     task.organization ? `Organization: ${task.organization}` : "",
     task.company ? `Company: ${task.company}` : "",
@@ -1085,6 +1338,11 @@ const buildTodoGoogleCalendarEventPayload = (task = {}) => {
     task.questions ? `Questions:\n${task.questions}` : "",
     noteText ? `Notes:\n${noteText}` : "",
     followUpText ? `Follow-up notes:\n${followUpText}` : "",
+    normalizeTaskAttachments(task.attachments).length
+      ? `Attached files:\n${normalizeTaskAttachments(task.attachments)
+          .map((attachment) => `${attachment.originalName || attachment.savedName || "Attached file"}: ${attachment.url || attachment.savedName || ""}`)
+          .join("\n")}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1152,9 +1410,106 @@ const createId = () => {
   return `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const normalizeTaskAttachment = (attachment = {}) => ({
+  id: attachment.id || `file-${createId()}`,
+  originalName: attachment.originalName || attachment.name || attachment.fileName || "Attached file",
+  savedName: attachment.savedName || "",
+  url: attachment.url || "",
+  viewUrl: attachment.viewUrl || "",
+  downloadUrl: attachment.downloadUrl || "",
+  mimeType: attachment.mimeType || attachment.type || "",
+  size: Number(attachment.size || attachment.sizeBytes || 0) || 0,
+  uploadedAt: attachment.uploadedAt || new Date().toISOString(),
+});
+
+const normalizeTaskAttachments = (attachments) => {
+  if (!Array.isArray(attachments)) return [];
+
+  return attachments
+    .map(normalizeTaskAttachment)
+    .filter((attachment) => attachment.url || attachment.savedName || attachment.originalName);
+};
+
+const formatTaskAttachmentSize = (size = 0) => {
+  const bytes = Number(size || 0);
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const getTaskFileUploadEndpointCandidates = () => {
+  if (typeof window === "undefined") return [TASK_FILE_UPLOAD_ENDPOINT];
+
+  const isLocalDevHost = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname || "");
+  const candidates = isLocalDevHost
+    ? [TASK_FILE_UPLOAD_LOCALWP_ENDPOINT, TASK_FILE_UPLOAD_ENDPOINT]
+    : [TASK_FILE_UPLOAD_ENDPOINT];
+
+  return Array.from(new Set(candidates));
+};
+
+const getTaskFileEndpointBase = () => {
+  if (typeof window === "undefined") return TASK_FILE_UPLOAD_ENDPOINT;
+
+  const isLocalDevHost = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname || "");
+  return isLocalDevHost ? TASK_FILE_UPLOAD_LOCALWP_ENDPOINT : TASK_FILE_UPLOAD_ENDPOINT;
+};
+
+const getTaskFileLocalWpOrigin = () => {
+  try {
+    return new URL(TASK_FILE_UPLOAD_LOCALWP_ENDPOINT).origin;
+  } catch {
+    return "";
+  }
+};
+
+const resolveTaskAttachmentUrl = (url = "") => {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value) || value.startsWith("blob:") || value.startsWith("data:")) return value;
+
+  if (typeof window === "undefined") return value;
+
+  const isLocalDevHost = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname || "");
+  if (isLocalDevHost && value.startsWith(`${TASK_FILE_PUBLIC_BASE_PATH}/`)) {
+    const origin = getTaskFileLocalWpOrigin();
+    return origin ? `${origin}${value}` : value;
+  }
+
+  return value;
+};
+
+const buildTaskFileEndpointUrl = (action, attachment = {}) => {
+  const savedName = String(attachment.savedName || "").trim();
+  if (!savedName) return "";
+
+  const params = new URLSearchParams();
+  params.set("action", action);
+  params.set("savedName", savedName);
+
+  const originalName = String(attachment.originalName || "").trim();
+  if (originalName) params.set("name", originalName);
+
+  return `${getTaskFileEndpointBase()}?${params.toString()}`;
+};
+
+const getTaskAttachmentViewUrl = (attachment = {}) => {
+  if (attachment.viewUrl) return resolveTaskAttachmentUrl(attachment.viewUrl);
+  if (attachment.savedName) return buildTaskFileEndpointUrl("view", attachment);
+  return resolveTaskAttachmentUrl(attachment.url);
+};
+
+const getTaskAttachmentDownloadUrl = (attachment = {}) => {
+  if (attachment.downloadUrl) return resolveTaskAttachmentUrl(attachment.downloadUrl);
+  if (attachment.savedName) return buildTaskFileEndpointUrl("download", attachment);
+  return resolveTaskAttachmentUrl(attachment.url);
+};
+
 const createEmptyTask = () => ({
   ...DEFAULT_FORM,
   id: createId(),
+  attachments: [],
 });
 
 const getCategoryAnchorId = (type) =>
@@ -1382,7 +1737,7 @@ const extractLabeledField = (line = "") => {
 };
 
 const appendField = (task, field, value) => {
-  const cleanValue = String(value || "").trim();
+  const cleanValue = field === "time" ? formatTodoTimeForTextInput(value) : String(value || "").trim();
   if (!cleanValue) return;
 
   if (!task[field]) {
@@ -1416,7 +1771,8 @@ const getExplicitTaskType = (task) => {
 };
 
 const inferTaskType = (task) => {
-  if (TASK_TYPES.includes(task?.typeOverride)) return task.typeOverride;
+  const manualOverride = cleanTaskCategoryName(task?.typeOverride);
+  if (manualOverride) return manualOverride;
 
   const explicitType = getExplicitTaskType(task);
   if (explicitType) return explicitType;
@@ -1451,16 +1807,20 @@ const inferTaskType = (task) => {
   if (/(work|job|shift|schedule|reactivation|retraining|csc)/i.test(haystack)) return "Work";
   if (/(dental|dentist|teeth|bhakta)/i.test(haystack)) return "Dental";
 
-  return TASK_TYPES.includes(task.type) ? task.type : "General";
+  const manualType = cleanTaskCategoryName(task?.type);
+  return manualType || "General";
 };
 
 const normalizeTaskCategory = (task = {}) => {
   const correctedType = inferTaskType(task);
-  const normalizedType = TASK_TYPES.includes(correctedType) ? correctedType : "General";
+  const normalizedType = normalizeType(correctedType);
+  const normalizedOverride = cleanTaskCategoryName(task.typeOverride);
+
   return combineNotesIntoFollowUpEntries({
     ...task,
     type: normalizedType,
-    typeOverride: TASK_TYPES.includes(task.typeOverride) ? task.typeOverride : task.typeOverride || "",
+    typeOverride: normalizedOverride,
+    attachments: normalizeTaskAttachments(task.attachments),
   });
 };
 
@@ -1483,6 +1843,15 @@ const normalizeDerivedFields = (task) => {
   if (!task.amount) {
     const amountMatch = combined.match(/\$\s?\d[\d,]*(?:\.\d{2})?(?:\s?→\s?\$\s?\d[\d,]*(?:\.\d{2})?)?/);
     if (amountMatch) task.amount = amountMatch[0].trim();
+  }
+
+  if (task.time) {
+    task.time = formatTodoTimeForTextInput(task.time);
+  }
+
+  if (!task.time) {
+    const timeMatch = combined.match(/\b(?:time|appointment time|start time)\s*:?\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\b/i);
+    if (timeMatch) task.time = formatTodoTimeForTextInput(timeMatch[1]);
   }
 
   if (!task.plate) {
@@ -1617,6 +1986,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [checkedTaskIds, setCheckedTaskIds] = useState([]);
   const [bulkMoveType, setBulkMoveType] = useState(TASK_TYPES[0] || "General");
+  const [customTaskCategories, setCustomTaskCategories] = useState(readStoredCustomTaskCategories);
   const [followUpDrafts, setFollowUpDrafts] = useState({});
   const [editingFollowUpEntries, setEditingFollowUpEntries] = useState({});
   const [localContacts, setLocalContacts] = useState(() => getInitialContactsForState(sharedContacts));
@@ -1627,6 +1997,21 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const [replaceExistingContactFields, setReplaceExistingContactFields] = useState(false);
   const [contactApplyTarget, setContactApplyTarget] = useState("form");
   const contacts = useMemo(() => getInitialContactsForState(sharedContacts?.length ? sharedContacts : localContacts), [sharedContacts, localContacts]);
+  const taskCategoryTypes = useMemo(
+    () => mergeTaskCategories(TASK_TYPES, customTaskCategories, extractTaskCategoryNames(tasks)),
+    [customTaskCategories, tasks]
+  );
+
+  useEffect(() => {
+    writeStoredCustomTaskCategories(customTaskCategories);
+  }, [customTaskCategories]);
+
+  useEffect(() => {
+    if (!taskCategoryTypes.includes(bulkMoveType)) {
+      setBulkMoveType(taskCategoryTypes[0] || "General");
+    }
+  }, [bulkMoveType, taskCategoryTypes]);
+
   const setContacts = useCallback((updater) => {
     setLocalContacts((current) => {
       const baseContacts = getInitialContactsForState(sharedContacts?.length ? sharedContacts : current);
@@ -1644,8 +2029,27 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const [completionCelebration, setCompletionCelebration] = useState(null);
   const [calendarAddingTaskId, setCalendarAddingTaskId] = useState("");
   const [calendarAddedIds, setCalendarAddedIds] = useState(readTodoGoogleCalendarAddedIds);
+  const [isTaskScanOpen, setIsTaskScanOpen] = useState(false);
+  const [taskScanText, setTaskScanText] = useState("");
+  const [taskScanFileName, setTaskScanFileName] = useState("");
+  const [taskScanStatus, setTaskScanStatus] = useState("");
+  const [taskScanError, setTaskScanError] = useState("");
+  const [isTaskFileUploading, setIsTaskFileUploading] = useState(false);
+  const [taskFileUploadStatus, setTaskFileUploadStatus] = useState("");
+  const [taskFileUploadError, setTaskFileUploadError] = useState("");
   const completionCelebrationTimeoutRef = useRef(null);
   const previousTaskCompletionRef = useRef(new Map(tasks.map((task) => [task.id, Boolean(task.completed)])));
+
+  const resetTaskScan = useCallback(() => {
+    setIsTaskScanOpen(false);
+    setTaskScanText("");
+    setTaskScanFileName("");
+    setTaskScanStatus("");
+    setTaskScanError("");
+    setIsTaskFileUploading(false);
+    setTaskFileUploadStatus("");
+    setTaskFileUploadError("");
+  }, []);
 
   useEffect(() => {
     hasHydrated.current = true;
@@ -1656,6 +2060,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
       setForm(createEmptyTask());
       setEditingId(null);
       setShowAdvanced(false);
+      resetTaskScan();
       setIsCreateOpen(true);
     };
 
@@ -1687,7 +2092,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
       window.removeEventListener("todo-toolbar:export", openExport);
       window.removeEventListener("todo-toolbar:import", openImport);
     };
-  }, [tasks, archivedTasks]);
+  }, [tasks, archivedTasks, resetTaskScan]);
 
   const playCompletionSound = () => {
     if (typeof window === "undefined") return;
@@ -1828,13 +2233,300 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     const typeFields = TYPE_FIELDS[form.type] || TYPE_FIELDS.General;
     const valuedFields = Object.keys(DEFAULT_FORM).filter((field) => form[field] && field !== "completed");
 
-    return Array.from(new Set([...typeFields, ...valuedFields])).filter(
-      (field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field)
+    return orderTaskFormFields(
+      Array.from(new Set([...typeFields, ...valuedFields])).filter(
+        (field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field)
+      )
     );
   }, [form]);
 
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const addCustomTaskCategory = (rawCategoryName, options = {}) => {
+    const typedCategory = cleanTaskCategoryName(rawCategoryName);
+    if (!typedCategory) return "";
+
+    const existingCategory = taskCategoryTypes.find(
+      (category) => category.toLowerCase() === typedCategory.toLowerCase()
+    );
+    const nextCategory = existingCategory || typedCategory;
+
+    if (!existingCategory) {
+      setCustomTaskCategories((current) =>
+        mergeTaskCategories(current, nextCategory).filter((category) => !TASK_TYPES.includes(category))
+      );
+    }
+
+    if (options.selectInTaskForm) {
+      setForm((current) => ({ ...current, type: nextCategory, typeOverride: nextCategory }));
+      setBulkMoveType(nextCategory);
+    }
+
+    return nextCategory;
+  };
+
+  const applyTaskScanTextToForm = (rawText = taskScanText, fileName = taskScanFileName) => {
+    const limitedText = limitTodoScanText(rawText);
+    if (!limitedText.trim() && !fileName) return;
+
+    const parsedTask = limitedText.trim() ? parseStructuredTask(limitedText) : createEmptyTask();
+    const documentBlock = buildTodoScanDocumentBlock(fileName, limitedText);
+
+    setForm((current) => {
+      const next = { ...current };
+
+      TASK_SCAN_FILL_FIELDS.forEach((field) => {
+        const parsedValue = parsedTask[field];
+        if (!parsedValue) return;
+
+        if (field === "type" || field === "typeOverride") {
+          if ((!next.type || next.type === "General") && taskCategoryTypes.includes(parsedValue)) {
+            next.type = parsedValue;
+            next.typeOverride = parsedValue;
+          }
+          return;
+        }
+
+        if (!String(next[field] || "").trim()) {
+          next[field] = parsedValue;
+        }
+      });
+
+      if (fileName && !String(next.fileName || "").trim()) {
+        next.fileName = fileName;
+      }
+
+      if (documentBlock && !String(next.documents || "").includes(documentBlock)) {
+        next.documents = appendTodoScanTextBlock(next.documents, documentBlock);
+      }
+
+      return normalizeDerivedFields(next);
+    });
+  };
+
+  const scanTaskFile = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    setTaskScanError("");
+    setTaskFileUploadError("");
+    setTaskFileUploadStatus("");
+    setIsTaskFileUploading(true);
+
+    try {
+      const uploadedNames = [];
+      let latestScanText = "";
+      let latestScanFileName = "";
+
+      for (const file of files) {
+        setTaskFileUploadStatus(`Saving ${file.name} to local documents...`);
+        const attachment = await processTaskFileUpload(file);
+        uploadedNames.push(attachment.originalName || file.name);
+
+        let text = "";
+
+        if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+          setTaskScanStatus(`Scanning ${file.name}...`);
+          text = await ocrTodoScanPdfFile(file);
+        } else if (file.type.startsWith("image/")) {
+          setTaskScanStatus(`Scanning ${file.name}...`);
+          const dataUrl = await readTodoScanFileAsDataUrl(file);
+          text = await ocrTodoScanImageDataUrl(dataUrl);
+        } else if (/\.txt$/i.test(file.name)) {
+          setTaskScanStatus(`Reading ${file.name}...`);
+          text = await file.text();
+        }
+
+        if (text.trim()) {
+          const limitedText = limitTodoScanText(text);
+          latestScanText = latestScanText ? `${latestScanText}\n\n${limitedText}` : limitedText;
+          latestScanFileName = file.name;
+          applyTaskScanTextToForm(limitedText, file.name);
+        }
+      }
+
+      if (latestScanText) {
+        setTaskScanText(limitTodoScanText(latestScanText));
+        setTaskScanFileName(latestScanFileName);
+        setTaskScanStatus("Scan complete. Text was added to Documents and blank task fields were filled.");
+      } else {
+        setTaskScanStatus("");
+      }
+
+      setTaskFileUploadStatus(`${uploadedNames.length} file${uploadedNames.length === 1 ? "" : "s"} saved to local documents.`);
+    } catch (error) {
+      setTaskFileUploadError(error?.message || "File upload failed.");
+      setTaskScanStatus("");
+    } finally {
+      setIsTaskFileUploading(false);
+      event.target.value = "";
+    }
+  };
+
+  const applyEditedTaskScanText = () => {
+    applyTaskScanTextToForm(taskScanText, taskScanFileName);
+    setTaskScanStatus("Scan text applied to the Add Task form.");
+    setTaskScanError("");
+  };
+
+  const clearTaskScan = () => {
+    setTaskScanText("");
+    setTaskScanFileName("");
+    setTaskScanStatus("");
+    setTaskScanError("");
+  };
+
+  const uploadTaskFileToLocalDrive = async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("taskId", form.id || createId());
+    formData.append("taskName", form.taskName || "task-file");
+
+    let lastError = null;
+
+    for (const endpoint of getTaskFileUploadEndpointCandidates()) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          body: formData,
+        });
+
+        const responseText = await response.text();
+        let payload = null;
+
+        try {
+          payload = JSON.parse(responseText);
+        } catch {
+          throw new Error("Upload endpoint did not return JSON.");
+        }
+
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || `Upload failed with status ${response.status}.`);
+        }
+
+        return normalizeTaskAttachment(payload.file || payload);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("Could not upload file.");
+  };
+
+  const deleteTaskFileFromLocalDrive = async (attachment) => {
+    if (!attachment?.savedName) return true;
+
+    const formData = new FormData();
+    formData.append("action", "delete");
+    formData.append("savedName", attachment.savedName);
+
+    let lastError = null;
+
+    for (const endpoint of getTaskFileUploadEndpointCandidates()) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          body: formData,
+        });
+
+        const responseText = await response.text();
+        let payload = null;
+
+        try {
+          payload = JSON.parse(responseText);
+        } catch {
+          throw new Error("Delete endpoint did not return JSON.");
+        }
+
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || `Delete failed with status ${response.status}.`);
+        }
+
+        return true;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("Could not delete file.");
+  };
+
+  const addTaskAttachmentToForm = (attachment) => {
+    setForm((current) => ({
+      ...current,
+      attachments: normalizeTaskAttachments([...(current.attachments || []), attachment]),
+      fileName: current.fileName || attachment.originalName || current.fileName,
+    }));
+  };
+
+  const removeTaskAttachmentFromForm = async (attachmentId) => {
+    const attachment = normalizeTaskAttachments(form.attachments).find((item) => item.id === attachmentId);
+    if (!attachment) return;
+
+    if (!window.confirm(`Remove ${attachment.originalName || "this file"} from this task?`)) return;
+
+    try {
+      await deleteTaskFileFromLocalDrive(attachment);
+    } catch (error) {
+      const removeLinkOnly = window.confirm(
+        `${error?.message || "Could not delete the local file."} Remove the file link from this task anyway?`
+      );
+      if (!removeLinkOnly) return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      attachments: normalizeTaskAttachments(current.attachments).filter((item) => item.id !== attachmentId),
+    }));
+  };
+
+  const removeTaskAttachment = async (taskId, attachmentId) => {
+    const task = tasks.find((item) => item.id === taskId);
+    const attachment = normalizeTaskAttachments(task?.attachments).find((item) => item.id === attachmentId);
+    if (!task || !attachment) return;
+
+    if (!window.confirm(`Remove ${attachment.originalName || "this file"} from this task?`)) return;
+
+    try {
+      await deleteTaskFileFromLocalDrive(attachment);
+    } catch (error) {
+      const removeLinkOnly = window.confirm(
+        `${error?.message || "Could not delete the local file."} Remove the file link from this task anyway?`
+      );
+      if (!removeLinkOnly) return;
+    }
+
+    setTasks((current) =>
+      current.map((item) =>
+        item.id === taskId
+          ? addTaskHistory(
+              {
+                ...item,
+                attachments: normalizeTaskAttachments(item.attachments).filter((file) => file.id !== attachmentId),
+                updatedAt: new Date().toISOString(),
+              },
+              "File removed",
+              attachment.originalName || attachment.savedName || "Attached file"
+            )
+          : item
+      )
+    );
+  };
+
+  const processTaskFileUpload = async (file) => {
+    const attachment = await uploadTaskFileToLocalDrive(file);
+    addTaskAttachmentToForm(attachment);
+    return attachment;
+  };
+
+  const closeTaskForm = () => {
+    setForm(createEmptyTask());
+    setEditingId(null);
+    setShowAdvanced(false);
+    resetTaskScan();
+    setIsCreateOpen(false);
   };
 
   const applyAutoLinks = (incomingTasks, existingTasks) => {
@@ -1860,6 +2552,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
         details: form.details.trim(),
         id: editingId || form.id || createId(),
         typeOverride: form.typeOverride || form.type || "General",
+        attachments: normalizeTaskAttachments(form.attachments),
       }),
       editingId ? "Task edited" : "Task created"
     );
@@ -1874,6 +2567,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     setForm(createEmptyTask());
     setEditingId(null);
     setShowAdvanced(false);
+    resetTaskScan();
     setIsCreateOpen(false);
   };
 
@@ -1884,6 +2578,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     if (parsed.length === 1) {
       setForm({ ...createEmptyTask(), ...parsed[0] });
       setShowAdvanced(true);
+      resetTaskScan();
       setIsImportOpen(false);
       setIsCreateOpen(true);
     }
@@ -1994,9 +2689,10 @@ const addParsedTasks = () => {
   };
 
   const editTask = (task) => {
-    setForm({ ...createEmptyTask(), ...task });
+    setForm({ ...createEmptyTask(), ...task, attachments: normalizeTaskAttachments(task.attachments) });
     setEditingId(task.id);
     setShowAdvanced(true);
+    resetTaskScan();
     setIsCreateOpen(true);
   };
 
@@ -2013,26 +2709,59 @@ const addParsedTasks = () => {
 
   const toggleTask = (id) => {
     const taskToToggle = tasks.find((task) => task.id === id);
-    const shouldCelebrate = Boolean(taskToToggle && !taskToToggle.completed);
+    if (!taskToToggle) return;
 
-    setTasks((current) =>
-      current.map((task) => {
-        if (task.id !== id) return task;
-        const nextCompleted = !task.completed;
-        return addTaskHistory(
-          {
-            ...task,
-            completed: nextCompleted,
-            completedAt: nextCompleted ? new Date().toISOString() : "",
-          },
-          nextCompleted ? "Marked done" : "Reopened"
-        );
-      })
+    if (taskToToggle.completed) {
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === id
+            ? addTaskHistory(
+                {
+                  ...task,
+                  completed: false,
+                  completedAt: "",
+                },
+                "Reopened"
+              )
+            : task
+        )
+      );
+      return;
+    }
+
+    const completedAt = new Date().toISOString();
+
+    writeSafetySnapshot("Before task done archive", tasks, archivedTasks);
+
+    const archivedTask = addTaskHistory(
+      {
+        ...taskToToggle,
+        completed: true,
+        completedAt,
+        archivedAt: completedAt,
+      },
+      "Marked done and archived"
     );
 
-    if (shouldCelebrate) {
-      showCompletionCelebration(1, taskToToggle.taskName);
-    }
+    setArchivedTasks((current) => {
+      const nextArchived = [archivedTask, ...current.filter((item) => item?.id !== id)];
+      writeStoredArchivedTasks(nextArchived);
+      return nextArchived;
+    });
+
+    setTasks((current) =>
+      normalizeInsuranceDmvTasks(
+        current
+          .filter((task) => task.id !== id)
+          .map((task) => (task.blockedBy === id ? { ...task, blockedBy: "" } : task))
+      ).tasks
+    );
+
+    setMovingTaskId(null);
+    setSelectedTaskId((current) => (current === id ? null : current));
+    setCheckedTaskIds((current) => current.filter((taskId) => taskId !== id));
+    showCompletionCelebration(1, taskToToggle.taskName);
+    window.dispatchEvent(new Event("todoTasksChanged"));
   };
 
   const updateTaskField = (id, field, value) => {
@@ -2212,7 +2941,7 @@ const addParsedTasks = () => {
   );
 
   const moveTaskToCategory = (id, nextType) => {
-    if (!TASK_TYPES.includes(nextType)) return;
+    if (!taskCategoryTypes.includes(nextType)) return;
 
     writeSafetySnapshot("Before category move", tasks, archivedTasks);
     setTasks((current) =>
@@ -2237,6 +2966,7 @@ const addParsedTasks = () => {
     setForm({ ...createEmptyTask(), type, typeOverride: type });
     setEditingId(null);
     setShowAdvanced(false);
+    resetTaskScan();
     setIsCreateOpen(true);
     window.requestAnimationFrame(() => {
       document.getElementById("todo-create-task")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2630,7 +3360,7 @@ const addParsedTasks = () => {
   };
 
   const tasksByType = useMemo(() => {
-    const map = TASK_TYPES.reduce((acc, type) => ({ ...acc, [type]: [] }), {});
+    const map = taskCategoryTypes.reduce((acc, type) => ({ ...acc, [type]: [] }), {});
 
     tasks.forEach((task) => {
       const normalizedTask = normalizeTaskCategory(task);
@@ -2640,10 +3370,10 @@ const addParsedTasks = () => {
     });
 
     return map;
-  }, [tasks]);
+  }, [tasks, taskCategoryTypes]);
 
   const activeCategorySummary = useMemo(() => {
-    return TASK_TYPES.map((type) => {
+    return taskCategoryTypes.map((type) => {
       const categoryTasks = tasksByType[type] || [];
       const activeCount = categoryTasks.filter((task) => !task.completed).length;
       const overdueCount = categoryTasks.filter((task) => !task.completed && getTaskStatus(task) === "overdue").length;
@@ -2657,18 +3387,18 @@ const addParsedTasks = () => {
         totalCount: categoryTasks.length,
       };
     }).filter((item) => item.activeCount > 0);
-  }, [tasksByType]);
+  }, [taskCategoryTypes, tasksByType]);
 
   const totalActiveTasks = useMemo(() => tasks.filter((task) => !task.completed).length, [tasks]);
 
   const visibleCategoryTypes = useMemo(() => {
-    if (!showActiveOnly) return TASK_TYPES;
+    if (!showActiveOnly) return taskCategoryTypes;
 
-    return TASK_TYPES.filter((type) => {
+    return taskCategoryTypes.filter((type) => {
       const categoryTasks = tasksByType[type] || [];
       return categoryTasks.some((task) => !task.completed);
     });
-  }, [showActiveOnly, tasksByType]);
+  }, [showActiveOnly, taskCategoryTypes, tasksByType]);
 
   const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) || null, [selectedTaskId, tasks]);
 
@@ -2723,7 +3453,7 @@ const addParsedTasks = () => {
   };
 
   const moveCheckedTasks = () => {
-    if (!checkedTaskIds.length || !TASK_TYPES.includes(bulkMoveType)) return;
+    if (!checkedTaskIds.length || !taskCategoryTypes.includes(bulkMoveType)) return;
 
     writeSafetySnapshot("Before bulk category move", tasks, archivedTasks);
     setTasks((current) =>
@@ -2826,6 +3556,120 @@ const addParsedTasks = () => {
     );
   }, [contactSearch, contacts]);
 
+  const downloadTaskAttachment = async (attachment = {}) => {
+    const downloadUrl = getTaskAttachmentDownloadUrl(attachment);
+
+    if (!downloadUrl) {
+      alert("This file does not have a valid download link.");
+      return;
+    }
+
+    const fileName = attachment.originalName || attachment.savedName || "attached-file";
+
+    const openDownloadUrl = () => {
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    };
+
+    try {
+      const response = await fetch(downloadUrl, { method: "GET" });
+
+      if (!response.ok) {
+        throw new Error(`Download failed with status ${response.status}.`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch {
+      openDownloadUrl();
+    }
+  };
+
+  const renderTaskAttachments = (attachments = [], options = {}) => {
+    const normalizedAttachments = normalizeTaskAttachments(attachments);
+    const { taskId = "", editable = true } = options;
+
+    if (!normalizedAttachments.length) return null;
+
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Attached Files</div>
+        <div className="space-y-2">
+          {normalizedAttachments.map((attachment) => {
+            const sizeLabel = formatTaskAttachmentSize(attachment.size);
+            const removeHandler = taskId
+              ? () => removeTaskAttachment(taskId, attachment.id)
+              : () => removeTaskAttachmentFromForm(attachment.id);
+            const viewUrl = getTaskAttachmentViewUrl(attachment);
+            const downloadUrl = getTaskAttachmentDownloadUrl(attachment);
+
+            return (
+              <div key={attachment.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2 font-semibold text-slate-900">
+                    <FileText className="h-4 w-4 shrink-0 text-slate-500" />
+                    <span className="truncate">{attachment.originalName || attachment.savedName || "Attached file"}</span>
+                  </div>
+                  <div className="mt-0.5 text-xs font-medium text-slate-500">
+                    {[sizeLabel, attachment.uploadedAt ? `Uploaded ${formatDateTime(attachment.uploadedAt)}` : ""].filter(Boolean).join(" • ")}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {viewUrl && (
+                    <a
+                      href={viewUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800"
+                      title="View attached file"
+                    >
+                      View
+                    </a>
+                  )}
+                  {downloadUrl && (
+                    <button
+                      type="button"
+                      onClick={() => downloadTaskAttachment(attachment)}
+                      className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100"
+                      title="Download attached file"
+                    >
+                      Download
+                    </button>
+                  )}
+                  {editable && (
+                    <button
+                      type="button"
+                      onClick={removeHandler}
+                      className="rounded bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700"
+                      title="Remove attached file"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const exportText = useMemo(() => {
     return sortTasks(tasks)
       .map((task) => {
@@ -2841,6 +3685,83 @@ const addParsedTasks = () => {
       })
       .join("\n\n");
   }, [tasks]);
+
+  const renderTaskScanPanel = () => (
+    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 md:col-span-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-blue-950">Attach Documents / Images</div>
+          <div className="text-xs font-semibold text-blue-800">Files are saved to your local documents folder. The task stores only file links and metadata.</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsTaskScanOpen((current) => !current)}
+          title={isTaskScanOpen ? "Hide file uploader" : "Attach documents or images to this task"}
+          className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
+        >
+          {isTaskScanOpen ? "Hide Files" : "Attach Files"}
+        </button>
+      </div>
+
+      {isTaskScanOpen && (
+        <div className="mt-3 grid gap-2">
+          <label className="text-xs font-black text-blue-950">
+            Document or image files
+            <input
+              type="file"
+              multiple
+              accept="image/*,application/pdf,.pdf,.txt,.doc,.docx,.rtf,.csv,.xls,.xlsx"
+              onChange={scanTaskFile}
+              disabled={isTaskFileUploading}
+              className="mt-1 block w-full text-xs text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-700 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white hover:file:bg-blue-800 disabled:cursor-wait disabled:opacity-60"
+            />
+            <span className="mt-1 block text-[11px] font-semibold text-blue-800">Supports PDF, JPG, PNG, HEIC, TXT, DOC, DOCX, RTF, CSV, XLS, and XLSX. Images, PDFs, and TXT can also extract text into the task.</span>
+          </label>
+
+          {renderTaskAttachments(form.attachments, { editable: true })}
+
+          {taskScanFileName && (
+            <div className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-900">
+              Last scanned file: {taskScanFileName}
+            </div>
+          )}
+
+          <textarea
+            value={taskScanText}
+            onChange={(event) => setTaskScanText(event.target.value)}
+            placeholder="Extracted scan text will appear here for PDFs, images, and TXT files. You can edit it before applying it to the task."
+            rows={5}
+            className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+          />
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={applyEditedTaskScanText}
+              disabled={!taskScanText.trim() && !taskScanFileName}
+              title="Apply extracted text to this task"
+              className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              Apply Extracted Text
+            </button>
+            <button
+              type="button"
+              onClick={clearTaskScan}
+              title="Clear extracted text"
+              className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-900 hover:bg-blue-100"
+            >
+              Clear Text
+            </button>
+          </div>
+
+          {taskFileUploadStatus && <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-900">{taskFileUploadStatus}</div>}
+          {taskFileUploadError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">{taskFileUploadError}</div>}
+          {taskScanStatus && <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-900">{taskScanStatus}</div>}
+          {taskScanError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">{taskScanError}</div>}
+        </div>
+      )}
+    </div>
+  );
 
   const renderInput = (field, value, onChange) => {
     if (MULTILINE_FIELDS.has(field)) {
@@ -2868,6 +3789,16 @@ const addParsedTasks = () => {
     if (DATE_PICKER_FIELDS.has(field)) {
       return (
         <TodoDatePickerInput
+          value={value || ""}
+          onChange={onChange}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      );
+    }
+
+    if (TIME_PICKER_FIELDS.has(field)) {
+      return (
+        <TodoTimePickerInput
           value={value || ""}
           onChange={onChange}
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -2977,7 +3908,10 @@ const addParsedTasks = () => {
       <div className="rounded-xl border-2 border-black bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold text-slate-800">To-Do</h2>
+            <div className="flex items-center gap-2">
+              <ListTodo className="h-6 w-6 text-green-700" />
+              <h2 className="text-2xl font-black text-slate-900">To-Do</h2>
+            </div>
             <p className="mt-1 text-sm font-medium text-slate-600">Manage tasks here. Budget details stay on the Dashboard tab.</p>
           </div>
 
@@ -3055,7 +3989,7 @@ const addParsedTasks = () => {
                       event.preventDefault();
                       setShowActiveOnly(true);
                       setCollapsedCategories(
-                        TASK_TYPES.reduce((map, categoryType) => ({ ...map, [categoryType]: categoryType !== item.type }), {})
+                        taskCategoryTypes.reduce((map, categoryType) => ({ ...map, [categoryType]: categoryType !== item.type }), {})
                       );
                       window.requestAnimationFrame(() => {
                         document.getElementById(getCategoryAnchorId(item.type))?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3138,7 +4072,7 @@ const addParsedTasks = () => {
             </button>
             <button
               type="button"
-              onClick={() => setCollapsedCategories(TASK_TYPES.reduce((map, type) => ({ ...map, [type]: true }), {}))}
+              onClick={() => setCollapsedCategories(taskCategoryTypes.reduce((map, type) => ({ ...map, [type]: true }), {}))}
               title="Collapse all categories"
               className="inline-flex items-center gap-2 rounded-lg bg-slate-600 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
             >
@@ -3195,7 +4129,7 @@ const addParsedTasks = () => {
                     className="h-full border-0 bg-white px-2 text-sm font-bold text-slate-900 focus:outline-none"
                     title="Choose category for selected tasks"
                   >
-                    {TASK_TYPES.map((categoryType) => (
+                    {taskCategoryTypes.map((categoryType) => (
                       <option key={categoryType} value={categoryType}>
                         {categoryType}
                       </option>
@@ -3349,7 +4283,7 @@ const addParsedTasks = () => {
                       <tr className="border-b-2 border-green-700">
                         <th className="px-1 py-2 text-left font-medium text-gray-700"></th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Task</th>
-                        <th className="px-2 py-2 text-left font-medium text-gray-700">Due Date</th>
+                        <th className="px-2 py-2 text-left font-medium text-gray-700">Due Date / Time</th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Status</th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Details</th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Actions</th>
@@ -3370,7 +4304,7 @@ const addParsedTasks = () => {
                           const statusLabel = getStatusLabel(task, isBlocked);
                           const statusClass = getStatusClass(task, isBlocked);
                           const rowClass = getTaskRowClass(task, isBlocked);
-                          const taskType = TASK_TYPES.includes(task.type) ? task.type : inferTaskType(task);
+                          const taskType = taskCategoryTypes.includes(task.type) ? task.type : inferTaskType(task);
                           const allowedFields = TYPE_FIELDS[taskType] || TYPE_FIELDS.General;
                           const hiddenDetailFields = new Set([
                             "id",
@@ -3383,6 +4317,7 @@ const addParsedTasks = () => {
                             "blockedBy",
                             "date",
                             "deadline",
+                            "time",
                             "notes",
                             "followUpNotes",
                           ]);
@@ -3433,6 +4368,13 @@ const addParsedTasks = () => {
                                     onChange={(value) => updateTaskField(task.id, task.deadline !== undefined ? "deadline" : "date", value)}
                                     className="w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                   />
+                                  <div className="mt-1">
+                                    <TodoTimePickerInput
+                                      value={task.time || ""}
+                                      onChange={(value) => updateTaskField(task.id, "time", value)}
+                                      className="w-full rounded border border-slate-300 bg-white p-1 text-sm"
+                                    />
+                                  </div>
                                 </td>
                                 <td className="align-top px-2 py-2">
                                   <span className={`inline-flex rounded px-2 py-1 text-xs font-bold ${statusClass}`}>{statusLabel}</span>
@@ -3459,8 +4401,8 @@ const addParsedTasks = () => {
                                       className={`inline-flex h-7 w-7 items-center justify-center rounded p-0 text-white transition-colors ${
                                         task.completed ? "bg-slate-600 hover:bg-slate-700" : "bg-green-600 hover:bg-green-700"
                                       }`}
-                                      title={task.completed ? "Reopen task" : "Mark task done"}
-                                      aria-label={task.completed ? "Reopen task" : "Mark task done"}
+                                      title={task.completed ? "Reopen task" : "Mark done and archive"}
+                                      aria-label={task.completed ? "Reopen task" : "Mark done and archive"}
                                     >
                                       {task.completed ? <RotateCcw className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
                                     </button>
@@ -3509,8 +4451,8 @@ const addParsedTasks = () => {
                                       disabled={calendarAddingTaskId === task.id}
                                       className={`inline-flex h-7 w-7 items-center justify-center rounded p-0 text-white transition-colors ${
                                         calendarAddedIds.includes(task.id)
-                                          ? "bg-green-700 hover:bg-green-800"
-                                          : "bg-emerald-700 hover:bg-emerald-800"
+                                          ? "bg-blue-700 hover:bg-blue-800"
+                                          : "bg-blue-600 hover:bg-blue-700"
                                       } disabled:cursor-wait disabled:opacity-60`}
                                       aria-label="Add task to Google Calendar"
                                       title={calendarAddedIds.includes(task.id) ? "Added to Google Calendar" : "Add task to Google Calendar"}
@@ -3554,7 +4496,7 @@ const addParsedTasks = () => {
                                         title="Select a new task category"
                                         className="mt-1 w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-slate-900"
                                       >
-                                        {TASK_TYPES.map((categoryType) => (
+                                        {taskCategoryTypes.map((categoryType) => (
                                           <option key={categoryType} value={categoryType}>
                                             {categoryType}
                                           </option>
@@ -3569,59 +4511,6 @@ const addParsedTasks = () => {
                                 <tr className={`${getTaskDetailRowClass(task, isBlocked)} border-b border-slate-200`}>
                                   <td></td>
                                   <td colSpan={5} className="px-2 pb-3">
-                                    {fieldsToShow.length > 0 && (
-                                      <div className="grid gap-2 md:grid-cols-3">
-                                        {fieldsToShow.map((field) => (
-                                          <label key={field} className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                            {getFieldLabel(task, field)}
-                                            <div className="mt-1">
-                                              {MULTILINE_FIELDS.has(field) ? (
-                                                shouldUseFormattingToolbar(field) ? (
-                                                  <FormattingTextarea
-                                                    value={task[field] || ""}
-                                                    onChange={(value) => updateTaskField(task.id, field, value)}
-                                                    rows={getTextareaRows(task[field], 1, 8, 48)}
-                                                    className="min-h-[34px] w-full resize-none rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                                  />
-                                                ) : (
-                                                  <AutoResizeTextarea
-                                                    value={task[field] || ""}
-                                                    onChange={(value) => updateTaskField(task.id, field, value)}
-                                                    minRows={1}
-                                                    maxRows={8}
-                                                    charsPerRow={48}
-                                                    compactOnChange
-                                                    className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                                  />
-                                                )
-                                              ) : (
-                                                DATE_PICKER_FIELDS.has(field) ? (
-                                                  <TodoDatePickerInput
-                                                    value={task[field] || ""}
-                                                    onChange={(value) => updateTaskField(task.id, field, value)}
-                                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                                  />
-                                                ) : (
-                                                  <input
-                                                    value={task[field] || ""}
-                                                    onChange={(event) => updateTaskField(task.id, field, event.target.value)}
-                                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
-                                                  />
-                                                )
-                                              )}
-                                            </div>
-                                          </label>
-                                        ))}
-                                      </div>
-                                    )}
-
-                                    {task.sourceTaskSummary && (
-                                      <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
-                                        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-indigo-800">Related Source Task</div>
-                                        <div className="text-sm font-semibold text-slate-900">{task.sourceTaskName || "Source task"}</div>
-                                        <FormattedText value={task.sourceTaskSummary} className="mt-2 whitespace-pre-wrap text-sm text-slate-800" />
-                                      </div>
-                                    )}
 
                                     <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
                                       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Notes</div>
@@ -3728,6 +4617,73 @@ const addParsedTasks = () => {
                                       </div>
                                     </div>
 
+                                    {fieldsToShow.length > 0 && (
+                                      <div className="grid gap-2 md:grid-cols-3">
+                                        {fieldsToShow.map((field) => (
+                                          <label key={field} className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                            {getFieldLabel(task, field)}
+                                            <div className="mt-1">
+                                              {MULTILINE_FIELDS.has(field) ? (
+                                                shouldUseFormattingToolbar(field) ? (
+                                                  <FormattingTextarea
+                                                    value={task[field] || ""}
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    rows={getTextareaRows(task[field], 1, 8, 48)}
+                                                    className="min-h-[34px] w-full resize-none rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                ) : (
+                                                  <AutoResizeTextarea
+                                                    value={task[field] || ""}
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    minRows={1}
+                                                    maxRows={8}
+                                                    charsPerRow={48}
+                                                    compactOnChange
+                                                    className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                )
+                                              ) : (
+                                                DATE_PICKER_FIELDS.has(field) ? (
+                                                  <TodoDatePickerInput
+                                                    value={task[field] || ""}
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                ) : TIME_PICKER_FIELDS.has(field) ? (
+                                                  <TodoTimePickerInput
+                                                    value={task[field] || ""}
+                                                    onChange={(value) => updateTaskField(task.id, field, value)}
+                                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                ) : (
+                                                  <input
+                                                    value={task[field] || ""}
+                                                    onChange={(event) => updateTaskField(task.id, field, event.target.value)}
+                                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+                                                  />
+                                                )
+                                              )}
+                                            </div>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {normalizeTaskAttachments(task.attachments).length > 0 && (
+                                      <div className="mt-2">
+                                        {renderTaskAttachments(task.attachments, { taskId: task.id, editable: true })}
+                                      </div>
+                                    )}
+
+                                    {task.sourceTaskSummary && (
+                                      <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                                        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-indigo-800">Related Source Task</div>
+                                        <div className="text-sm font-semibold text-slate-900">{task.sourceTaskName || "Source task"}</div>
+                                        <FormattedText value={task.sourceTaskSummary} className="mt-2 whitespace-pre-wrap text-sm text-slate-800" />
+                                      </div>
+                                    )}
+
+
                                   </td>
                                 </tr>
                               )}
@@ -3800,7 +4756,7 @@ const addParsedTasks = () => {
                 <h3 className="text-lg font-bold text-slate-900">{editingId ? "Edit task" : "Add task"}</h3>
                 <p className="text-sm text-slate-600">Only the fields that fit this task type are shown first.</p>
               </div>
-              <button type="button" onClick={() => { setForm(createEmptyTask()); setEditingId(null); setShowAdvanced(false); setIsCreateOpen(false); }} title="Close task form" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
+              <button type="button" onClick={closeTaskForm} title="Close task form" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -3815,9 +4771,13 @@ const addParsedTasks = () => {
                 </label>
 
                 <label className="text-sm font-medium">
-                  Type
-                  <select value={form.type} onChange={(event) => updateForm("type", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    {TASK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  Category
+                  <select
+                    value={form.type}
+                    onChange={(event) => updateForm("type", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    {taskCategoryTypes.map((type) => <option key={type} value={type}>{type}</option>)}
                   </select>
                 </label>
 
@@ -3845,6 +4805,8 @@ const addParsedTasks = () => {
                     <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
                   </label>
                 ))}
+
+                {renderTaskScanPanel()}
               </div>
 
               <button type="button" onClick={() => setShowAdvanced((value) => !value)} title={showAdvanced ? "Hide advanced task fields" : "Show advanced task fields"} className="mt-3 text-sm font-medium text-slate-700 underline">
@@ -3868,7 +4830,7 @@ const addParsedTasks = () => {
 
             <div className="flex flex-wrap gap-2 border-t border-slate-200 px-6 py-4">
               <button type="button" onClick={saveTask} title={editingId ? "Save task changes" : "Add task to the list"} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white">{editingId ? "Save changes" : "Add task"}</button>
-              <button type="button" onClick={() => { setForm(createEmptyTask()); setEditingId(null); setShowAdvanced(false); setIsCreateOpen(false); }} title="Cancel task editing" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium">Cancel</button>
+              <button type="button" onClick={closeTaskForm} title="Cancel task editing" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium">Cancel</button>
             </div>
           </div>
         </div>
@@ -3954,7 +4916,7 @@ const addParsedTasks = () => {
                   className="h-full border-0 bg-white px-2 text-sm font-bold text-slate-900 focus:outline-none"
                   title="Choose category for checked tasks"
                 >
-                  {TASK_TYPES.map((categoryType) => (
+                  {taskCategoryTypes.map((categoryType) => (
                     <option key={categoryType} value={categoryType}>
                       {categoryType}
                     </option>
@@ -4015,7 +4977,7 @@ const addParsedTasks = () => {
                 <label className="text-sm font-semibold">
                   Category
                   <select value={selectedTask.type || "General"} onChange={(event) => moveTaskToCategory(selectedTask.id, event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    {TASK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                    {taskCategoryTypes.map((type) => <option key={type} value={type}>{type}</option>)}
                   </select>
                 </label>
                 <label className="text-sm font-semibold">
@@ -4024,6 +4986,16 @@ const addParsedTasks = () => {
                     <TodoDatePickerInput
                       value={selectedTask.deadline || selectedTask.date || ""}
                       onChange={(value) => updateTaskField(selectedTask.id, selectedTask.deadline !== undefined ? "deadline" : "date", value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                </label>
+                <label className="text-sm font-semibold">
+                  Time
+                  <div className="mt-1">
+                    <TodoTimePickerInput
+                      value={selectedTask.time || ""}
+                      onChange={(value) => updateTaskField(selectedTask.id, "time", value)}
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     />
                   </div>
@@ -4042,7 +5014,7 @@ const addParsedTasks = () => {
                 </label>
 
                 {Array.from(new Set([...(TYPE_FIELDS[selectedTask.type] || []), ...Object.keys(DEFAULT_FORM).filter((field) => selectedTask[field])]))
-                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
+                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id", "time"].includes(field))
                   .map((field) => (
                     <label key={field} className="text-sm font-semibold">
                       {getFieldLabel(selectedTask, field)}
@@ -4055,6 +5027,12 @@ const addParsedTasks = () => {
                           )
                         ) : DATE_PICKER_FIELDS.has(field) ? (
                           <TodoDatePickerInput
+                            value={selectedTask[field] || ""}
+                            onChange={(value) => updateTaskField(selectedTask.id, field, value)}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          />
+                        ) : TIME_PICKER_FIELDS.has(field) ? (
+                          <TodoTimePickerInput
                             value={selectedTask[field] || ""}
                             onChange={(value) => updateTaskField(selectedTask.id, field, value)}
                             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -4109,7 +5087,8 @@ const addParsedTasks = () => {
         applyContactToTarget={applyContactToTarget}
         editContact={editContact}
         deleteContact={deleteContact}
-        taskTypes={TASK_TYPES}
+        taskTypes={taskCategoryTypes}
+        onAddTaskCategory={addCustomTaskCategory}
         AutoResizeTextarea={AutoResizeTextarea}
       />
 
