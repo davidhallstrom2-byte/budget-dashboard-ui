@@ -795,6 +795,35 @@ export default function ContactManager({
               </div>
 
               <label className="text-sm font-bold text-slate-800">
+                Email
+                <input
+                  type="email"
+                  value={contactForm.email || ""}
+                  onChange={(event) => setContactForm((current) => ({ ...current, email: event.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-bold text-slate-800">
+                  Direct Phone
+                  <input
+                    value={contactForm.directPhone || ""}
+                    onChange={(event) => setContactForm((current) => ({ ...current, directPhone: event.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="text-sm font-bold text-slate-800">
+                  Mobile Phone
+                  <input
+                    value={contactForm.cellPhone || ""}
+                    onChange={(event) => setContactForm((current) => ({ ...current, cellPhone: event.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+
+              <label className="text-sm font-bold text-slate-800">
                 Website
                 <input
                   value={contactForm.website || ""}
@@ -985,6 +1014,9 @@ export default function ContactManager({
                           <div className="text-base font-black text-slate-900">{contact.name}</div>
                           <div className="mt-1 text-xs font-black uppercase tracking-wide text-slate-500">{contact.category}</div>
                           <div className="mt-2 grid gap-1 text-sm text-slate-700 md:grid-cols-2">
+                            {contact.email && <div className="truncate"><span className="font-bold">Email:</span> {contact.email}</div>}
+                            {contact.directPhone && <div><span className="font-bold">Direct:</span> {contact.directPhone}</div>}
+                            {contact.cellPhone && <div><span className="font-bold">Mobile:</span> {contact.cellPhone}</div>}
                             {contact.website && <div className="truncate"><span className="font-bold">Website:</span> {contact.website}</div>}
                             {contact.organization && <div><span className="font-bold">Organization:</span> {contact.organization}</div>}
                             {contact.company && <div><span className="font-bold">Company:</span> {contact.company}</div>}
@@ -1024,7 +1056,10 @@ export default function ContactManager({
                         <div className="flex shrink-0 flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() => applyContactToTarget(contact)}
+                            onClick={() => {
+                              applyContactToTarget(contact);
+                              onClose();
+                            }}
                             title="Use this contact"
                             className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
                           >

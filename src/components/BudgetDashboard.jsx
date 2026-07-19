@@ -3,6 +3,7 @@ import { initializeState, saveToServer } from '../utils/state.js';
 import LoadingGate from './common/LoadingGate';
 import PageContainer from './common/PageContainer';
 import DashboardTab from './tabs/DashboardTab';
+import EditorTab from './tabs/EditorTab';
 import AnalysisTab from './tabs/AnalysisTab';
 import CalculatorTab from './tabs/CalculatorTab';
 import TodoTab from './tabs/TodoTab';
@@ -12,6 +13,7 @@ import CscOpportunitiesTab from './tabs/CscOpportunitiesTab';
 import PaychecksTab from './tabs/PaychecksTab';
 import ArchivedDrawer from './ui/ArchivedDrawer';
 import StickyToolbar from './common/StickyToolbar.jsx';
+import TabPageHeader from './common/TabPageHeader.jsx';
 import StatementScanner from './statements/StatementScanner';
 import NotificationPanel from './modern/NotificationPanel';
 import {
@@ -28,6 +30,7 @@ import {
   Car,
   CircleDollarSign,
   ListTodo,
+  Monitor,
 } from 'lucide-react';
 
 const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
@@ -541,6 +544,52 @@ const BudgetDashboard = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const handleAppNavigate = (event) => {
+      const detail = event?.detail || {};
+      const tab = String(detail.tab || '').trim();
+      const recordId = String(detail.recordId || '').trim();
+      const validTabs = new Set(['todo', 'rides', 'cscShifts', 'cscOpportunities', 'paychecks', 'budget']);
+
+      if (!validTabs.has(tab)) return;
+
+      setSearchQuery('');
+
+      if (tab === 'budget') {
+        setActiveBudgetTab(detail.budgetTab || 'overview');
+      }
+
+      if (tab === 'todo') {
+        setTodoEditTaskId(recordId);
+        setTodoRefreshKey((current) => current + 1);
+      }
+
+      try {
+        if (tab === 'cscShifts' && recordId) {
+          sessionStorage.setItem('cscShifts.openLinkedShiftId.v1', recordId);
+        }
+
+        if (tab === 'rides' && recordId) {
+          sessionStorage.setItem('modivcareRides.openLinkedRideId.v1', recordId);
+        }
+
+        if (tab === 'cscOpportunities' && recordId) {
+          sessionStorage.setItem('cscOpportunities.openLinkedOpportunityId.v1', recordId);
+        }
+      } catch (error) {
+        console.error('Failed to queue cross-tab navigation:', error);
+      }
+
+      setActiveTab(tab);
+    };
+
+    window.addEventListener('app:navigate', handleAppNavigate);
+
+    return () => {
+      window.removeEventListener('app:navigate', handleAppNavigate);
+    };
+  }, []);
+
   const tabs = useMemo(
     () => [
       {
@@ -598,6 +647,7 @@ const BudgetDashboard = () => {
   const budgetTabs = useMemo(
     () => [
       { id: 'overview', label: 'Overview', inactiveClass: 'bg-blue-50 text-blue-900 hover:bg-blue-100' },
+      { id: 'editor', label: 'Editor', inactiveClass: 'bg-indigo-50 text-indigo-900 hover:bg-indigo-100' },
       { id: 'analysis', label: 'Analysis', inactiveClass: 'bg-purple-50 text-purple-900 hover:bg-purple-100' },
       { id: 'calculator', label: 'Calculator', inactiveClass: 'bg-green-50 text-green-900 hover:bg-green-100' },
     ],
@@ -631,21 +681,15 @@ const BudgetDashboard = () => {
     </div>
   );
 
-  // FIX: Use PageContainer (max-w-6xl) instead of budget-fixed-width (1360px hardcoded)
-  // so all subnav headers match the width of the Overview tab which uses PageContainer.
-  const renderBudgetToolHeader = (title, description) => (
-    <PageContainer className="mb-6">
-      <section className="rounded-xl border border-blue-200 bg-blue-50 px-6 py-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
-            {description && (
-              <p className="mt-1 text-sm font-medium text-slate-600">{description}</p>
-            )}
-          </div>
-          {renderBudgetSubnav()}
-        </div>
-      </section>
+  const renderBudgetToolHeader = (title, description, theme, Icon) => (
+    <PageContainer className="py-6">
+      <TabPageHeader
+        icon={Icon}
+        title={title}
+        subtitle={description}
+        theme={theme}
+        actions={renderBudgetSubnav()}
+      />
     </PageContainer>
   );
 
@@ -1280,7 +1324,7 @@ const BudgetDashboard = () => {
 
         {activeTab === 'budget' && (
           <div className="min-h-screen">
-            {(activeBudgetTab === 'overview' || activeBudgetTab === 'editor') && (
+            {activeBudgetTab === 'overview' && (
               <DashboardTab
                 state={state}
                 setState={setState}
@@ -1290,9 +1334,21 @@ const BudgetDashboard = () => {
               />
             )}
 
+            {activeBudgetTab === 'editor' && (
+              <div>
+                {renderBudgetToolHeader('Budget Editor', 'Edit budget items, categories, amounts, due dates, notes, payment details, and recurring schedules.', 'indigo', Monitor)}
+                <EditorTab
+                  state={state}
+                  setState={setState}
+                  saveBudget={saveBudget}
+                  searchQuery={searchQuery}
+                />
+              </div>
+            )}
+
             {activeBudgetTab === 'analysis' && (
-              <div className="pt-4">
-                {renderBudgetToolHeader('Budget Analysis', 'Review budget trends, spending patterns, category totals, and variance insights.')}
+              <div>
+                {renderBudgetToolHeader('Budget Analysis', 'Review budget trends, spending patterns, category totals, and variance insights.', 'cyan', BarChart3)}
                 <AnalysisTab
                   state={state}
                   setState={setState}
@@ -1303,8 +1359,8 @@ const BudgetDashboard = () => {
             )}
 
             {activeBudgetTab === 'calculator' && (
-              <div className="pt-4">
-                {renderBudgetToolHeader('Budget Calculator', 'Calculate payment scenarios, totals, savings targets, and budget adjustments.')}
+              <div>
+                {renderBudgetToolHeader('Budget Calculator', 'Calculate payment scenarios, totals, savings targets, and budget adjustments.', 'amber', CircleDollarSign)}
                 <CalculatorTab
                   state={state}
                   setState={setState}

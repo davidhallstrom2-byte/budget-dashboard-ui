@@ -8,6 +8,7 @@ import {
   Clock,
   Copy,
   Download,
+  DollarSign,
   FileUp,
   MapPin,
   Pencil,
@@ -20,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
+import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
 import { createGoogleCalendarEvent } from '../../utils/googleCalendarApi';
 
 const RIDES_STORAGE_KEY = 'modivcareRides.v1';
@@ -27,6 +29,10 @@ const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
 const RIDES_SNAPSHOT_KEY = 'modivcareRides.safetySnapshot.v1';
 const RIDES_STORAGE_EVENT = 'modivcareRides:updated';
 const RIDES_GOOGLE_CALENDAR_ADDED_STORAGE_KEY = 'modivcareRides.googleCalendar.addedIds.v1';
+const RIDES_CREATE_DRAFT_STORAGE_KEY = 'modivcareRides.createDraftFromOpportunity.v1';
+const RIDES_OPEN_LINKED_RIDE_STORAGE_KEY = 'modivcareRides.openLinkedRideId.v1';
+const CSC_OPPORTUNITIES_STORAGE_KEY = 'cscOpportunities.v1';
+const CSC_OPPORTUNITIES_UPDATE_EVENT = 'cscOpportunities:updated';
 const RIDE_STATUS_OPTIONS = ['Confirmed', 'Completed', 'Canceled', 'Pending', 'Paid'];
 const LEG_STATUS_OPTIONS = ['Confirmed', 'Completed', 'Canceled', 'Pending', 'Request Pickup'];
 
@@ -59,6 +65,35 @@ const formatDateForDisplay = (value = '') => {
     day: 'numeric',
     year: 'numeric',
   }).format(new Date(year, month - 1, day));
+};
+
+const parseMoneyAmount = (value = 0) => {
+  const match = String(value ?? '').replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+  const parsed = match ? Number(match[0]) : 0;
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : 0;
+};
+
+const formatRideCurrency = (value = 0) =>
+  `$${parseMoneyAmount(value).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const formatLocalIsoDate = (date = new Date()) =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+
+const getDefaultRideReportRange = () => {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+
+  return {
+    start: formatLocalIsoDate(start),
+    end: formatLocalIsoDate(today),
+  };
 };
 
 const normalizeTime = (value = '') => {
@@ -333,6 +368,15 @@ const parseUberReceipt = (rawText = '') => {
     .filter(Boolean)
     .join('-');
 
+  const totalAmount = parseMoneyAmount(total || summaryTotal);
+  const fareAmount = parseMoneyAmount(tripFare);
+  const tipAmount = parseMoneyAmount(tip);
+  const waitTimeAmount = parseMoneyAmount(waitTime);
+  const feeAmount = Math.max(
+    waitTimeAmount,
+    Math.round(Math.max(totalAmount - fareAmount - tipAmount, 0) * 100) / 100
+  );
+
   const notes = [
     total || summaryTotal ? `Total: ${total || summaryTotal}` : '',
     tripFare ? `Trip fare: ${tripFare}` : '',
@@ -351,6 +395,11 @@ const parseUberReceipt = (rawText = '') => {
     riderName: 'David Hallstrom',
     status: 'Completed',
     provider: 'Uber',
+    fareAmount,
+    tipAmount,
+    feeAmount,
+    totalAmount,
+    sourceType: 'Uber Receipt',
     notes,
     sourceText: rawText,
     legs: [
@@ -369,6 +418,115 @@ const parseUberReceipt = (rawText = '') => {
       },
     ],
   });
+};
+
+const UBER_ACTIVITY_MONTHS = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+const isUberActivityHistoryText = (rawText = '') => {
+  const lines = getUberReceiptLines(rawText);
+  const hasActivityDate = lines.some((line) =>
+    /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2}\s*[•·]\s*\d{1,2}:\d{2}\s*(?:AM|PM)$/i.test(
+      line
+    )
+  );
+  const hasActivityAmount = lines.some((line) => /^\$\s*\d+(?:\.\d{2})?(?:\s*[•·]\s*Canceled)?$/i.test(line));
+
+  return hasActivityDate && hasActivityAmount;
+};
+
+const parseUberActivityHistory = (rawText = '') => {
+  const lines = getUberReceiptLines(rawText).filter((line) => !/^help$/i.test(line));
+  const dateTimePattern =
+    /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})\s*[•·]\s*(\d{1,2}:\d{2}\s*(?:AM|PM))$/i;
+  const amountPattern = /^\$\s*\d+(?:\.\d{2})?(?:\s*[•·]\s*Canceled)?$/i;
+  const now = new Date();
+  let inferredYear = now.getFullYear();
+  let lastMonth = now.getMonth() + 1;
+  const parsedRides = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const dateMatch = lines[index].match(dateTimePattern);
+    if (!dateMatch) continue;
+
+    const month = UBER_ACTIVITY_MONTHS[dateMatch[1].toLowerCase()];
+    const day = Number(dateMatch[2]);
+    const pickupTime = normalizeTime(dateMatch[3]);
+    const location = String(lines[index - 1] || '').trim();
+    const amountLine = String(lines[index + 1] || '').trim();
+
+    if (!month || !day || !amountPattern.test(amountLine)) continue;
+
+    if (month > lastMonth) inferredYear -= 1;
+    lastMonth = month;
+
+    const rideDate = `${inferredYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const amount = parseMoneyAmount(amountLine);
+    const isCanceled = /canceled/i.test(amountLine);
+    const timeId = normalizeRideCalendarTime(pickupTime).replace(/:/g, '').slice(0, 4);
+    const receiptId = `UBER-ACTIVITY-${rideDate.replace(/-/g, '')}-${timeId || String(index).padStart(4, '0')}`;
+    const notes = isCanceled
+      ? 'Imported from Uber Activity. This canceled ride amount is stored as a fee because the activity log does not provide a separate breakdown.'
+      : 'Imported from Uber Activity. Tip and fee breakdown were not listed, so the displayed amount is stored as the ride fare until a receipt or manual edit provides more detail.';
+
+    parsedRides.push(
+      normalizeRide({
+        confirmationNumber: receiptId,
+        rideDate,
+        riderName: 'David Hallstrom',
+        status: isCanceled ? 'Canceled' : 'Completed',
+        provider: 'Uber',
+        fareAmount: isCanceled ? 0 : amount,
+        tipAmount: 0,
+        feeAmount: isCanceled ? amount : 0,
+        totalAmount: amount,
+        sourceType: 'Uber Activity',
+        notes,
+        sourceText: [location, lines[index], amountLine].filter(Boolean).join('\n'),
+        legs: [
+          {
+            leg: 'Uber Trip',
+            confirmationNumber: receiptId,
+            pickupTime,
+            appointmentTime: '',
+            pickupName: '',
+            pickupAddress: '',
+            dropoffName: location || 'Destination not listed',
+            dropoffAddress: '',
+            status: isCanceled ? 'Canceled' : 'Completed',
+            provider: 'Uber',
+            notes,
+          },
+        ],
+      })
+    );
+  }
+
+  return parsedRides;
 };
 
 const parseModivcareConfirmation = (rawText = '') => {
@@ -421,9 +579,10 @@ const parseModivcareConfirmation = (rawText = '') => {
   });
 };
 
-const parseRideScanText = (rawText = '') => {
-  if (isUberReceiptText(rawText)) return parseUberReceipt(rawText);
-  return parseModivcareConfirmation(rawText);
+const parseRideScanEntries = (rawText = '') => {
+  if (isUberReceiptText(rawText)) return [parseUberReceipt(rawText)];
+  if (isUberActivityHistoryText(rawText)) return parseUberActivityHistory(rawText);
+  return [parseModivcareConfirmation(rawText)];
 };
 
 const normalizeLeg = (leg = {}) => ({
@@ -445,6 +604,20 @@ const normalizeLeg = (leg = {}) => ({
 function normalizeRide(ride = {}) {
   const now = new Date().toISOString();
   const legs = Array.isArray(ride.legs) ? ride.legs.map(normalizeLeg) : [];
+  const fareAmount = parseMoneyAmount(ride.fareAmount);
+  const tipAmount = parseMoneyAmount(ride.tipAmount);
+  let feeAmount = parseMoneyAmount(ride.feeAmount);
+  const explicitTotal = parseMoneyAmount(ride.totalAmount);
+  const itemizedTotal = fareAmount + tipAmount + feeAmount;
+
+  if (explicitTotal > itemizedTotal) {
+    feeAmount = Math.round((feeAmount + explicitTotal - itemizedTotal) * 100) / 100;
+  }
+
+  const totalAmount =
+    explicitTotal > 0
+      ? explicitTotal
+      : Math.round((fareAmount + tipAmount + feeAmount) * 100) / 100;
 
   return {
     id: ride.id || createRideId(),
@@ -453,6 +626,11 @@ function normalizeRide(ride = {}) {
     confirmationNumber: String(ride.confirmationNumber || legs[0]?.confirmationNumber || '').trim(),
     status: String(ride.status || legs[0]?.status || '').trim() || 'Confirmed',
     provider: String(ride.provider || legs[0]?.provider || '').trim(),
+    fareAmount,
+    tipAmount,
+    feeAmount,
+    totalAmount,
+    sourceType: String(ride.sourceType || '').trim(),
     notes: String(ride.notes || '').trim(),
     sourceText: String(ride.sourceText || '').trim(),
     legs,
@@ -464,8 +642,91 @@ function normalizeRide(ride = {}) {
     googleCalendarEventId: ride.googleCalendarEventId || '',
     googleCalendarEventLink: ride.googleCalendarEventLink || '',
     googleCalendarAddedAt: ride.googleCalendarAddedAt || '',
+    sourceOpportunityId: ride.sourceOpportunityId || '',
+    linkedCscShiftId: ride.linkedCscShiftId || '',
   };
 }
+
+const getRideFinancials = (ride = {}) => {
+  const fare = parseMoneyAmount(ride.fareAmount);
+  const tip = parseMoneyAmount(ride.tipAmount);
+  const fees = parseMoneyAmount(ride.feeAmount);
+  const itemizedTotal = Math.round((fare + tip + fees) * 100) / 100;
+  const storedTotal = parseMoneyAmount(ride.totalAmount);
+  const total = storedTotal > 0 ? storedTotal : itemizedTotal;
+  const fareAndFees = Math.max(
+    Math.round((total - tip) * 100) / 100,
+    Math.round((fare + fees) * 100) / 100
+  );
+
+  return {
+    fare,
+    tip,
+    fees,
+    fareAndFees,
+    total,
+  };
+};
+
+const updateOpportunityRideLink = (opportunityId, rideId) => {
+  if (!opportunityId || !rideId) return;
+
+  try {
+    const opportunities = JSON.parse(localStorage.getItem(CSC_OPPORTUNITIES_STORAGE_KEY) || '[]');
+    if (!Array.isArray(opportunities)) return;
+
+    let changed = false;
+    const nextOpportunities = opportunities.map((opportunity) => {
+      if (opportunity.id !== opportunityId || opportunity.linkedRideId === rideId) return opportunity;
+      changed = true;
+      return {
+        ...opportunity,
+        linkedRideId: rideId,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    if (!changed) return;
+    localStorage.setItem(CSC_OPPORTUNITIES_STORAGE_KEY, JSON.stringify(nextOpportunities));
+    window.dispatchEvent(
+      new CustomEvent(CSC_OPPORTUNITIES_UPDATE_EVENT, {
+        detail: { opportunities: nextOpportunities },
+      })
+    );
+  } catch (error) {
+    console.error('Failed to link ride to CSC opportunity:', error);
+  }
+};
+
+const clearOpportunityRideLink = (rideId) => {
+  if (!rideId) return;
+
+  try {
+    const opportunities = JSON.parse(localStorage.getItem(CSC_OPPORTUNITIES_STORAGE_KEY) || '[]');
+    if (!Array.isArray(opportunities)) return;
+
+    let changed = false;
+    const nextOpportunities = opportunities.map((opportunity) => {
+      if (opportunity.linkedRideId !== rideId) return opportunity;
+      changed = true;
+      return {
+        ...opportunity,
+        linkedRideId: '',
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    if (!changed) return;
+    localStorage.setItem(CSC_OPPORTUNITIES_STORAGE_KEY, JSON.stringify(nextOpportunities));
+    window.dispatchEvent(
+      new CustomEvent(CSC_OPPORTUNITIES_UPDATE_EVENT, {
+        detail: { opportunities: nextOpportunities },
+      })
+    );
+  } catch (error) {
+    console.error('Failed to clear ride link from CSC opportunity:', error);
+  }
+};
 
 const isGenericDropoffName = (value = '') => /^(dropoff location|drop off location|n\/a)$/i.test(String(value || '').trim());
 
@@ -524,6 +785,12 @@ const mergeScannedLeg = (existingLeg = {}, incomingLeg = {}) =>
     notes: combineRideNotes(existingLeg.notes, incomingLeg.notes),
   });
 
+const mergeScannedMoneyValue = (existingValue, incomingValue) => {
+  const incoming = parseMoneyAmount(incomingValue);
+  const existing = parseMoneyAmount(existingValue);
+  return incoming > 0 ? incoming : existing;
+};
+
 const mergeScannedRide = (existingRide = {}, incomingRide = {}) => {
   const existingLegs = Array.isArray(existingRide.legs) ? existingRide.legs : [];
   const incomingLegs = Array.isArray(incomingRide.legs) ? incomingRide.legs : [];
@@ -542,6 +809,11 @@ const mergeScannedRide = (existingRide = {}, incomingRide = {}) => {
     confirmationNumber: mergeTextValue(existingRide.confirmationNumber, incomingRide.confirmationNumber),
     status: mergeTextValue(existingRide.status, incomingRide.status),
     provider: mergeTextValue(existingRide.provider, incomingRide.provider),
+    fareAmount: mergeScannedMoneyValue(existingRide.fareAmount, incomingRide.fareAmount),
+    tipAmount: mergeScannedMoneyValue(existingRide.tipAmount, incomingRide.tipAmount),
+    feeAmount: mergeScannedMoneyValue(existingRide.feeAmount, incomingRide.feeAmount),
+    totalAmount: mergeScannedMoneyValue(existingRide.totalAmount, incomingRide.totalAmount),
+    sourceType: mergeTextValue(existingRide.sourceType, incomingRide.sourceType),
     notes: combineRideNotes(existingRide.notes, incomingRide.notes),
     sourceText: combineRideSourceText(existingRide.sourceText, incomingRide.sourceText),
     legs: mergedLegs,
@@ -652,6 +924,11 @@ const formatRideForSearch = (ride = {}) =>
     ride.confirmationNumber,
     ride.status,
     ride.provider,
+    ride.fareAmount,
+    ride.tipAmount,
+    ride.feeAmount,
+    ride.totalAmount,
+    ride.sourceType,
     ride.notes,
     ...ride.legs.flatMap((leg) => [
       leg.leg,
@@ -847,7 +1124,68 @@ const RidesTab = ({ searchQuery = '' }) => {
   const [editingRide, setEditingRide] = useState(null);
   const [calendarAddingRideId, setCalendarAddingRideId] = useState('');
   const [calendarAddedIds, setCalendarAddedIds] = useState(readRideGoogleCalendarAddedIds);
+  const [reportRange, setReportRange] = useState(getDefaultRideReportRange);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let rawDraft = '';
+
+    try {
+      rawDraft =
+        sessionStorage.getItem(RIDES_CREATE_DRAFT_STORAGE_KEY) ||
+        localStorage.getItem(RIDES_CREATE_DRAFT_STORAGE_KEY) ||
+        '';
+      sessionStorage.removeItem(RIDES_CREATE_DRAFT_STORAGE_KEY);
+      localStorage.removeItem(RIDES_CREATE_DRAFT_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to read ride draft from CSC opportunity:', error);
+    }
+
+    if (!rawDraft) return;
+
+    try {
+      setEditingRide(normalizeRide(JSON.parse(rawDraft)));
+      setStatusMessage('Ride plan opened from CSC Opportunities.');
+      window.setTimeout(() => setStatusMessage(''), 3000);
+    } catch (error) {
+      console.error('Failed to open ride draft from CSC opportunity:', error);
+      setStatusMessage('The CSC opportunity ride plan could not be opened.');
+      window.setTimeout(() => setStatusMessage(''), 3000);
+    }
+  }, []);
+
+  useEffect(() => {
+    let rideId = '';
+
+    try {
+      rideId =
+        sessionStorage.getItem(RIDES_OPEN_LINKED_RIDE_STORAGE_KEY) ||
+        localStorage.getItem(RIDES_OPEN_LINKED_RIDE_STORAGE_KEY) ||
+        '';
+      sessionStorage.removeItem(RIDES_OPEN_LINKED_RIDE_STORAGE_KEY);
+      localStorage.removeItem(RIDES_OPEN_LINKED_RIDE_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to read linked ride request:', error);
+    }
+
+    if (!rideId) return;
+
+    const activeRide = rides.find((ride) => ride.id === rideId);
+    const archivedRide = archivedRides.find((ride) => ride.id === rideId);
+
+    if (activeRide) {
+      setExpandedRideIds((current) => ({ ...current, [rideId]: true }));
+      setStatusMessage('Linked ride opened.');
+      window.setTimeout(() => setStatusMessage(''), 2500);
+      return;
+    }
+
+    if (archivedRide) {
+      setIsArchiveOpen(true);
+      setStatusMessage('Linked ride is in the archive.');
+      window.setTimeout(() => setStatusMessage(''), 2500);
+    }
+  }, [archivedRides, rides]);
 
   const filteredRides = useMemo(() => {
     const query = String(searchQuery || '').trim().toLowerCase();
@@ -863,6 +1201,51 @@ const RidesTab = ({ searchQuery = '' }) => {
       return groups;
     }, {});
   }, [filteredRides]);
+
+  const reportRidePool = useMemo(() => {
+    const byId = new Map();
+    [...rides, ...archivedRides].forEach((ride) => byId.set(ride.id, normalizeRide(ride)));
+    return sortRides(Array.from(byId.values()));
+  }, [rides, archivedRides]);
+
+  const reportRides = useMemo(
+    () =>
+      reportRidePool.filter((ride) => {
+        const rideDate = formatDateForInput(ride.rideDate);
+        if (!rideDate) return false;
+        if (reportRange.start && rideDate < reportRange.start) return false;
+        if (reportRange.end && rideDate > reportRange.end) return false;
+        return true;
+      }),
+    [reportRange, reportRidePool]
+  );
+
+  const reportSummary = useMemo(
+    () =>
+      reportRides.reduce(
+        (totals, ride) => {
+          const financials = getRideFinancials(ride);
+          totals.rideCount += 1;
+          totals.fare += financials.fare;
+          totals.tip += financials.tip;
+          totals.fees += financials.fees;
+          totals.fareAndFees += financials.fareAndFees;
+          totals.total += financials.total;
+          if (financials.total > 0) totals.ridesWithCost += 1;
+          return totals;
+        },
+        {
+          rideCount: 0,
+          ridesWithCost: 0,
+          fare: 0,
+          tip: 0,
+          fees: 0,
+          fareAndFees: 0,
+          total: 0,
+        }
+      ),
+    [reportRides]
+  );
 
   const summary = useMemo(() => {
     const legCount = rides.reduce((sum, ride) => sum + ride.legs.length, 0);
@@ -971,11 +1354,13 @@ const RidesTab = ({ searchQuery = '' }) => {
       ...editingRide,
       updatedAt: new Date().toISOString(),
     });
+    const existingRide = rides.some((ride) => ride.id === normalized.id);
+    const nextRides = existingRide
+      ? rides.map((ride) => (ride.id === normalized.id ? normalized : ride))
+      : [...rides, normalized];
 
-    saveRides(
-      rides.map((ride) => (ride.id === normalized.id ? normalized : ride)),
-      'Ride changes saved.'
-    );
+    saveRides(nextRides, existingRide ? 'Ride changes saved.' : 'Ride plan saved.');
+    updateOpportunityRideLink(normalized.sourceOpportunityId, normalized.id);
     setExpandedRideIds((current) => ({ ...current, [normalized.id]: true }));
     setEditingRide(null);
   };
@@ -1003,6 +1388,8 @@ const RidesTab = ({ searchQuery = '' }) => {
       googleCalendarEventId: '',
       googleCalendarEventLink: '',
       googleCalendarAddedAt: '',
+      sourceOpportunityId: '',
+      linkedCscShiftId: '',
     });
 
     saveRides([...rides, copy], 'Ride copied.');
@@ -1044,6 +1431,7 @@ const RidesTab = ({ searchQuery = '' }) => {
 
   const deleteArchivedRide = (rideId) => {
     if (!window.confirm('Delete this archived ride permanently?')) return;
+    clearOpportunityRideLink(rideId);
     saveArchivedRides(archivedRides.filter((ride) => ride.id !== rideId), 'Archived ride deleted.');
   };
 
@@ -1082,30 +1470,50 @@ const RidesTab = ({ searchQuery = '' }) => {
   };
 
   const addRideFromScan = () => {
-    const parsedRide = parseRideScanText(scanText);
+    const parsedRides = parseRideScanEntries(scanText).filter((ride) => ride.legs.length);
 
-    if (!parsedRide.legs.length) {
-      setStatusMessage('No ride details found. Paste the full Modivcare/Lyft confirmation or Uber receipt and try again.');
+    if (!parsedRides.length) {
+      setStatusMessage('No ride details found. Paste a Modivcare/Lyft confirmation, Uber receipt, or Uber Activity history list and try again.');
       return;
     }
 
-    const existingIndex = findMatchingRideIndex(rides, parsedRide);
+    let nextRides = [...rides];
+    let addedCount = 0;
+    let updatedCount = 0;
+    const openedRideIds = [];
 
-    const nextRide =
-      existingIndex >= 0
-        ? mergeScannedRide(rides[existingIndex], parsedRide)
-        : {
-            ...parsedRide,
-            updatedAt: new Date().toISOString(),
-          };
+    parsedRides.forEach((parsedRide) => {
+      const existingIndex = findMatchingRideIndex(nextRides, parsedRide);
 
-    const nextRides =
-      existingIndex >= 0
-        ? rides.map((ride, index) => (index === existingIndex ? nextRide : ride))
-        : [...rides, nextRide];
+      if (existingIndex >= 0) {
+        const mergedRide = mergeScannedRide(nextRides[existingIndex], parsedRide);
+        nextRides = nextRides.map((ride, index) => (index === existingIndex ? mergedRide : ride));
+        openedRideIds.push(mergedRide.id);
+        updatedCount += 1;
+        return;
+      }
 
-    saveRides(nextRides, existingIndex >= 0 ? 'Ride updated from scan.' : 'Ride added from scan.');
-    setExpandedRideIds((current) => ({ ...current, [nextRide.id]: true }));
+      const nextRide = normalizeRide({
+        ...parsedRide,
+        updatedAt: new Date().toISOString(),
+      });
+      nextRides.push(nextRide);
+      openedRideIds.push(nextRide.id);
+      addedCount += 1;
+    });
+
+    const messageParts = [];
+    if (addedCount) messageParts.push(`${addedCount} ride${addedCount === 1 ? '' : 's'} added`);
+    if (updatedCount) messageParts.push(`${updatedCount} ride${updatedCount === 1 ? '' : 's'} updated`);
+
+    saveRides(nextRides, `${messageParts.join(' and ')} from scan.`);
+    setExpandedRideIds((current) => {
+      const next = { ...current };
+      openedRideIds.forEach((rideId) => {
+        next[rideId] = true;
+      });
+      return next;
+    });
     setScanText('');
   };
 
@@ -1136,6 +1544,7 @@ const RidesTab = ({ searchQuery = '' }) => {
 
   const deleteRide = (rideId) => {
     if (!window.confirm('Delete this ride?')) return;
+    clearOpportunityRideLink(rideId);
     saveRides(rides.filter((ride) => ride.id !== rideId), 'Ride deleted.');
   };
 
@@ -1178,6 +1587,178 @@ const RidesTab = ({ searchQuery = '' }) => {
     event.target.value = '';
   };
 
+  const applyRideReportPreset = (preset) => {
+    const today = new Date();
+    let start = new Date(today);
+    let end = new Date(today);
+
+    if (preset === 'week') {
+      const dayOfWeek = today.getDay();
+      const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      start.setDate(today.getDate() - daysSinceMonday);
+    } else if (preset === 'month') {
+      start = new Date(today.getFullYear(), today.getMonth(), 1);
+    } else if (preset === 'last30') {
+      start.setDate(today.getDate() - 29);
+    } else if (preset === 'all') {
+      const datedRides = reportRidePool
+        .map((ride) => formatDateForInput(ride.rideDate))
+        .filter(Boolean)
+        .sort();
+      setReportRange({
+        start: datedRides[0] || '',
+        end: datedRides[datedRides.length - 1] || formatLocalIsoDate(today),
+      });
+      return;
+    }
+
+    setReportRange({
+      start: formatLocalIsoDate(start),
+      end: formatLocalIsoDate(end),
+    });
+  };
+
+  const exportRideExpenseReport = () => {
+    const headers = ['Date', 'Provider', 'Status', 'Route', 'Fare', 'Fees', 'Tip', 'Total'];
+    const rows = reportRides.map((ride) => {
+      const financials = getRideFinancials(ride);
+      const firstLeg = ride.legs?.[0] || {};
+      const route = [
+        firstLeg.pickupName || firstLeg.pickupAddress || 'Pickup not listed',
+        firstLeg.dropoffName || firstLeg.dropoffAddress || 'Dropoff not listed',
+      ].join(' to ');
+
+      return [
+        ride.rideDate || '',
+        ride.provider || '',
+        ride.status || '',
+        route,
+        financials.fare.toFixed(2),
+        financials.fees.toFixed(2),
+        financials.tip.toFixed(2),
+        financials.total.toFixed(2),
+      ];
+    });
+
+    const csv = [
+      headers,
+      ...rows,
+      [],
+      ['Totals', '', '', '', reportSummary.fare.toFixed(2), reportSummary.fees.toFixed(2), reportSummary.tip.toFixed(2), reportSummary.total.toFixed(2)],
+    ]
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    downloadTextFile(
+      `ride-expense-report-${reportRange.start || 'start'}-to-${reportRange.end || 'end'}.csv`,
+      csv,
+      'text/csv;charset=utf-8'
+    );
+    setStatusMessage('Ride expense report exported.');
+    window.setTimeout(() => setStatusMessage(''), 3000);
+  };
+
+  const printRideExpenseReport = () => {
+    const printWindow = window.open('', '_blank');
+
+    if (!printWindow) {
+      setStatusMessage('Popup blocked. Allow popups to print the ride expense report.');
+      return;
+    }
+
+    const reportRows = reportRides
+      .map((ride) => {
+        const financials = getRideFinancials(ride);
+        const firstLeg = ride.legs?.[0] || {};
+        const from = firstLeg.pickupName || firstLeg.pickupAddress || 'Pickup not listed';
+        const to = firstLeg.dropoffName || firstLeg.dropoffAddress || 'Dropoff not listed';
+
+        return `
+          <tr>
+            <td>${escapeHtml(formatDateForDisplay(ride.rideDate))}</td>
+            <td>${escapeHtml(ride.provider || 'Provider not listed')}</td>
+            <td>${escapeHtml(ride.status || '')}</td>
+            <td>${escapeHtml(`${from} to ${to}`)}</td>
+            <td class="money">${escapeHtml(formatRideCurrency(financials.fare))}</td>
+            <td class="money">${escapeHtml(formatRideCurrency(financials.fees))}</td>
+            <td class="money">${escapeHtml(formatRideCurrency(financials.tip))}</td>
+            <td class="money total">${escapeHtml(formatRideCurrency(financials.total))}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+      <head>
+        <title>Ride Fare and Tip Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #0f172a; margin: 24px; }
+          h1 { margin: 0; font-size: 24px; }
+          .meta { color: #475569; margin: 6px 0 18px; }
+          .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+          .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; }
+          .card span { display: block; color: #64748b; font-size: 12px; }
+          .card strong { display: block; margin-top: 4px; font-size: 18px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
+          th { background: #e2e8f0; }
+          .money { text-align: right; white-space: nowrap; }
+          .total { font-weight: 700; }
+          tfoot td { background: #f8fafc; font-weight: 700; }
+          @media print {
+            body { margin: 12mm; }
+            .summary { break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>Ride Fare and Tip Report</h1>
+        <div class="meta">
+          ${escapeHtml(formatDateForDisplay(reportRange.start))} through ${escapeHtml(formatDateForDisplay(reportRange.end))}
+          | ${reportSummary.rideCount} ride${reportSummary.rideCount === 1 ? '' : 's'}
+          | Printed ${escapeHtml(new Date().toLocaleString())}
+        </div>
+        <div class="summary">
+          <div class="card"><span>Fares</span><strong>${escapeHtml(formatRideCurrency(reportSummary.fare))}</strong></div>
+          <div class="card"><span>Fees</span><strong>${escapeHtml(formatRideCurrency(reportSummary.fees))}</strong></div>
+          <div class="card"><span>Tips</span><strong>${escapeHtml(formatRideCurrency(reportSummary.tip))}</strong></div>
+          <div class="card"><span>Total</span><strong>${escapeHtml(formatRideCurrency(reportSummary.total))}</strong></div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Provider</th>
+              <th>Status</th>
+              <th>Route</th>
+              <th>Fare</th>
+              <th>Fees</th>
+              <th>Tip</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${reportRows || '<tr><td colspan="8">No rides found for this date range.</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4">Totals</td>
+              <td class="money">${escapeHtml(formatRideCurrency(reportSummary.fare))}</td>
+              <td class="money">${escapeHtml(formatRideCurrency(reportSummary.fees))}</td>
+              <td class="money">${escapeHtml(formatRideCurrency(reportSummary.tip))}</td>
+              <td class="money">${escapeHtml(formatRideCurrency(reportSummary.total))}</td>
+            </tr>
+          </tfoot>
+        </table>
+        <script>window.onload = () => window.print();</script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const printRides = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -1193,6 +1774,7 @@ const RidesTab = ({ searchQuery = '' }) => {
               <div>
                 <h2>${escapeHtml(formatDateForDisplay(ride.rideDate))}</h2>
                 <p>Confirmation #${escapeHtml(ride.confirmationNumber || 'N/A')} | ${escapeHtml(ride.status || 'Status unknown')} | ${escapeHtml(ride.provider || 'Provider not listed')}</p>
+                <p>Fare: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).fare))} | Fees: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).fees))} | Tip: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).tip))} | Total: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).total))}</p>
               </div>
               <div class="rider">${escapeHtml(ride.riderName || '')}</div>
             </div>
@@ -1271,94 +1853,164 @@ const RidesTab = ({ searchQuery = '' }) => {
   });
 
   return (
-    <PageContainer className="py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-sky-50" className="flex flex-col gap-6 bg-sky-50 py-6">
       <input ref={fileInputRef} type="file" accept=".json" onChange={importRides} className="hidden" />
 
-      <div className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Car className="h-6 w-6 text-sky-700" />
-              <h1 className="text-2xl font-black text-slate-900">Rides</h1>
-            </div>
-            <p className="mt-1 text-sm font-medium text-sky-900">
-              Scan Modivcare/Lyft confirmations and Uber receipts, track each ride, and print a clean ride list.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={addBlankRide} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800">
+      <TabPageHeader
+        icon={Car}
+        title="Rides"
+        subtitle="Scan Modivcare and Lyft confirmations or Uber receipts, then manage ride details and calendar status."
+        theme="sky"
+        message={statusMessage}
+        actions={
+          <>
+            <button type="button" onClick={addBlankRide} className={`${TAB_HEADER_ACTION_CLASS} bg-slate-950 text-white hover:bg-slate-800`}>
               <Plus className="h-4 w-4" />
               Add Ride
             </button>
-            <button type="button" onClick={printRides} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700">
+            <button type="button" onClick={printRides} className={`${TAB_HEADER_ACTION_CLASS} bg-blue-600 text-white hover:bg-blue-500`}>
               <Printer className="h-4 w-4" />
               Print Rides
             </button>
-            <button type="button" onClick={() => setIsArchiveOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm font-bold text-white hover:bg-purple-700">
+            <button type="button" onClick={() => setIsArchiveOpen(true)} className={`${TAB_HEADER_ACTION_CLASS} bg-violet-600 text-white hover:bg-violet-500`}>
               <Archive className="h-4 w-4" />
               Archive ({summary.archivedCount})
             </button>
-            <button type="button" onClick={exportRides} className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-bold text-white hover:bg-green-700">
+            <button type="button" onClick={exportRides} className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}>
               <Download className="h-4 w-4" />
               Export
             </button>
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-3 py-2 text-sm font-bold text-white hover:bg-amber-600">
+            <button type="button" onClick={() => fileInputRef.current?.click()} className={`${TAB_HEADER_ACTION_CLASS} bg-white text-sky-900 hover:bg-sky-50`}>
               <FileUp className="h-4 w-4" />
               Import
             </button>
-          </div>
-        </div>
+          </>
+        }
+      />
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <div className="rounded-xl border border-sky-200 bg-white p-3">
-            <p className="text-xs font-bold uppercase text-sky-700">Rides</p>
-            <p className="mt-1 text-2xl font-black text-slate-900">{summary.rideCount}</p>
-          </div>
-          <div className="rounded-xl border border-sky-200 bg-white p-3">
-            <p className="text-xs font-bold uppercase text-sky-700">Legs</p>
-            <p className="mt-1 text-2xl font-black text-slate-900">{summary.legCount}</p>
-          </div>
-          <div className="rounded-xl border border-sky-200 bg-white p-3">
-            <p className="text-xs font-bold uppercase text-sky-700">Confirmed</p>
-            <p className="mt-1 text-2xl font-black text-slate-900">{summary.confirmedCount}</p>
-          </div>
-          <div className="rounded-xl border border-sky-200 bg-white p-3">
-            <p className="text-xs font-bold uppercase text-sky-700">Request Pickup</p>
-            <p className="mt-1 text-2xl font-black text-slate-900">{summary.requestPickupCount}</p>
-          </div>
-          <div className="rounded-xl border border-sky-200 bg-white p-3">
-            <p className="text-xs font-bold uppercase text-sky-700">Archived</p>
-            <p className="mt-1 text-2xl font-black text-slate-900">{summary.archivedCount}</p>
-          </div>
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" aria-label="Ride summary">
+        <div className="rounded-2xl border border-sky-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-sky-700">Rides</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">{summary.rideCount}</p>
         </div>
-      </div>
-
-      {statusMessage && (
-        <div className="mb-4 rounded-lg border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-900 shadow-sm">
-          {statusMessage}
+        <div className="rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-cyan-700">Legs</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">{summary.legCount}</p>
         </div>
-      )}
+        <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Confirmed</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">{summary.confirmedCount}</p>
+        </div>
+        <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-amber-700">Request Pickup</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">{summary.requestPickupCount}</p>
+        </div>
+        <div className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-violet-700">Archived</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">{summary.archivedCount}</p>
+        </div>
+      </section>
 
       <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-blue-700" />
-          <h2 className="text-lg font-black text-slate-900">Scan Ride Email</h2>
+          <h2 className="text-lg font-black text-slate-900">Import Ride Email or Uber Activity</h2>
         </div>
         <textarea
           value={scanText}
           onChange={(event) => setScanText(event.target.value)}
           rows={8}
           className="mt-4 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          placeholder="Paste the Modivcare/Lyft confirmation or Uber receipt email text here."
+          placeholder={"Paste a Modivcare/Lyft confirmation, Uber receipt, or Uber Activity history list here.\n\nExample:\nPincay Dr & Kareem Ct\nJul 3 • 12:55 PM\n$13.74\nHelp"}
         />
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" onClick={addRideFromScan} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700">
-            Scan Ride Email
+            Import Ride Text
           </button>
           <button type="button" onClick={() => setScanText('')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
             Clear
           </button>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-white to-sky-50 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-sky-700" />
+              <h2 className="text-lg font-black text-slate-900">Ride Fare and Tip Report</h2>
+            </div>
+            <p className="mt-1 text-sm text-slate-600">
+              Includes active and archived rides. Choose a weekly, monthly, all-time, or custom date range.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => applyRideReportPreset('week')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
+              This Week
+            </button>
+            <button type="button" onClick={() => applyRideReportPreset('month')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
+              This Month
+            </button>
+            <button type="button" onClick={() => applyRideReportPreset('last30')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
+              Last 30 Days
+            </button>
+            <button type="button" onClick={() => applyRideReportPreset('all')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
+              All Rides
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+          <label className="text-sm font-bold text-slate-700">
+            Start Date
+            <input
+              type="date"
+              value={reportRange.start}
+              onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
+              className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+            />
+          </label>
+          <label className="text-sm font-bold text-slate-700">
+            End Date
+            <input
+              type="date"
+              value={reportRange.end}
+              onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
+              className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+            />
+          </label>
+          <button type="button" onClick={printRideExpenseReport} className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 text-sm font-black text-white hover:bg-blue-800">
+            <Printer className="h-4 w-4" />
+            Print Report
+          </button>
+          <button type="button" onClick={exportRideExpenseReport} className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 text-sm font-black text-white hover:bg-emerald-800">
+            <Download className="h-4 w-4" />
+            Export CSV
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Rides</p>
+            <p className="mt-1 text-2xl font-black text-slate-950">{reportSummary.rideCount}</p>
+          </div>
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+            <p className="text-xs font-black uppercase tracking-wide text-blue-700">Fares</p>
+            <p className="mt-1 text-2xl font-black text-blue-950">{formatRideCurrency(reportSummary.fare)}</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs font-black uppercase tracking-wide text-amber-700">Fees</p>
+            <p className="mt-1 text-2xl font-black text-amber-950">{formatRideCurrency(reportSummary.fees)}</p>
+          </div>
+          <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+            <p className="text-xs font-black uppercase tracking-wide text-violet-700">Tips</p>
+            <p className="mt-1 text-2xl font-black text-violet-950">{formatRideCurrency(reportSummary.tip)}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Total</p>
+            <p className="mt-1 text-2xl font-black text-emerald-950">{formatRideCurrency(reportSummary.total)}</p>
+          </div>
         </div>
       </section>
 
@@ -1395,6 +2047,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                   {dateRides.map((ride) => {
                     const isExpanded = expandedRideIds[ride.id] !== false;
                     const pastRide = isPastRide(ride);
+                    const rideFinancials = getRideFinancials(ride);
 
                     return (
                       <article key={ride.id} className="rounded-xl border border-slate-200 bg-slate-50">
@@ -1414,6 +2067,16 @@ const RidesTab = ({ searchQuery = '' }) => {
                               {ride.provider && (
                                 <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-black text-slate-700">
                                   {ride.provider}
+                                </span>
+                              )}
+                              {(rideFinancials.total > 0 || ride.sourceType) && (
+                                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">
+                                  Total {formatRideCurrency(rideFinancials.total)}
+                                </span>
+                              )}
+                              {rideFinancials.tip > 0 && (
+                                <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">
+                                  Tip {formatRideCurrency(rideFinancials.tip)}
                                 </span>
                               )}
                             </div>
@@ -1503,6 +2166,25 @@ const RidesTab = ({ searchQuery = '' }) => {
                                 </button>
                               </div>
                             )}
+
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                                <p className="text-xs font-black uppercase tracking-wide text-blue-700">Fare</p>
+                                <p className="mt-1 text-lg font-black text-blue-950">{formatRideCurrency(rideFinancials.fare)}</p>
+                              </div>
+                              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                <p className="text-xs font-black uppercase tracking-wide text-amber-700">Fees</p>
+                                <p className="mt-1 text-lg font-black text-amber-950">{formatRideCurrency(rideFinancials.fees)}</p>
+                              </div>
+                              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+                                <p className="text-xs font-black uppercase tracking-wide text-violet-700">Tip</p>
+                                <p className="mt-1 text-lg font-black text-violet-950">{formatRideCurrency(rideFinancials.tip)}</p>
+                              </div>
+                              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                                <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Total</p>
+                                <p className="mt-1 text-lg font-black text-emerald-950">{formatRideCurrency(rideFinancials.total)}</p>
+                              </div>
+                            </div>
 
                             {ride.legs.map((leg) => (
                               <div key={leg.id} className="rounded-xl border border-slate-200 bg-white p-4">
@@ -1650,6 +2332,54 @@ const RidesTab = ({ searchQuery = '' }) => {
                       </option>
                     ))}
                   </select>
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Fare
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editingRide.fareAmount ?? 0}
+                    onChange={(event) => updateEditingRideField('fareAmount', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Tip
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editingRide.tipAmount ?? 0}
+                    onChange={(event) => updateEditingRideField('tipAmount', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Fees
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editingRide.feeAmount ?? 0}
+                    onChange={(event) => updateEditingRideField('feeAmount', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Total
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editingRide.totalAmount ?? 0}
+                    onChange={(event) => updateEditingRideField('totalAmount', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
                 </label>
 
                 <label className="md:col-span-2 text-sm font-bold text-slate-700">

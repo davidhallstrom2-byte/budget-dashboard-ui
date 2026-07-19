@@ -1,12 +1,13 @@
 // C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\components\tabs\EditorTab.jsx
 // src/components/tabs/EditorTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Search, Zap, AlertCircle, Clock, Download, ListPlus, CalendarClock } from 'lucide-react';
+import { Plus, Archive, Undo2, GripVertical, Trash2, FolderPlus, FolderMinus, Edit2, ArrowUp, ArrowDown, Copy, ChevronDown, ChevronUp, Zap, AlertCircle, Clock, Download, ListPlus, CalendarClock, Ban, FileText, X, Save, PauseCircle, Play, ScanSearch } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package, PiggyBank
 } from 'lucide-react';
 import PageContainer from "../common/PageContainer.jsx";
+import CreditReportScanner from '../credit/CreditReportScanner.jsx';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -56,6 +57,111 @@ const ITEM_TEMPLATES = [
   { name: 'Spotify', category: 'subscriptions', estBudget: 10.99, recurrence: 'monthly' },
 ];
 
+const ACCOUNT_STATUS_OPTIONS = [
+  'Open',
+  'Current',
+  'Past Due',
+  'Suspended',
+  'Closed',
+  'Charged Off',
+  'Sent to Collections',
+  'Settled',
+  'Disputed',
+  'Bankruptcy Review',
+  'Paid in Full',
+  'Unknown',
+];
+
+const getDebtNumber = (value) => {
+  const parsed = Number(String(value ?? '').replace(/[$,\s]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatDebtCurrency = (value) =>
+  `$${getDebtNumber(value).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const getDebtDaysDelinquent = (item = {}) => {
+  const sourceDate = item.delinquentSince || '';
+  if (!sourceDate) return 0;
+
+  const start = new Date(`${sourceDate}T12:00:00`);
+  if (Number.isNaN(start.getTime())) return 0;
+
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86400000));
+};
+
+const getDelinquencyStage = (days = 0) => {
+  if (days >= 120) return '120+ days';
+  if (days >= 90) return '90-119 days';
+  if (days >= 60) return '60-89 days';
+  if (days >= 30) return '30-59 days';
+  if (days >= 1) return '1-29 days';
+  return 'Current';
+};
+
+const hasDebtTrackingDetails = (item = {}) =>
+  Boolean(
+    item.accountStatus ||
+      item.currentAmountOwed ||
+      item.pastDueAmount ||
+      item.originalBalance ||
+      item.lastPaymentDate ||
+      item.delinquentSince ||
+      item.collectionAgency ||
+      item.sentToCollectionsDate ||
+      item.originalCreditor ||
+      item.accountLast4 ||
+      item.settlementAmount ||
+      item.debtStatusNotes
+  );
+
+const buildCreditReportNote = (account = {}, reportMeta = {}) => {
+  const details = [
+    `Imported from ${account.bureau || reportMeta.bureau || 'credit'} report${account.reportDate || reportMeta.reportDate ? ` dated ${account.reportDate || reportMeta.reportDate}` : ''}.`,
+    account.rawStatus ? `Reported status: ${account.rawStatus}.` : '',
+    account.accountType ? `Account type: ${account.accountType}.` : '',
+    account.dateReported ? `Last reported: ${account.dateReported}.` : '',
+    account.dateReportedRaw ? `Last reported: ${account.dateReportedRaw}.` : '',
+    account.delinquentSinceRaw ? `First delinquency reported as: ${account.delinquentSinceRaw}.` : '',
+    account.remarks ? `Remarks: ${account.remarks}.` : '',
+  ];
+  return details.filter(Boolean).join(' ');
+};
+
+const buildCreditReportDebtPatch = (account = {}) => {
+  const patch = {
+    creditBureau: account.bureau || '',
+    creditReportDate: account.reportDate || '',
+    creditAccountType: account.accountType || '',
+    creditDateOpened: account.dateOpened || '',
+    creditDateReported: account.dateReported || '',
+    creditLimit: account.creditLimit ?? '',
+    creditMonthlyPayment: account.monthlyPayment ?? '',
+    debtUpdatedAt: new Date().toISOString(),
+  };
+
+  if (account.accountStatus && account.accountStatus !== 'Unknown') patch.accountStatus = account.accountStatus;
+  if (account.currentBalance !== null && account.currentBalance !== undefined) {
+    patch.currentAmountOwed = account.currentBalance;
+    patch.currentBalance = account.currentBalance;
+  }
+  if (account.pastDueAmount !== null && account.pastDueAmount !== undefined) patch.pastDueAmount = account.pastDueAmount;
+  if (account.originalBalance !== null && account.originalBalance !== undefined) patch.originalBalance = account.originalBalance;
+  if (account.lastPaymentDate) patch.lastPaymentDate = account.lastPaymentDate;
+  if (account.delinquentSince) patch.delinquentSince = account.delinquentSince;
+  if (account.collectionAgency) patch.collectionAgency = account.collectionAgency;
+  if (account.sentToCollectionsDate) patch.sentToCollectionsDate = account.sentToCollectionsDate;
+  if (account.originalCreditor) patch.originalCreditor = account.originalCreditor;
+  if (account.accountLast4) patch.accountLast4 = String(account.accountLast4).slice(-4);
+
+  return patch;
+};
+
 const getFridaysInMonth = (year, month) => {
   const fridays = [];
   const date = new Date(year, month, 1);
@@ -87,6 +193,8 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [draggedCategory, setDraggedCategory] = useState(null);
   const [batchAddMode, setBatchAddMode] = useState(false);
   const [batchAddCategory, setBatchAddCategory] = useState('');
+  const [debtEditor, setDebtEditor] = useState(null);
+  const [showCreditReportScanner, setShowCreditReportScanner] = useState(false);
   const batchItemNameRef = useRef(null);
 
   useEffect(() => {
@@ -145,6 +253,8 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
 
   const getRowBackgroundColor = (item) => {
+    if (item.status === 'notPaying') return 'bg-slate-200 border-slate-300';
+    if (item.status === 'paused') return 'bg-indigo-50 border-indigo-200';
     if (item.colorCleared) return 'bg-white border-gray-200';
     if (item.status === 'paid') return 'bg-green-100 border-green-200';
     const today = new Date();
@@ -155,6 +265,8 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
 
   const getItemStatus = (item) => {
+    if (item.status === 'notPaying') return 'notPaying';
+    if (item.status === 'paused') return 'paused';
     if (item.status === 'paid') return 'paid';
     const today = new Date();
     const diffDays = Math.ceil((new Date(item.dueDate) - today) / (1000 * 60 * 60 * 24));
@@ -172,7 +284,19 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     const updatedBuckets = {
       ...state.buckets,
       [bucket]: state.buckets[bucket].map(it =>
-        it.id === id ? { ...it, status: 'paid', previousState } : it
+        it.id === id
+          ? {
+              ...it,
+              status: 'paid',
+              previousState,
+              notPayingReason: '',
+              notPayingAt: '',
+              notPayingPreviousState: undefined,
+              pausedReason: '',
+              pausedAt: '',
+              pausedPreviousState: undefined,
+            }
+          : it
       )
     };
 
@@ -196,9 +320,326 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     setTimeout(() => saveBudgetWithIndicator(updatedState, 'Payment undone!'), 100);
   };
 
+
+  const handlePauseClick = (bucket, id) => {
+    const item = state.buckets[bucket].find((entry) => entry.id === id);
+    if (!item || ['paid', 'notPaying', 'paused'].includes(item.status)) return;
+
+    const reason = window.prompt(
+      'Reason for temporarily pausing this item:',
+      item.pausedReason || 'Paused until income improves'
+    );
+
+    if (reason === null) return;
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              status: 'paused',
+              pausedReason: reason.trim() || 'Temporarily paused',
+              pausedAt: new Date().toISOString(),
+              pausedPreviousState: {
+                status: entry.status || 'pending',
+                dueDate: entry.dueDate,
+                actualCost: entry.actualCost,
+                colorCleared: entry.colorCleared,
+              },
+              previousState: undefined,
+              notPayingReason: '',
+              notPayingAt: '',
+              notPayingPreviousState: undefined,
+              colorCleared: false,
+            }
+          : entry
+      ),
+    };
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(
+      () => saveBudgetWithIndicator(updatedState, 'Item paused and removed from active totals and alerts.'),
+      100
+    );
+  };
+
+  const handleResumePaused = (bucket, id) => {
+    const item = state.buckets[bucket].find((entry) => entry.id === id);
+    if (!item || item.status !== 'paused') return;
+
+    const previousState = item.pausedPreviousState || {};
+    const restoredStatus =
+      previousState.status && !['paused', 'notPaying'].includes(previousState.status)
+        ? previousState.status
+        : 'pending';
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              status: restoredStatus,
+              dueDate: previousState.dueDate ?? entry.dueDate,
+              actualCost: previousState.actualCost ?? entry.actualCost,
+              colorCleared: previousState.colorCleared ?? false,
+              pausedReason: '',
+              pausedAt: '',
+              pausedPreviousState: undefined,
+              notPayingReason: '',
+              notPayingAt: '',
+              notPayingPreviousState: undefined,
+            }
+          : entry
+      ),
+    };
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(
+      () => saveBudgetWithIndicator(updatedState, 'Paused item returned to the active budget.'),
+      100
+    );
+  };
+
+  const handleNotPayingClick = (bucket, id) => {
+    const item = state.buckets[bucket].find((entry) => entry.id === id);
+    if (!item || ['paid', 'notPaying', 'paused'].includes(item.status)) return;
+
+    const reason = window.prompt(
+      'Reason this item is no longer in the active payment plan:',
+      item.notPayingReason || 'Bankruptcy review'
+    );
+
+    if (reason === null) return;
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              status: 'notPaying',
+              notPayingReason: reason.trim() || 'No longer in active payment plan',
+              notPayingAt: new Date().toISOString(),
+              notPayingPreviousState: {
+                status: entry.status || 'pending',
+                dueDate: entry.dueDate,
+                actualCost: entry.actualCost,
+                colorCleared: entry.colorCleared,
+              },
+              previousState: undefined,
+              pausedReason: '',
+              pausedAt: '',
+              pausedPreviousState: undefined,
+              colorCleared: false,
+            }
+          : entry
+      ),
+    };
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(
+      () => saveBudgetWithIndicator(updatedState, 'Item removed from the active payment plan.'),
+      100
+    );
+  };
+
+  const handleResumePaying = (bucket, id) => {
+    const item = state.buckets[bucket].find((entry) => entry.id === id);
+    if (!item) return;
+
+    const previousState = item.notPayingPreviousState || {};
+    const restoredStatus =
+      previousState.status && !['notPaying', 'paused'].includes(previousState.status)
+        ? previousState.status
+        : 'pending';
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              status: restoredStatus,
+              dueDate: previousState.dueDate ?? entry.dueDate,
+              actualCost: previousState.actualCost ?? entry.actualCost,
+              colorCleared: previousState.colorCleared ?? false,
+              notPayingReason: '',
+              notPayingAt: '',
+              notPayingPreviousState: undefined,
+              pausedReason: '',
+              pausedAt: '',
+              pausedPreviousState: undefined,
+            }
+          : entry
+      ),
+    };
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(
+      () => saveBudgetWithIndicator(updatedState, 'Item returned to the active payment plan.'),
+      100
+    );
+  };
+
+  const openDebtEditor = (bucket, item) => {
+    setDebtEditor({
+      bucket,
+      item: {
+        ...item,
+        accountStatus: item.accountStatus || '',
+        currentAmountOwed: getDebtNumber(item.currentAmountOwed || item.currentBalance),
+        pastDueAmount: getDebtNumber(item.pastDueAmount),
+        originalBalance: getDebtNumber(item.originalBalance),
+        settlementAmount: getDebtNumber(item.settlementAmount),
+        lastPaymentDate: item.lastPaymentDate || '',
+        delinquentSince: item.delinquentSince || '',
+        collectionAgency: item.collectionAgency || '',
+        sentToCollectionsDate: item.sentToCollectionsDate || '',
+        originalCreditor: item.originalCreditor || '',
+        accountLast4: item.accountLast4 || '',
+        debtStatusNotes: item.debtStatusNotes || '',
+      },
+    });
+  };
+
+  const updateDebtEditorField = (field, value) => {
+    setDebtEditor((current) =>
+      current
+        ? {
+            ...current,
+            item: {
+              ...current.item,
+              [field]: value,
+            },
+          }
+        : current
+    );
+  };
+
+  const saveDebtDetails = () => {
+    if (!debtEditor?.bucket || !debtEditor?.item?.id) return;
+
+    const currentAmountOwed = getDebtNumber(debtEditor.item.currentAmountOwed);
+    const pastDueAmount = getDebtNumber(debtEditor.item.pastDueAmount);
+    const originalBalance = getDebtNumber(debtEditor.item.originalBalance);
+    const settlementAmount = getDebtNumber(debtEditor.item.settlementAmount);
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [debtEditor.bucket]: state.buckets[debtEditor.bucket].map((item) =>
+        item.id === debtEditor.item.id
+          ? {
+              ...item,
+              accountStatus: debtEditor.item.accountStatus || '',
+              currentAmountOwed,
+              currentBalance: currentAmountOwed,
+              pastDueAmount,
+              originalBalance,
+              lastPaymentDate: debtEditor.item.lastPaymentDate || '',
+              delinquentSince: debtEditor.item.delinquentSince || '',
+              collectionAgency: debtEditor.item.collectionAgency || '',
+              sentToCollectionsDate: debtEditor.item.sentToCollectionsDate || '',
+              originalCreditor: debtEditor.item.originalCreditor || '',
+              accountLast4: String(debtEditor.item.accountLast4 || '').replace(/\D/g, '').slice(-4),
+              settlementAmount,
+              debtStatusNotes: debtEditor.item.debtStatusNotes || '',
+              debtUpdatedAt: new Date().toISOString(),
+            }
+          : item
+      ),
+    };
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setDebtEditor(null);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Debt and account details saved.'), 100);
+  };
+
+  const handleCreditReportImport = (operations = [], reportMeta = {}) => {
+    if (!operations.length) return;
+
+    const updatedBuckets = Object.fromEntries(
+      Object.entries(state.buckets || {}).map(([bucket, items]) => [bucket, [...(items || [])]])
+    );
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    operations.forEach((operation, index) => {
+      const account = operation.account || {};
+      const debtPatch = buildCreditReportDebtPatch(account);
+      const importNote = buildCreditReportNote(account, reportMeta);
+      const historyEntry = {
+        bureau: account.bureau || reportMeta.bureau || '',
+        reportDate: account.reportDate || reportMeta.reportDate || '',
+        importedAt: new Date().toISOString(),
+      };
+
+      if (operation.type === 'update') {
+        const bucketItems = updatedBuckets[operation.bucket] || [];
+        const itemIndex = bucketItems.findIndex((item) => item.id === operation.itemId);
+        if (itemIndex === -1) return;
+
+        const existing = bucketItems[itemIndex];
+        const existingNotes = String(existing.debtStatusNotes || '').trim();
+        bucketItems[itemIndex] = {
+          ...existing,
+          ...debtPatch,
+          debtStatusNotes: [existingNotes, importNote]
+            .filter(Boolean)
+            .filter((note, noteIndex, notes) => notes.indexOf(note) === noteIndex)
+            .join('\n'),
+          creditReportHistory: [...(Array.isArray(existing.creditReportHistory) ? existing.creditReportHistory : []), historyEntry],
+        };
+        updatedCount += 1;
+        return;
+      }
+
+      const targetBucket = updatedBuckets[operation.bucket] ? operation.bucket : 'misc';
+      const budgetStatus = operation.budgetStatus === 'notPaying' ? 'notPaying' : 'pending';
+      const newItem = {
+        id: `credit-report-${Date.now()}-${index}`,
+        category: account.creditor || account.originalCreditor || 'Credit Account',
+        estBudget: account.monthlyPayment ?? 0,
+        actualCost: 0,
+        dueDate: '',
+        status: budgetStatus,
+        recurrence: 'monthly',
+        note: '',
+        accountStatus: account.accountStatus || 'Unknown',
+        ...debtPatch,
+        debtStatusNotes: importNote,
+        creditReportHistory: [historyEntry],
+        notPayingReason: budgetStatus === 'notPaying' ? 'Imported from credit report for payment-plan review' : '',
+        notPayingAt: budgetStatus === 'notPaying' ? new Date().toISOString() : '',
+        notPayingPreviousState: undefined,
+        pausedReason: '',
+        pausedAt: '',
+        pausedPreviousState: undefined,
+      };
+
+      updatedBuckets[targetBucket] = [...(updatedBuckets[targetBucket] || []), newItem];
+      createdCount += 1;
+    });
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setShowCreditReportScanner(false);
+    const summary = [
+      createdCount ? `${createdCount} created` : '',
+      updatedCount ? `${updatedCount} updated` : '',
+    ].filter(Boolean).join(', ');
+    setTimeout(() => saveBudgetWithIndicator(updatedState, `Credit report import complete: ${summary}.`), 100);
+  };
+
   const handleRollForward = (bucket, id) => {
     const item = state.buckets[bucket].find(item => item.id === id);
-    if (!item) return;
+    if (!item || ['notPaying', 'paused'].includes(item.status)) return;
 
     const currentDate = new Date(item.dueDate);
     const nextDate = new Date(currentDate);
@@ -235,7 +676,13 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           dueDate: nextDate.toISOString().split('T')[0],
           status: 'pending',
           actualCost: 0,
-          previousState: undefined
+          previousState: undefined,
+          notPayingReason: '',
+          notPayingAt: '',
+          notPayingPreviousState: undefined,
+          pausedReason: '',
+          pausedAt: '',
+          pausedPreviousState: undefined
         } : it
       )
     };
@@ -284,7 +731,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
   const handleClearStatus = (bucket, id) => {
     const item = state.buckets[bucket].find(x => x.id === id);
-    if (!item) return;
+    if (!item || ['notPaying', 'paused'].includes(item.status)) return;
 
     const updatedBuckets = {
       ...state.buckets,
@@ -412,14 +859,57 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
   const exportCategoryToCSV = (bucketName, items) => {
     const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
-    const headers = ['Item', 'Est. Budget', 'Actual Cost', 'Due Date', 'Status'];
-    const rows = items.map(item => [
-      item.category || '',
-      item.estBudget || 0,
-      item.actualCost || 0,
-      item.dueDate || '',
-      item.status || 'pending'
-    ]);
+    const headers = [
+      'Item',
+      'Est. Budget',
+      'Actual Cost',
+      'Due Date',
+      'Payment Plan Status',
+      'Payment Plan Reason',
+      'Pause Reason',
+      'Paused At',
+      'Account Status',
+      'Current Amount Owed',
+      'Past Due Amount',
+      'Original Balance',
+      'Last Payment Date',
+      'Delinquent Since',
+      'Days Delinquent',
+      'Delinquency Stage',
+      'Collection Agency',
+      'Sent to Collections',
+      'Original Creditor',
+      'Account Last 4',
+      'Settlement Amount',
+      'Debt Notes',
+    ];
+    const rows = items.map(item => {
+      const daysDelinquent = getDebtDaysDelinquent(item);
+      return [
+        item.category || '',
+        item.estBudget || 0,
+        item.actualCost || 0,
+        item.dueDate || '',
+        item.status || 'pending',
+        item.notPayingReason || '',
+        item.pausedReason || '',
+        item.pausedAt || '',
+        item.accountStatus || '',
+        item.currentAmountOwed || item.currentBalance || 0,
+        item.pastDueAmount || 0,
+        item.originalBalance || 0,
+        item.lastPaymentDate || '',
+        item.delinquentSince || '',
+        daysDelinquent,
+        getDelinquencyStage(daysDelinquent),
+        item.collectionAgency || '',
+        item.sentToCollectionsDate || '',
+        item.originalCreditor || '',
+        item.accountLast4 || '',
+        item.settlementAmount || 0,
+        item.debtStatusNotes || '',
+      ];
+    });
 
     const csvContent = [
       headers.join(','),
@@ -593,7 +1083,15 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       ...item,
       id: `${bucket}-${Date.now()}`,
       status: 'pending',
-      actualCost: 0
+      actualCost: 0,
+      previousState: undefined,
+      colorCleared: false,
+      notPayingReason: '',
+      notPayingAt: '',
+      notPayingPreviousState: undefined,
+      pausedReason: '',
+      pausedAt: '',
+      pausedPreviousState: undefined,
     };
 
     const updatedBuckets = { ...state.buckets, [bucket]: [...state.buckets[bucket], newItem] };
@@ -686,6 +1184,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
       if (itemIndex !== -1) {
         const item = updatedBuckets[bucket][itemIndex];
+        if (['notPaying', 'paused'].includes(item.status)) return;
 
         const currentDate = new Date(item.dueDate);
         const nextDate = new Date(currentDate);
@@ -714,7 +1213,13 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           dueDate: nextDate.toISOString().split('T')[0],
           status: 'pending',
           actualCost: 0,
-          previousState: undefined
+          previousState: undefined,
+          notPayingReason: '',
+          notPayingAt: '',
+          notPayingPreviousState: undefined,
+          pausedReason: '',
+          pausedAt: '',
+          pausedPreviousState: undefined
         };
         rolledCount++;
       }
@@ -751,10 +1256,10 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
 
   const getCategoryStatusCounts = (items) => {
-    const counts = { overdue: 0, pending: 0, paid: 0 };
+    const counts = { overdue: 0, dueSoon: 0, pending: 0, paid: 0, paused: 0, notPaying: 0 };
     items.forEach(item => {
       const status = getItemStatus(item);
-      counts[status]++;
+      counts[status] = (counts[status] || 0) + 1;
     });
     return counts;
   };
@@ -793,8 +1298,9 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       return dateA - dateB;
     });
 
-    const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
-    const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+    const activeItems = items.filter((item) => !['notPaying', 'paused'].includes(item.status));
+    const totalBudgeted = activeItems.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+    const totalActual = activeItems.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
     const variance = totalActual - totalBudgeted;
     const statusCounts = getCategoryStatusCounts(items);
 
@@ -829,6 +1335,18 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                 <span className="px-2 py-0.5 bg-yellow-500 text-white text-xs rounded-full flex items-center gap-1">
                   <Clock className="w-3 h-3" />
                   {statusCounts.pending}
+                </span>
+              )}
+              {statusCounts.paused > 0 && (
+                <span className="px-2 py-0.5 bg-indigo-600 text-white text-xs rounded-full flex items-center gap-1">
+                  <PauseCircle className="w-3 h-3" />
+                  {statusCounts.paused}
+                </span>
+              )}
+              {statusCounts.notPaying > 0 && (
+                <span className="px-2 py-0.5 bg-slate-600 text-white text-xs rounded-full flex items-center gap-1">
+                  <Ban className="w-3 h-3" />
+                  {statusCounts.notPaying}
                 </span>
               )}
             </div>
@@ -936,6 +1454,62 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                             className="w-full p-1 border rounded bg-white text-sm"
                             placeholder="Enter item name"
                           />
+                          {item.status === 'paused' && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <span
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white"
+                                title={`Paused${item.pausedReason ? `: ${item.pausedReason}` : ''}`}
+                                aria-label={`Paused${item.pausedReason ? `: ${item.pausedReason}` : ''}`}
+                              >
+                                <PauseCircle className="h-3 w-3" />
+                              </span>
+                              {item.pausedReason && (
+                                <span className="text-[11px] font-semibold text-indigo-800">
+                                  {item.pausedReason}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {item.status === 'notPaying' && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <span
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white"
+                                title={`Not paying${item.notPayingReason ? `: ${item.notPayingReason}` : ''}`}
+                                aria-label={`Not paying${item.notPayingReason ? `: ${item.notPayingReason}` : ''}`}
+                              >
+                                <Ban className="h-3 w-3" />
+                              </span>
+                              {item.notPayingReason && (
+                                <span className="text-[11px] font-semibold text-slate-700">
+                                  {item.notPayingReason}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {hasDebtTrackingDetails(item) && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] font-semibold">
+                              {item.accountStatus && (
+                                <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-indigo-800">
+                                  {item.accountStatus}
+                                </span>
+                              )}
+                              {getDebtNumber(item.currentAmountOwed || item.currentBalance) > 0 && (
+                                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-800">
+                                  Owed {formatDebtCurrency(item.currentAmountOwed || item.currentBalance)}
+                                </span>
+                              )}
+                              {getDebtDaysDelinquent(item) > 0 && (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-900">
+                                  {getDebtDaysDelinquent(item)} days delinquent
+                                </span>
+                              )}
+                              {item.collectionAgency && (
+                                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-violet-800">
+                                  Collections: {item.collectionAgency}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2 text-right">
                           <input
@@ -988,7 +1562,25 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                         </td>
                         <td className="px-2 py-2">
                           <div className="flex flex-wrap gap-1">
-                            {item.status === 'paid' && item.previousState ? (
+                            {item.status === 'notPaying' ? (
+                              <button
+                                onClick={() => handleResumePaying(bucketName, item.id)}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded bg-slate-700 text-white hover:bg-slate-800"
+                                title="Return this item to its previous budget status"
+                                aria-label="Return this item to its previous budget status"
+                              >
+                                <Undo2 className="w-3.5 h-3.5" />
+                              </button>
+                            ) : item.status === 'paused' ? (
+                              <button
+                                onClick={() => handleResumePaused(bucketName, item.id)}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                                title="Resume this paused budget item"
+                                aria-label="Resume this paused budget item"
+                              >
+                                <Play className="w-3.5 h-3.5" />
+                              </button>
+                            ) : item.status === 'paid' && item.previousState ? (
                               <>
                                 <button
                                   onClick={() => handleUndoPaid(bucketName, item.id)}
@@ -1015,6 +1607,39 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                               </button>
                             )}
 
+                            {!['notPaying', 'paid', 'paused'].includes(item.status) && bucketName !== 'income' && (
+                              <button
+                                onClick={() => handlePauseClick(bucketName, item.id)}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                                title="Pause this item temporarily. It will stay visible but be removed from active totals and alerts."
+                                aria-label="Pause this budget item temporarily"
+                              >
+                                <PauseCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {!['notPaying', 'paid', 'paused'].includes(item.status) && (
+                              <button
+                                onClick={() => handleNotPayingClick(bucketName, item.id)}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded bg-slate-700 text-white hover:bg-slate-800"
+                                title="Stop paying this item"
+                                aria-label="Stop paying this item"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {bucketName !== 'income' && (
+                              <button
+                                onClick={() => openDebtEditor(bucketName, item)}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded bg-amber-600 text-white hover:bg-amber-700"
+                                title="Edit debt, delinquency, closure, and collections details"
+                                aria-label="Edit debt, delinquency, closure, and collections details"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
                             <button
                               onClick={() => duplicateItem(bucketName, item.id)}
                               className="px-1.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -1038,7 +1663,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
 
-                            {(item.status === 'paid' || getRowBackgroundColor(item) !== 'bg-white border-gray-200') && (
+                            {!['notPaying', 'paused'].includes(item.status) && (item.status === 'paid' || getRowBackgroundColor(item) !== 'bg-white border-gray-200') && (
                               <button
                                 onClick={() => handleClearStatus(bucketName, item.id)}
                                 className="px-2 py-1 bg-gray-400 text-white rounded hover:bg-gray-500 text-xs"
@@ -1122,6 +1747,62 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                           className="w-full p-1 border rounded bg-white"
                           placeholder="Enter item name"
                         />
+                        {item.status === 'paused' && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <span
+                              className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white"
+                              title={`Paused${item.pausedReason ? `: ${item.pausedReason}` : ''}`}
+                              aria-label={`Paused${item.pausedReason ? `: ${item.pausedReason}` : ''}`}
+                            >
+                              <PauseCircle className="h-3 w-3" />
+                            </span>
+                            {item.pausedReason && (
+                              <span className="text-[11px] font-semibold text-indigo-800">
+                                {item.pausedReason}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {item.status === 'notPaying' && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <span
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white"
+                                title={`Not paying${item.notPayingReason ? `: ${item.notPayingReason}` : ''}`}
+                                aria-label={`Not paying${item.notPayingReason ? `: ${item.notPayingReason}` : ''}`}
+                              >
+                                <Ban className="h-3 w-3" />
+                              </span>
+                            {item.notPayingReason && (
+                              <span className="text-[11px] font-semibold text-slate-700">
+                                {item.notPayingReason}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                          {hasDebtTrackingDetails(item) && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] font-semibold">
+                              {item.accountStatus && (
+                                <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-indigo-800">
+                                  {item.accountStatus}
+                                </span>
+                              )}
+                              {getDebtNumber(item.currentAmountOwed || item.currentBalance) > 0 && (
+                                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-800">
+                                  Owed {formatDebtCurrency(item.currentAmountOwed || item.currentBalance)}
+                                </span>
+                              )}
+                              {getDebtDaysDelinquent(item) > 0 && (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-900">
+                                  {getDebtDaysDelinquent(item)} days delinquent
+                                </span>
+                              )}
+                              {item.collectionAgency && (
+                                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-violet-800">
+                                  Collections: {item.collectionAgency}
+                                </span>
+                              )}
+                            </div>
+                          )}
                       </td>
                       <td className="px-4 py-2 text-right w-28">
                         <input
@@ -1155,7 +1836,25 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex flex-wrap gap-2">
-                          {item.status === 'paid' && item.previousState ? (
+                          {item.status === 'notPaying' ? (
+                            <button
+                              onClick={() => handleResumePaying(bucketName, item.id)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded bg-slate-700 text-white hover:bg-slate-800"
+                              title="Return this item to its previous budget status"
+                              aria-label="Return this item to its previous budget status"
+                            >
+                              <Undo2 className="w-4 h-4" />
+                            </button>
+                          ) : item.status === 'paused' ? (
+                            <button
+                              onClick={() => handleResumePaused(bucketName, item.id)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                              title="Resume this paused budget item"
+                              aria-label="Resume this paused budget item"
+                            >
+                              <Play className="w-4 h-4" />
+                            </button>
+                          ) : item.status === 'paid' && item.previousState ? (
                             <>
                               <button
                                 onClick={() => handleUndoPaid(bucketName, item.id)}
@@ -1182,6 +1881,39 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                             </button>
                           )}
 
+                          {!['notPaying', 'paid', 'paused'].includes(item.status) && bucketName !== 'income' && (
+                            <button
+                              onClick={() => handlePauseClick(bucketName, item.id)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                              title="Pause this item temporarily. It will stay visible but be removed from active totals and alerts."
+                              aria-label="Pause this budget item temporarily"
+                            >
+                              <PauseCircle className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {!['notPaying', 'paid', 'paused'].includes(item.status) && (
+                            <button
+                              onClick={() => handleNotPayingClick(bucketName, item.id)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded bg-slate-700 text-white hover:bg-slate-800"
+                                title="Stop paying this item"
+                                aria-label="Stop paying this item"
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                          )}
+
+                          {bucketName !== 'income' && (
+                            <button
+                              onClick={() => openDebtEditor(bucketName, item)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded bg-amber-600 text-white hover:bg-amber-700"
+                              title="Edit debt, delinquency, closure, and collections details"
+                              aria-label="Edit debt, delinquency, closure, and collections details"
+                            >
+                              <FileText className="h-4 w-4" />
+                            </button>
+                          )}
+
                           <button
                             onClick={() => duplicateItem(bucketName, item.id)}
                             className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -1205,7 +1937,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                             <Trash2 className="w-4 h-4" />
                           </button>
 
-                          {(item.status === 'paid' || getRowBackgroundColor(item) !== 'bg-white border-gray-200') && (
+                          {!['notPaying', 'paused'].includes(item.status) && (item.status === 'paid' || getRowBackgroundColor(item) !== 'bg-white border-gray-200') && (
                             <button
                               onClick={() => handleClearStatus(bucketName, item.id)}
                               className="px-3 py-1 bg-gray-400 text-white rounded hover:bg-gray-500 text-xs"
@@ -1236,6 +1968,12 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                 {statusCounts.pending > 0 && (
                   <span className="text-yellow-600 font-medium">{statusCounts.pending} pending</span>
                 )}
+                {statusCounts.paused > 0 && (
+                  <span className="text-indigo-700 font-medium">{statusCounts.paused} paused</span>
+                )}
+                {statusCounts.notPaying > 0 && (
+                  <span className="text-slate-700 font-medium">{statusCounts.notPaying} not paying</span>
+                )}
               </div>
               <div className="flex gap-4 flex-wrap">
                 <span>Budgeted: <strong>${totalBudgeted.toFixed(2)}</strong></span>
@@ -1261,7 +1999,9 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
             { id: 'paid', label: 'Paid', mobileLabel: 'Paid', color: 'bg-green-100 text-green-800' },
             { id: 'dueSoon', label: 'Due Soon', mobileLabel: 'Soon', color: 'bg-yellow-100 text-yellow-800' },
             { id: 'pending', label: 'Pending', mobileLabel: 'Pending', color: 'bg-blue-100 text-blue-800' },
-            { id: 'overdue', label: 'Overdue', mobileLabel: 'Past', color: 'bg-red-100 text-red-800' }
+            { id: 'overdue', label: 'Overdue', mobileLabel: 'Past', color: 'bg-red-100 text-red-800' },
+            { id: 'paused', label: 'Paused', mobileLabel: 'Pause', color: 'bg-indigo-100 text-indigo-800' },
+            { id: 'notPaying', label: 'Not Paying', mobileLabel: 'No Pay', color: 'bg-slate-200 text-slate-800' }
           ].map(filter => (
             <button
               key={filter.id}
@@ -1290,6 +2030,14 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           <span className="flex items-center gap-2 text-sm whitespace-nowrap">
             <div className="w-4 h-4 bg-red-100 border border-red-200 rounded"></div>
             Overdue
+          </span>
+          <span className="flex items-center gap-2 text-sm whitespace-nowrap">
+            <div className="w-4 h-4 bg-indigo-50 border border-indigo-200 rounded"></div>
+            Paused
+          </span>
+          <span className="flex items-center gap-2 text-sm whitespace-nowrap">
+            <div className="w-4 h-4 bg-slate-200 border border-slate-300 rounded"></div>
+            Not Paying
           </span>
         </div>
       </div>
@@ -1325,6 +2073,15 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
             >
               <ListPlus className="w-4 h-4" />
               <span className="hidden sm:inline">Batch Add {batchAddMode && '(ON)'}</span>
+            </button>
+
+            <button
+              onClick={() => setShowCreditReportScanner(true)}
+              className="flex items-center gap-2 rounded bg-rose-700 px-3 py-2 text-sm font-bold text-white hover:bg-rose-800"
+              title="Scan a credit report and review debt-account matches"
+            >
+              <ScanSearch className="h-4 w-4" />
+              <span className="hidden sm:inline">Scan Credit Report</span>
             </button>
 
             {selectedItems.size > 0 && (
@@ -1484,6 +2241,233 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       {recentlyCleared && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded">
           <span className="text-sm text-green-800">Row bgcolor reset</span>
+        </div>
+      )}
+
+
+      <CreditReportScanner
+        isOpen={showCreditReportScanner}
+        onClose={() => setShowCreditReportScanner(false)}
+        state={state}
+        onImport={handleCreditReportImport}
+      />
+
+      {debtEditor && (
+        <div className="fixed inset-0 z-[9998]">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/50"
+            onClick={() => setDebtEditor(null)}
+            aria-label="Close debt details"
+          />
+          <aside className="absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-amber-700" />
+                  <h2 className="text-xl font-black text-slate-950">Debt and Account Details</h2>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">
+                  {debtEditor.item.category || 'Budget item'} · track amount owed, delinquency, closure, collections, settlement, and account history.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDebtEditor(null)}
+                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                aria-label="Close debt details"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-bold text-slate-700">
+                  Account Status
+                  <select
+                    value={debtEditor.item.accountStatus || ''}
+                    onChange={(event) => updateDebtEditorField('accountStatus', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="">Not specified</option>
+                    {ACCOUNT_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Current Amount Owed
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={debtEditor.item.currentAmountOwed ?? 0}
+                    onChange={(event) => updateDebtEditorField('currentAmountOwed', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Past-Due Amount
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={debtEditor.item.pastDueAmount ?? 0}
+                    onChange={(event) => updateDebtEditorField('pastDueAmount', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Original Balance
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={debtEditor.item.originalBalance ?? 0}
+                    onChange={(event) => updateDebtEditorField('originalBalance', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Last Payment Date
+                  <input
+                    type="date"
+                    value={debtEditor.item.lastPaymentDate || ''}
+                    onChange={(event) => updateDebtEditorField('lastPaymentDate', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Delinquent Since
+                  <input
+                    type="date"
+                    value={debtEditor.item.delinquentSince || ''}
+                    onChange={(event) => updateDebtEditorField('delinquentSince', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-amber-800">Days Delinquent</p>
+                  <p className="mt-1 text-2xl font-black text-amber-950">
+                    {getDebtDaysDelinquent(debtEditor.item)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-orange-800">Delinquency Stage</p>
+                  <p className="mt-1 text-xl font-black text-orange-950">
+                    {getDelinquencyStage(getDebtDaysDelinquent(debtEditor.item))}
+                  </p>
+                </div>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Collection Agency
+                  <input
+                    value={debtEditor.item.collectionAgency || ''}
+                    onChange={(event) => updateDebtEditorField('collectionAgency', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Date Sent to Collections
+                  <input
+                    type="date"
+                    value={debtEditor.item.sentToCollectionsDate || ''}
+                    onChange={(event) => updateDebtEditorField('sentToCollectionsDate', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Original Creditor
+                  <input
+                    value={debtEditor.item.originalCreditor || ''}
+                    onChange={(event) => updateDebtEditorField('originalCreditor', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Account Number, Last 4
+                  <input
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={debtEditor.item.accountLast4 || ''}
+                    onChange={(event) => updateDebtEditorField('accountLast4', event.target.value.replace(/\D/g, '').slice(-4))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Settlement Amount
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={debtEditor.item.settlementAmount ?? 0}
+                    onChange={(event) => updateDebtEditorField('settlementAmount', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-rose-800">Payment Plan Decision</p>
+                  <p className="mt-1 text-sm font-black text-rose-950">
+                    {debtEditor.item.status === 'notPaying'
+                      ? 'Excluded from active payment plan'
+                      : debtEditor.item.status === 'paused'
+                        ? 'Temporarily paused'
+                        : 'Included in active payment plan'}
+                  </p>
+                  {debtEditor.item.notPayingReason && (
+                    <p className="mt-1 text-xs font-semibold text-rose-800">{debtEditor.item.notPayingReason}</p>
+                  )}
+                  {debtEditor.item.pausedReason && (
+                    <p className="mt-1 text-xs font-semibold text-indigo-800">{debtEditor.item.pausedReason}</p>
+                  )}
+                </div>
+
+                <label className="md:col-span-2 text-sm font-bold text-slate-700">
+                  Status Notes
+                  <textarea
+                    value={debtEditor.item.debtStatusNotes || ''}
+                    onChange={(event) => updateDebtEditorField('debtStatusNotes', event.target.value)}
+                    rows={4}
+                    placeholder="Add collection contacts, settlement discussions, dispute details, closure notes, or bankruptcy-related notes."
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setDebtEditor(null)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveDebtDetails}
+                className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-black text-white hover:bg-amber-700"
+              >
+                <Save className="h-4 w-4" />
+                Save Debt Details
+              </button>
+            </div>
+          </aside>
         </div>
       )}
 

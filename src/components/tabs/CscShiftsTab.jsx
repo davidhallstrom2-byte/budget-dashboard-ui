@@ -5,6 +5,7 @@ import {
   Building2,
   CalendarDays,
   CalendarPlus,
+  Car,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -31,6 +32,8 @@ import {
   X
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
+import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
+import { createGoogleCalendarEvent } from '../../utils/googleCalendarApi';
 
 const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
@@ -39,6 +42,16 @@ const CSC_SNAPSHOT_STORAGE_KEY = 'cscShifts.safetySnapshot.v1';
 const CSC_CALENDAR_ADDED_STORAGE_KEY = 'cscShifts.googleCalendarAdded.v1';
 const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
 const CSC_OPEN_SHIFT_STORAGE_KEY = 'cscShifts.openLinkedShiftId.v1';
+const CSC_RETURN_CONTEXT_STORAGE_KEY = 'cscShifts.returnContext.v1';
+const CSC_CREATE_DRAFT_STORAGE_KEY = 'cscShifts.createDraftFromOpportunity.v1';
+const CSC_OPPORTUNITIES_STORAGE_KEY = 'cscOpportunities.v1';
+const CSC_OPPORTUNITIES_UPDATE_EVENT = 'cscOpportunities:updated';
+const RIDES_STORAGE_KEY = 'modivcareRides.v1';
+const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
+const RIDES_CREATE_DRAFT_STORAGE_KEY = 'modivcareRides.createDraftFromOpportunity.v1';
+const PAYCHECK_STORAGE_KEY = 'paychecksTab.paychecks.v1';
+const PAYCHECK_UPDATE_EVENT = 'paychecksChanged';
+const APP_NAVIGATE_EVENT = 'app:navigate';
 const DEFAULT_HOURLY_RATE = '19.50';
 const OLD_DEFAULT_HOURLY_RATES = ['15.50', '20.50'];
 const OVERTIME_HOUR_THRESHOLD = 8;
@@ -505,8 +518,76 @@ const normalizeShift = (shift = {}) => {
     parking: cleanCscParkingText(shift.parking || ''),
     uniform,
     supervisor: shift.supervisor || '',
+    createdFromOpportunityId: shift.createdFromOpportunityId || shift.linkedOpportunityId || '',
+    linkedOpportunityId: shift.linkedOpportunityId || shift.createdFromOpportunityId || '',
+    googleCalendarEventId: shift.googleCalendarEventId || '',
+    googleCalendarEventLink: shift.googleCalendarEventLink || '',
+    googleCalendarAddedAt: shift.googleCalendarAddedAt || '',
     archivedAt: shift.archivedAt || '',
   };
+};
+
+const syncOpportunityLinksFromShifts = (activeShifts = [], archivedShifts = []) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CSC_OPPORTUNITIES_STORAGE_KEY) || '[]');
+    if (!Array.isArray(parsed) || !parsed.length) return;
+
+    const allShifts = [
+      ...activeShifts.map((shift) => ({ ...shift, recordSource: 'active' })),
+      ...archivedShifts.map((shift) => ({ ...shift, recordSource: 'archived' })),
+    ];
+    const shiftsById = new Map(allShifts.map((shift) => [shift.id, shift]));
+    let changed = false;
+
+    const nextOpportunities = parsed.map((opportunity) => {
+      const linkedShift =
+        shiftsById.get(opportunity.linkedCscShiftId) ||
+        allShifts.find(
+          (shift) =>
+            shift.createdFromOpportunityId === opportunity.id ||
+            shift.linkedOpportunityId === opportunity.id
+        );
+
+      if (!linkedShift) {
+        if (!opportunity.linkedCscShiftId) return opportunity;
+
+        changed = true;
+        return {
+          ...opportunity,
+          linkedCscShiftId: '',
+          status: opportunity.status === 'Scheduled' ? 'New' : opportunity.status,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      const nextStatus = linkedShift.shiftStatus === 'Cancelled' ? 'Cancelled' : 'Scheduled';
+      if (
+        opportunity.linkedCscShiftId === linkedShift.id &&
+        opportunity.status === nextStatus
+      ) {
+        return opportunity;
+      }
+
+      changed = true;
+      return {
+        ...opportunity,
+        linkedCscShiftId: linkedShift.id,
+        status: nextStatus,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    if (!changed) return;
+
+    localStorage.setItem(CSC_OPPORTUNITIES_STORAGE_KEY, JSON.stringify(nextOpportunities));
+    window.dispatchEvent(
+      new CustomEvent(CSC_OPPORTUNITIES_UPDATE_EVENT, {
+        detail: { opportunities: nextOpportunities },
+      })
+    );
+  } catch (error) {
+    console.error('Failed to sync CSC opportunities from shifts:', error);
+  }
 };
 
 const seedShifts = BASE_CSC_SHIFTS.map(normalizeShift);
@@ -759,6 +840,16 @@ const mergeDuplicateShiftRecords = (existingShift = {}, incomingShift = {}, pref
       incomingShift.uniform || existingShift.uniform || incomingShift.notes || existingShift.notes || ''
     ),
     supervisor: incomingShift.supervisor || existingShift.supervisor,
+    createdFromOpportunityId:
+      existingShift.createdFromOpportunityId || incomingShift.createdFromOpportunityId || '',
+    linkedOpportunityId:
+      existingShift.linkedOpportunityId || incomingShift.linkedOpportunityId || '',
+    googleCalendarEventId:
+      existingShift.googleCalendarEventId || incomingShift.googleCalendarEventId || '',
+    googleCalendarEventLink:
+      existingShift.googleCalendarEventLink || incomingShift.googleCalendarEventLink || '',
+    googleCalendarAddedAt:
+      existingShift.googleCalendarAddedAt || incomingShift.googleCalendarAddedAt || '',
     archivedAt: existingShift.archivedAt || incomingShift.archivedAt || '',
   });
 };
@@ -1692,6 +1783,11 @@ const parseCsv = (text) => {
       parking: row.parking,
       uniform: row.uniform,
       supervisor: row.supervisor,
+      createdFromOpportunityId: row.createdFromOpportunityId,
+      linkedOpportunityId: row.linkedOpportunityId,
+      googleCalendarEventId: row.googleCalendarEventId,
+      googleCalendarEventLink: row.googleCalendarEventLink,
+      googleCalendarAddedAt: row.googleCalendarAddedAt,
     });
   });
 };
@@ -1720,6 +1816,11 @@ const buildCsv = (shifts) => {
     'parking',
     'uniform',
     'supervisor',
+    'createdFromOpportunityId',
+    'linkedOpportunityId',
+    'googleCalendarEventId',
+    'googleCalendarEventLink',
+    'googleCalendarAddedAt',
   ];
 
   const rows = shifts.map((shift) => ({
@@ -1882,18 +1983,89 @@ const MONTH_RANGE_OPTIONS = [
   { value: 'historical', label: 'Historical All-Time' },
 ];
 
-const toGoogleCalendarDateTime = (dateValue, timeValue) => {
-  if (!dateValue || !timeValue) return '';
-  return `${dateValue.replaceAll('-', '')}T${String(timeValue).replace(':', '')}00`;
+const readArrayStorage = (storageKey, fallback = []) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
 };
 
-const getGoogleCalendarUrl = (shift) => {
-  const startDateTime = toGoogleCalendarDateTime(shift.startDate, shift.startTime);
-  const finishDateTime = toGoogleCalendarDateTime(shift.finishDate, shift.finishTime);
+const navigateToAppTab = (tab, recordId = '', extra = {}) => {
+  window.dispatchEvent(
+    new CustomEvent(APP_NAVIGATE_EVENT, {
+      detail: { tab, recordId, ...extra },
+    })
+  );
+};
 
-  if (!startDateTime || !finishDateTime) return '#';
+const clearCscShiftReturnContext = () => {
+  try {
+    sessionStorage.removeItem(CSC_RETURN_CONTEXT_STORAGE_KEY);
+    localStorage.removeItem(CSC_RETURN_CONTEXT_STORAGE_KEY);
+  } catch (error) {
+    console.error('Failed to clear the CSC shift return location:', error);
+  }
+};
 
-  const details = [
+const normalizeCscShiftReturnContext = (context = null) => {
+  const returnTab = String(context?.returnTab || '').trim();
+  const returnRecordId = String(context?.returnRecordId || '').trim();
+  const openedShiftId = String(context?.openedShiftId || context?.shiftId || '').trim();
+
+  if (!returnTab) return null;
+
+  return {
+    returnTab,
+    returnRecordId,
+    openedShiftId,
+  };
+};
+
+const readCscShiftReturnContext = () => {
+  try {
+    const rawContext =
+      sessionStorage.getItem(CSC_RETURN_CONTEXT_STORAGE_KEY) ||
+      localStorage.getItem(CSC_RETURN_CONTEXT_STORAGE_KEY) ||
+      '';
+
+    if (!rawContext) return null;
+
+    return normalizeCscShiftReturnContext(JSON.parse(rawContext));
+  } catch (error) {
+    console.error('Failed to read the CSC shift return location:', error);
+    clearCscShiftReturnContext();
+    return null;
+  }
+};
+
+const createRelatedRecordId = (prefix = 'record') =>
+  `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const readStoredRides = () => [
+  ...readArrayStorage(RIDES_STORAGE_KEY, []),
+  ...readArrayStorage(RIDES_ARCHIVE_STORAGE_KEY, []),
+];
+
+const readStoredPaychecks = () => readArrayStorage(PAYCHECK_STORAGE_KEY, []);
+
+const getLinkedRideForShift = (shift = {}) =>
+  readStoredRides().find((ride) => ride.linkedCscShiftId === shift.id) || null;
+
+const getPaychecksMatchingShift = (shift = {}, paychecks = []) => {
+  const shiftDate = String(shift.startDate || '').slice(0, 10);
+  if (!shiftDate) return [];
+
+  return paychecks.filter((paycheck) => {
+    const periodStart = String(paycheck.payPeriodStart || '').slice(0, 10);
+    const periodEnd = String(paycheck.payPeriodEnd || '').slice(0, 10);
+    return Boolean(periodStart && periodEnd && shiftDate >= periodStart && shiftDate <= periodEnd);
+  });
+};
+
+const buildShiftCalendarEventPayload = (shift = {}) => {
+  const description = [
     `CSC shift status: ${shift.shiftStatus || 'Scheduled'}`,
     `Paid status: ${shift.paidStatus || 'Unpaid'}`,
     `Hours: ${getShiftHours(shift).toFixed(1)}`,
@@ -1905,30 +2077,24 @@ const getGoogleCalendarUrl = (shift) => {
     shift.parking ? `Parking: ${shift.parking}` : '',
     shift.supervisor ? `Supervisor: ${shift.supervisor}` : '',
     shift.notes ? `Notes: ${shift.notes}` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles';
 
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: `CSC Shift - ${shift.venue || 'Shift'}${shift.event ? ` - ${shift.event}` : ''}`,
-    dates: `${startDateTime}/${finishDateTime}`,
+  return {
+    summary: `CSC Shift - ${shift.venue || 'Shift'}${shift.event ? ` - ${shift.event}` : ''}`,
     location: [shift.venue, shift.address, shift.city].filter(Boolean).join(', '),
-    details,
-    ctz: 'America/Los_Angeles',
-    color: '#F4B400',
-  });
-
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-};
-
-const loadCalendarAddedIds = () => {
-  try {
-    const saved = localStorage.getItem(CSC_CALENDAR_ADDED_STORAGE_KEY);
-    const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error('Failed to load CSC Google Calendar added ids:', error);
-    return [];
-  }
+    description,
+    start: {
+      dateTime: `${shift.startDate}T${shift.startTime}:00`,
+      timeZone: timezone,
+    },
+    end: {
+      dateTime: `${shift.finishDate || shift.startDate}T${shift.finishTime}:00`,
+      timeZone: timezone,
+    },
+  };
 };
 
 const CscShiftsTab = ({ searchQuery = '' }) => {
@@ -1957,12 +2123,52 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [showActiveOnly, setShowActiveOnly] = useState(true);
   const [isShiftTableCollapsed, setIsShiftTableCollapsed] = useState(false);
   const [selectedDetailShiftId, setSelectedDetailShiftId] = useState(null);
+  const [detailReturnContext, setDetailReturnContext] = useState(null);
   const [movingShiftId, setMovingShiftId] = useState(null);
   const [expandedNoteIds, setExpandedNoteIds] = useState(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [calendarAddedIds, setCalendarAddedIds] = useState(() => new Set(loadCalendarAddedIds()));
+  const [calendarAddingShiftId, setCalendarAddingShiftId] = useState('');
+  const [paychecks, setPaychecks] = useState(() => readStoredPaychecks());
   const [selectedPaidMonthKey, setSelectedPaidMonthKey] = useState('');
   const toolbarImportInputRef = useRef(null);
+
+  useEffect(() => {
+    let rawDraft = '';
+
+    try {
+      rawDraft =
+        sessionStorage.getItem(CSC_CREATE_DRAFT_STORAGE_KEY) ||
+        localStorage.getItem(CSC_CREATE_DRAFT_STORAGE_KEY) ||
+        '';
+      sessionStorage.removeItem(CSC_CREATE_DRAFT_STORAGE_KEY);
+      localStorage.removeItem(CSC_CREATE_DRAFT_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to read CSC shift draft from opportunity:', error);
+    }
+
+    if (!rawDraft) return;
+
+    try {
+      const parsedDraft = JSON.parse(rawDraft);
+      const blankShift = createBlankShift();
+      setNewShift(
+        normalizeShift({
+          ...blankShift,
+          ...parsedDraft,
+          id: parsedDraft.id || blankShift.id,
+          finishDate: parsedDraft.finishDate || parsedDraft.startDate || '',
+        })
+      );
+      setEditingShiftId(null);
+      setShowAddDrawer(true);
+      setSaveMessage('CSC shift draft opened from CSC Opportunities.');
+      window.setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error) {
+      console.error('Failed to open CSC shift draft from opportunity:', error);
+      setSaveMessage('The CSC opportunity shift draft could not be opened.');
+      window.setTimeout(() => setSaveMessage(''), 3000);
+    }
+  }, []);
 
   useEffect(() => {
     const openLinkedShift = (event) => {
@@ -1983,11 +2189,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
       if (!shiftId) return;
 
+      const eventReturnContext = normalizeCscShiftReturnContext(event?.detail || null);
+      const returnContext = eventReturnContext || readCscShiftReturnContext();
       const linkedShift =
         shifts.find((shift) => shift.id === shiftId) ||
         archivedShifts.find((shift) => shift.id === shiftId);
 
       if (!linkedShift) {
+        setDetailReturnContext(null);
+        clearCscShiftReturnContext();
         setSaveMessage('The linked CSC shift could not be found.');
         setTimeout(() => setSaveMessage(''), 3000);
         return;
@@ -2000,6 +2210,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       setSelectedMonth('All');
       setShowActiveOnly(false);
       setIsShiftTableCollapsed(false);
+      setDetailReturnContext(returnContext);
       setSelectedDetailShiftId(shiftId);
       setSaveMessage('Linked CSC shift opened.');
       setTimeout(() => setSaveMessage(''), 2500);
@@ -2031,21 +2242,107 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   }, [archivedShifts]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(CSC_CALENDAR_ADDED_STORAGE_KEY, JSON.stringify(Array.from(calendarAddedIds)));
-    } catch (error) {
-      console.error('Failed to save CSC Google Calendar added ids:', error);
-    }
-  }, [calendarAddedIds]);
+    syncOpportunityLinksFromShifts(shifts, archivedShifts);
+  }, [archivedShifts, shifts]);
 
-  const handleGoogleCalendarClick = (id) => {
-    setCalendarAddedIds((current) => {
-      const next = new Set(current);
-      next.add(id);
-      return next;
-    });
-    setSaveMessage('Google Calendar opened. Shift marked as calendar added.');
-    setTimeout(() => setSaveMessage(''), 2500);
+  useEffect(() => {
+    const refreshPaychecks = () => setPaychecks(readStoredPaychecks());
+
+    window.addEventListener('storage', refreshPaychecks);
+    window.addEventListener(PAYCHECK_UPDATE_EVENT, refreshPaychecks);
+
+    return () => {
+      window.removeEventListener('storage', refreshPaychecks);
+      window.removeEventListener(PAYCHECK_UPDATE_EVENT, refreshPaychecks);
+    };
+  }, []);
+
+  const handleAddShiftToCalendar = async (shift) => {
+    if (!shift?.id || calendarAddingShiftId) return;
+
+    if (shift.googleCalendarEventLink) {
+      window.open(shift.googleCalendarEventLink, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    if (shift.googleCalendarEventId) {
+      window.alert('This shift is already linked to Google Calendar, but its calendar link is unavailable.');
+      return;
+    }
+
+    if (!shift.startDate || !shift.startTime || !shift.finishTime) {
+      window.alert('Start date, start time, and finish time are required before adding this shift to Google Calendar.');
+      return;
+    }
+
+    try {
+      setCalendarAddingShiftId(shift.id);
+      const createdEvent = await createGoogleCalendarEvent(buildShiftCalendarEventPayload(shift));
+      updateShift(shift.id, {
+        googleCalendarEventId: createdEvent?.id || '',
+        googleCalendarEventLink: createdEvent?.htmlLink || '',
+        googleCalendarAddedAt: new Date().toISOString(),
+      });
+      setSaveMessage('CSC shift added to Google Calendar.');
+      setTimeout(() => setSaveMessage(''), 2500);
+    } catch (error) {
+      window.alert(error?.message || 'Could not add this CSC shift to Google Calendar.');
+    } finally {
+      setCalendarAddingShiftId('');
+    }
+  };
+
+  const handlePlanOrOpenRide = (shift) => {
+    const linkedRide = getLinkedRideForShift(shift);
+
+    if (linkedRide) {
+      navigateToAppTab('rides', linkedRide.id);
+      return;
+    }
+
+    const rideDraft = {
+      id: createRelatedRecordId('ride-csc-shift'),
+      rideDate: shift.startDate || '',
+      riderName: 'David Hallstrom',
+      confirmationNumber: '',
+      status: 'Pending',
+      provider: '',
+      notes: `Transportation plan for ${shift.event || shift.jobName || 'CSC shift'} at ${shift.venue || 'CSC venue'}.`,
+      sourceText: '',
+      sourceOpportunityId: shift.linkedOpportunityId || shift.createdFromOpportunityId || '',
+      linkedCscShiftId: shift.id,
+      legs: [
+        {
+          id: createRelatedRecordId('ride-leg'),
+          leg: 'Trip to Venue',
+          confirmationNumber: '',
+          pickupTime: '',
+          appointmentTime: shift.startTime || '',
+          pickupName: 'Pickup',
+          pickupAddress: '',
+          dropoffName: shift.venue || 'CSC Venue',
+          dropoffAddress: shift.address || '',
+          status: 'Pending',
+          provider: '',
+          notes: '',
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      sessionStorage.setItem(RIDES_CREATE_DRAFT_STORAGE_KEY, JSON.stringify(rideDraft));
+      navigateToAppTab('rides');
+    } catch (error) {
+      console.error('Failed to create ride plan from CSC shift:', error);
+      setSaveMessage('The ride plan could not be opened.');
+      setTimeout(() => setSaveMessage(''), 3000);
+    }
+  };
+
+  const handleOpenPaychecks = () => {
+    navigateToAppTab('paychecks');
   };
 
   const handleShowFullShiftList = () => {
@@ -2162,7 +2459,23 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   };
 
   const handleOpenShiftDetails = (shift) => {
+    clearCscShiftReturnContext();
+    setDetailReturnContext(null);
     setSelectedDetailShiftId(shift.id);
+  };
+
+  const handleCloseShiftDetails = () => {
+    const returnContext = detailReturnContext || readCscShiftReturnContext();
+
+    setSelectedDetailShiftId(null);
+    setDetailReturnContext(null);
+    clearCscShiftReturnContext();
+
+    if (returnContext?.returnTab) {
+      navigateToAppTab(returnContext.returnTab, returnContext.returnRecordId || '', {
+        recordId: returnContext.returnRecordId || '',
+      });
+    }
   };
 
   const handleMoveShift = (id) => {
@@ -2449,11 +2762,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       saveDeletedSeedShiftId(deleteConfirm.id);
     }
     setShifts((currentShifts) => currentShifts.filter((item) => item.id !== deleteConfirm.id));
-    setCalendarAddedIds((current) => {
-      const next = new Set(current);
-      next.delete(deleteConfirm.id);
-      return next;
-    });
     if (selectedDetailShiftId === deleteConfirm.id) {
       setSelectedDetailShiftId(null);
     }
@@ -2876,15 +3184,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const removedDuplicateCount = dedupeResult.removedIds.length;
     setShifts(dedupeResult.shifts);
 
-    setCalendarAddedIds((current) => {
-      const next = new Set(current);
-      dedupeResult.replacementIds.forEach((keptId, removedId) => {
-        if (next.has(removedId)) next.add(keptId);
-        next.delete(removedId);
-      });
-      return next;
-    });
-
     setShiftEmailText('');
     setScannedShifts([]);
     setShowScanDrawer(false);
@@ -2929,7 +3228,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     selectedDetailShiftId && archivedShifts.some((shift) => shift.id === selectedDetailShiftId)
   );
 
-  const renderShiftActions = (shift) => (
+  const renderShiftActions = (shift) => {
+    const linkedRide = getLinkedRideForShift(shift);
+    const matchingPaycheckCount = getPaychecksMatchingShift(shift, paychecks).length;
+    const calendarAdded = Boolean(shift.googleCalendarEventId || shift.googleCalendarEventLink);
+    const calendarBusy = calendarAddingShiftId === shift.id;
+
+    return (
     <div className="w-[154px] max-w-[154px]">
       <div className="grid gap-2">
         <div className="grid grid-cols-[110px_34px] gap-2">
@@ -2976,21 +3281,22 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           >
             Clr
           </button>
-          <a
-            href={getGoogleCalendarUrl(shift)}
-            target="_blank"
-            rel="noreferrer"
-            onClick={() => handleGoogleCalendarClick(shift.id)}
-            className={`inline-flex h-[30px] w-[34px] items-center justify-center rounded text-white ${
-              calendarAddedIds.has(shift.id)
+          <button
+            type="button"
+            onClick={() => handleAddShiftToCalendar(shift)}
+            disabled={calendarBusy}
+            className={`inline-flex h-[30px] w-[34px] items-center justify-center rounded text-white disabled:cursor-wait ${
+              calendarAdded
                 ? 'bg-green-700 ring-2 ring-green-200 hover:bg-green-800'
-                : 'bg-emerald-600 hover:bg-emerald-700'
+                : calendarBusy
+                  ? 'bg-emerald-400'
+                  : 'bg-emerald-600 hover:bg-emerald-700'
             }`}
-            aria-label={calendarAddedIds.has(shift.id) ? 'Google Calendar opened for this shift' : 'Add shift to Google Calendar'}
-            title={calendarAddedIds.has(shift.id) ? 'Google Calendar opened for this shift' : 'Add to Google Calendar'}
+            aria-label={calendarAdded ? 'Open this shift in Google Calendar' : 'Add shift to Google Calendar'}
+            title={calendarAdded ? 'Open in Google Calendar' : calendarBusy ? 'Adding to Google Calendar' : 'Add to Google Calendar'}
           >
-            {calendarAddedIds.has(shift.id) ? <CheckCircle2 className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
-          </a>
+            {calendarAdded ? <CheckCircle2 className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
+          </button>
         </div>
 
         <div className="grid grid-cols-[58px_34px_34px] gap-2">
@@ -3022,6 +3328,29 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             <Edit3 className="h-4 w-4" />
           </button>
         </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => handlePlanOrOpenRide(shift)}
+            className="inline-flex h-[30px] items-center justify-center gap-1 rounded bg-sky-700 px-2 text-[11px] font-extrabold text-white hover:bg-sky-800"
+            title={linkedRide ? 'Open linked ride' : 'Plan a ride for this shift'}
+            aria-label={linkedRide ? 'Open linked ride' : 'Plan a ride for this shift'}
+          >
+            <Car className="h-3.5 w-3.5" />
+            {linkedRide ? 'Ride' : 'Plan Ride'}
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenPaychecks}
+            className="inline-flex h-[30px] items-center justify-center gap-1 rounded bg-amber-700 px-2 text-[11px] font-extrabold text-white hover:bg-amber-800"
+            title="Open paychecks"
+            aria-label="Open paychecks"
+          >
+            <DollarSign className="h-3.5 w-3.5" />
+            Pay ({matchingPaycheckCount})
+          </button>
+        </div>
       </div>
       {movingShiftId === shift.id && (
         <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2">
@@ -3041,34 +3370,25 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
-    <PageContainer>
-      <div className="space-y-6 py-6">
-        <section className="rounded-xl border-2 border-yellow-200 bg-gradient-to-r from-yellow-50 to-yellow-100 px-6 py-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <BriefcaseBusiness className="h-6 w-6 text-amber-700" />
-                <h2 className="text-2xl font-black text-slate-900">CSC Shifts</h2>
-              </div>
-              <p className="mt-1 text-sm font-medium text-slate-600">
-                Manage CSC shifts here. Pay details stay on the CSC Shifts tab.
-              </p>
-              {saveMessage && (
-                <p className="mt-3 inline-flex rounded-full bg-yellow-100 px-3 py-1 text-xs font-bold text-yellow-900">
-                  {saveMessage}
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">
+    <PageContainer surfaceClassName="min-h-screen bg-amber-50">
+      <div className="flex flex-col gap-6 bg-amber-50 py-6">
+        <TabPageHeader
+          icon={BriefcaseBusiness}
+          title="CSC Shifts"
+          subtitle="Manage confirmed work schedules, pay status, calendar details, rides, and paycheck links."
+          theme="amber"
+          message={saveMessage}
+          actions={
+            <>
               <button
                 type="button"
                 onClick={() => setShowScanDrawer(true)}
                 title="Scan CSC shift email"
-                className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700"
+                className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
               >
                 <StickyNote className="h-4 w-4" />
                 Scan Email
@@ -3076,7 +3396,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
               <label
                 title="Import CSC shifts from CSV"
-                className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+                className={`${TAB_HEADER_ACTION_CLASS} cursor-pointer bg-white text-amber-900 hover:bg-amber-50`}
               >
                 <FileUp className="h-4 w-4" />
                 Import
@@ -3087,7 +3407,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 type="button"
                 onClick={handleExportCsv}
                 title="Export CSC shifts"
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                className={`${TAB_HEADER_ACTION_CLASS} bg-indigo-600 text-white hover:bg-indigo-500`}
               >
                 <Download className="h-4 w-4" />
                 Export
@@ -3097,14 +3417,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 type="button"
                 onClick={handleTogglePremiumView}
                 title="View premium CSC shift schedule"
-                className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
+                className={`${TAB_HEADER_ACTION_CLASS} bg-violet-600 text-white hover:bg-violet-500`}
               >
                 <ListChecks className="h-4 w-4" />
                 Premium View
               </button>
-            </div>
-          </div>
-        </section>
+            </>
+          }
+        />
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -3387,7 +3707,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Est. Pay:</span> {formatCurrency(getEstimatedPay(shift))}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Status:</span> {shift.shiftStatus}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Paid:</span> {shift.paidStatus}</div>
-                        {calendarAddedIds.has(shift.id) ? (
+                        {shift.googleCalendarEventId || shift.googleCalendarEventLink ? (
                           <div className="min-w-0 break-words text-green-700">
                             <span className="font-bold">Calendar:</span> Added
                           </div>
@@ -4040,7 +4360,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   <h2 className="text-xl font-extrabold text-slate-950">CSC Shift Details</h2>
                   <p className="text-sm text-slate-600">Full shift record with restore, edit, archive, and delete actions.</p>
                 </div>
-                <button type="button" onClick={() => setSelectedDetailShiftId(null)} className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-50">
+                <button type="button" onClick={handleCloseShiftDetails} className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-50">
                   <X className="h-5 w-5" />
                 </button>
               </div>

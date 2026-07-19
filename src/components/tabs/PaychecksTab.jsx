@@ -5,12 +5,14 @@ import {
   CircleDollarSign,
   Download,
   Eye,
+  Pencil,
   Plus,
   ScanLine,
   Trash2,
   X,
 } from "lucide-react";
 import PageContainer from "../common/PageContainer";
+import TabPageHeader from "../common/TabPageHeader.jsx";
 
 const PAYCHECK_STORAGE_KEY = "paychecksTab.paychecks.v1";
 const PAYCHECK_UPLOAD_ENDPOINT = "/budget-dashboard-fs/upload-paycheck-file.php";
@@ -142,6 +144,35 @@ const formatDateForDisplay = (value = "") => {
   return `${month}/${day}/${year}`;
 };
 
+const formatCompactDate = (value = "") => {
+  const iso = formatDateForInput(value);
+  if (!iso) return "";
+
+  const [, year, month, day] = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/) || [];
+  if (!year || !month || !day) return "";
+
+  return `${Number(month)}/${Number(day)}/${String(year).slice(-2)}`;
+};
+
+const formatCompactPayPeriod = (startValue = "", endValue = "") => {
+  const startIso = formatDateForInput(startValue);
+  const endIso = formatDateForInput(endValue);
+
+  if (!startIso && !endIso) return "";
+  if (!startIso) return formatCompactDate(endIso);
+  if (!endIso) return formatCompactDate(startIso);
+
+  const [startYear, startMonth, startDay] = startIso.split("-");
+  const [endYear, endMonth, endDay] = endIso.split("-");
+  const startDate = `${Number(startMonth)}/${Number(startDay)}`;
+  const endDate = `${Number(endMonth)}/${Number(endDay)}`;
+  const endDateWithYear = `${endDate}/${String(endYear).slice(-2)}`;
+
+  if (startYear === endYear) return `${startDate}-${endDate}`;
+
+  return `${startDate}/${String(startYear).slice(-2)}-${endDateWithYear}`;
+};
+
 const createId = () => `paycheck-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const safeJsonParse = (value, fallback) => {
@@ -226,6 +257,33 @@ const getPaycheckHourLines = (paycheck = {}) => {
     [line.hours || "0.00", "hrs", line.amount ? `$${line.amount}` : ""].filter(Boolean).join(" ")
   );
 };
+
+const getPaycheckEarningsRows = (paycheck = {}) => {
+  const earningsLines = normalizeEarningsLines(paycheck.earningsLines);
+
+  if (earningsLines.length) {
+    return earningsLines.map((line) => ({
+      id: line.id || createId(),
+      type: line.type || "Earnings",
+      rate: line.rate || "0.00",
+      hours: line.hours || "0.00",
+      amount: line.amount || "0.00",
+    }));
+  }
+
+  return [
+    {
+      id: `${paycheck.id || createId()}-earnings`,
+      type: "Earnings",
+      rate: formatRate(paycheck.rate) || "0.00",
+      hours: formatRate(paycheck.hours) || "0.00",
+      amount: formatMoney(paycheck.grossPay) || "0.00",
+    },
+  ];
+};
+
+const isPaycheckRateWarning = (paycheck = {}) =>
+  /below expected|lower pre-guard-card/i.test(paycheck.payRateNote || "");
 
 const getPaycheckNotesDisplay = (paycheck = {}) => {
   const notes = String(paycheck.notes || "").trim();
@@ -625,6 +683,16 @@ export default function PaychecksTab() {
     setForm((current) => normalizePaycheck({ ...current, [field]: value, updatedAt: new Date().toISOString() }));
   };
 
+  const updatePaycheckNotes = (paycheckId, value) => {
+    updatePaychecks((current) =>
+      current.map((item) =>
+        item.id === paycheckId
+          ? { ...item, notes: value, updatedAt: new Date().toISOString() }
+          : item
+      )
+    );
+  };
+
   const resetForm = () => {
     setForm(normalizePaycheck({ id: createId(), expectedRate: "19.50" }));
     setEditingId("");
@@ -842,36 +910,32 @@ export default function PaychecksTab() {
   );
 
   return (
-    <PageContainer className="space-y-5 bg-slate-50 py-6">
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <CircleDollarSign className="h-6 w-6 text-slate-700" />
-              <h2 className="text-2xl font-black text-slate-900">Paychecks</h2>
-            </div>
-            <p className="mt-1 text-sm text-slate-600">Scan paycheck stubs, save the original file, and track pay rate, hours, gross pay, taxes, and net pay.</p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-right text-xs font-bold text-slate-600 md:grid-cols-4">
-            <div className="rounded-lg bg-slate-100 px-3 py-2">
-              <div>Hours</div>
-              <div className="text-base text-slate-900">{totals.hours.toFixed(2)}</div>
-            </div>
-            <div className="rounded-lg bg-slate-100 px-3 py-2">
-              <div>Gross</div>
-              <div className="text-base text-slate-900">${totals.grossPay.toFixed(2)}</div>
-            </div>
-            <div className="rounded-lg bg-slate-100 px-3 py-2">
-              <div>Taxes</div>
-              <div className="text-base text-slate-900">${totals.taxes.toFixed(2)}</div>
-            </div>
-            <div className="rounded-lg bg-slate-100 px-3 py-2">
-              <div>Net</div>
-              <div className="text-base text-slate-900">${totals.netPay.toFixed(2)}</div>
-            </div>
-          </div>
+    <PageContainer surfaceClassName="min-h-screen bg-teal-50" className="flex flex-col gap-6 bg-teal-50 py-6">
+      <TabPageHeader
+        icon={CircleDollarSign}
+        title="Paychecks"
+        subtitle="Scan paycheck stubs, preserve the original file, and track rates, hours, gross pay, taxes, and net pay."
+        theme="teal"
+      />
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Paycheck totals">
+        <div className="rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-cyan-700">Hours</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">{totals.hours.toFixed(2)}</p>
         </div>
-      </div>
+        <div className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-blue-700">Gross</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">${totals.grossPay.toFixed(2)}</p>
+        </div>
+        <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-amber-700">Taxes</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">${totals.taxes.toFixed(2)}</p>
+        </div>
+        <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Net</p>
+          <p className="mt-1 text-3xl font-black text-slate-950">${totals.netPay.toFixed(2)}</p>
+        </div>
+      </section>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
         <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-wide text-blue-950">
@@ -1052,106 +1116,139 @@ export default function PaychecksTab() {
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-[1180px] w-full table-fixed text-sm">
+        <table className="w-full min-w-[880px] table-fixed text-sm">
+          <colgroup>
+            <col className="w-[76px]" />
+            <col className="w-[58px]" />
+            <col className="w-[290px]" />
+            <col className="w-[58px]" />
+            <col className="w-[54px]" />
+            <col className="w-[62px]" />
+            <col />
+            <col className="w-[144px]" />
+          </colgroup>
           <thead className="bg-slate-100 text-slate-700">
             <tr>
-              <th className="w-[13%] px-3 py-2 text-left font-bold">Check Date</th>
-              <th className="w-[13%] px-3 py-2 text-left font-bold">Pay Period</th>
-              <th className="w-[12%] px-3 py-2 text-left font-bold">Check #</th>
-              <th className="w-[13%] px-3 py-2 text-right font-bold">Rate</th>
-              <th className="w-[12%] px-3 py-2 text-right font-bold">Hours</th>
-              <th className="w-[10%] px-3 py-2 text-right font-bold">Gross</th>
-              <th className="w-[10%] px-3 py-2 text-right font-bold">Taxes</th>
-              <th className="w-[10%] px-3 py-2 text-right font-bold">Net</th>
-              <th className="w-[14%] px-3 py-2 text-left font-bold">Notes</th>
-              <th className="w-[13%] px-3 py-2 text-left font-bold">Actions</th>
+              <th className="px-1.5 py-2 text-left font-bold">Date / Period</th>
+              <th className="px-1.5 py-2 text-left font-bold">Check #</th>
+              <th className="px-2 py-2 text-left font-bold">Earnings</th>
+              <th className="px-1.5 py-2 text-right font-bold">Gross</th>
+              <th className="px-1.5 py-2 text-right font-bold">Taxes</th>
+              <th className="px-1.5 py-2 text-right font-bold">Net</th>
+              <th className="px-2 py-2 text-left font-bold">Notes</th>
+              <th className="px-2.5 py-2 text-left font-bold">Actions</th>
             </tr>
           </thead>
           <tbody>
             {paychecks.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
                   No paychecks saved yet.
                 </td>
               </tr>
             ) : (
               paychecks.map((paycheck) => {
-                const hasRateWarning = /below expected|lower pre-guard-card/i.test(paycheck.payRateNote || "");
-                const notesDisplay = getPaycheckNotesDisplay(paycheck);
+                const hasRateWarning = isPaycheckRateWarning(paycheck);
+                const earningsRows = getPaycheckEarningsRows(paycheck);
 
                 return (
                   <tr key={paycheck.id} className="border-t border-slate-200 align-top">
-                    <td className="px-3 py-2 font-semibold text-slate-900">{formatDateForDisplay(paycheck.checkDate)}</td>
-                    <td className="px-3 py-2 text-slate-700">
-                      {formatDateForDisplay(paycheck.payPeriodStart)}
-                      {paycheck.payPeriodStart || paycheck.payPeriodEnd ? " - " : ""}
-                      {formatDateForDisplay(paycheck.payPeriodEnd)}
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">{paycheck.checkNumber}</td>
-                    <td className={`px-3 py-2 text-right font-bold ${hasRateWarning ? "text-amber-700" : "text-slate-900"}`}>
-                      <div className="space-y-1">
-                        {getPaycheckRateLines(paycheck).map((line, index) => (
-                          <div key={`${paycheck.id}-rate-${index}`}>{line}</div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-700">
-                      <div className="space-y-1">
-                        {getPaycheckHourLines(paycheck).map((line, index) => (
-                          <div key={`${paycheck.id}-hours-${index}`}>{line}</div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-700">${paycheck.grossPay || "0.00"}</td>
-                    <td className="px-3 py-2 text-right text-slate-700">${paycheck.taxes || "0.00"}</td>
-                    <td className="px-3 py-2 text-right font-bold text-green-700">${paycheck.netPay || "0.00"}</td>
-                    <td className="px-3 py-2">
-                      {hasRateWarning ? (
-                        <div className="space-y-1">
-                          <div className="flex gap-1 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs font-semibold text-amber-900">
-                            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                            <span>{paycheck.payRateNote}</span>
+                    <td className="px-1.5 py-2 text-slate-900">
+                      <div className="leading-tight">
+                        <div className="font-black tabular-nums">{formatCompactDate(paycheck.checkDate)}</div>
+                        {paycheck.payPeriodStart || paycheck.payPeriodEnd ? (
+                          <div className="mt-0.5 whitespace-nowrap text-sm font-semibold text-slate-500">
+                            {formatCompactPayPeriod(paycheck.payPeriodStart, paycheck.payPeriodEnd)}
                           </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-1 text-xs font-semibold text-slate-500">
-                          <div>{paycheck.payRateNote || notesDisplay || ""}</div>
-                        </div>
-                      )}
+                        ) : null}
+                      </div>
                     </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-2">
+                    <td className="px-1.5 py-2 text-slate-700 tabular-nums">{paycheck.checkNumber}</td>
+                    <td className="px-2 py-2">
+                      <div className="space-y-0.5">
+                        {earningsRows.map((line, index) => {
+                          const lineRate = money(line.rate);
+                          const isLowRateLine = hasRateWarning && lineRate !== null && lineRate < FUTURE_EXPECTED_CSC_RATE;
+
+                          return (
+                            <div
+                              key={`${paycheck.id}-earnings-${line.id || index}`}
+                              className={`grid grid-cols-[68px_72px_50px_66px] items-center gap-1 rounded px-1.5 py-1 text-sm leading-tight ${
+                                isLowRateLine ? "bg-amber-50 text-amber-900" : "bg-slate-50 text-slate-700"
+                              }`}
+                            >
+                              <span className={`truncate font-black ${isLowRateLine ? "text-amber-800" : "text-slate-950"}`}>
+                                {line.type || "Earnings"}
+                              </span>
+                              <span className="text-right font-bold">${line.rate || "0.00"}/hr</span>
+                              <span className="text-right">{line.hours || "0.00"}h</span>
+                              <span className="text-right font-bold">${line.amount || "0.00"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td className="px-1.5 py-2 text-right text-slate-700 tabular-nums">${paycheck.grossPay || "0.00"}</td>
+                    <td className="px-1.5 py-2 text-right text-slate-700 tabular-nums">${paycheck.taxes || "0.00"}</td>
+                    <td className="px-1.5 py-2 text-right font-bold text-green-700 tabular-nums">${paycheck.netPay || "0.00"}</td>
+                    <td className="px-2 py-2">
+                      <div className="space-y-1">
+                        {hasRateWarning ? (
+                          <div title={paycheck.payRateNote} className="inline-flex max-w-full items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-xs font-bold leading-tight text-amber-900">
+                            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">Rate warning</span>
+                          </div>
+                        ) : null}
+                        <textarea
+                          value={paycheck.notes || ""}
+                          onChange={(event) => updatePaycheckNotes(paycheck.id, event.target.value)}
+                          rows={earningsRows.length > 3 ? 3 : 2}
+                          placeholder="Add notes..."
+                          className="min-h-[42px] w-full resize-y rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm leading-snug text-slate-700 shadow-inner placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    </td>
+                    <td className="px-2.5 py-2.5">
+                      <div className="grid w-fit grid-cols-3 gap-2">
                         <button
                           type="button"
                           onClick={() => editPaycheck(paycheck)}
-                          className="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-blue-700 text-white hover:bg-blue-800"
+                          title="Edit paycheck"
+                          aria-label="Edit paycheck"
                         >
-                          Edit
+                          <Pencil className="h-4 w-4" />
                         </button>
-                        {paycheck.attachment && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => window.open(getAttachmentViewUrl(paycheck.attachment), "_blank", "noopener,noreferrer")}
-                              className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800"
-                            >
-                              View
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => downloadAttachment(paycheck.attachment)}
-                              className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800"
-                            >
-                              Download
-                            </button>
-                          </>
-                        )}
+                        {paycheck.attachment ? (
+                          <button
+                            type="button"
+                            onClick={() => window.open(getAttachmentViewUrl(paycheck.attachment), "_blank", "noopener,noreferrer")}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-900 text-white hover:bg-slate-800"
+                            title="View paycheck file"
+                            aria-label="View paycheck file"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                        {paycheck.attachment ? (
+                          <button
+                            type="button"
+                            onClick={() => downloadAttachment(paycheck.attachment)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-700 text-white hover:bg-slate-800"
+                            title="Download paycheck file"
+                            aria-label="Download paycheck file"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => removePaycheck(paycheck)}
-                          className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-800"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-red-700 text-white hover:bg-red-800"
+                          title="Delete paycheck"
+                          aria-label="Delete paycheck"
                         >
-                          Delete Check
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>

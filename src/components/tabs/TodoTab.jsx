@@ -31,6 +31,7 @@ import {
   PanelRightOpen,
 } from "lucide-react";
 import PageContainer from "../common/PageContainer";
+import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
 import PremiumTodoListView from "../todo/PremiumTodoListView";
 import ArchivedDrawer from "../ui/ArchivedDrawer";
 import ContactManager from "../contacts/ContactManager";
@@ -138,8 +139,17 @@ const DEFAULT_FORM = {
   typeOverride: "",
   date: "",
   time: "",
+  contactId: "",
+  contactName: "",
   phone: "",
+  directPhone: "",
+  cellPhone: "",
+  fax: "",
+  email: "",
   address: "",
+  address2: "",
+  address3: "",
+  contactDetails: "",
   deadline: "",
   blockedBy: "",
   person: "",
@@ -172,7 +182,13 @@ const TASK_SCAN_FILL_FIELDS = Object.keys(DEFAULT_FORM).filter(
 
 const FIELD_LABELS = {
   phone: ["phone", "tel", "telephone"],
+  directPhone: ["direct phone", "direct", "office direct"],
+  cellPhone: ["cell", "cell phone", "mobile", "mobile phone"],
+  fax: ["fax", "facsimile"],
+  email: ["email", "email address", "e-mail"],
   address: ["address", "location"],
+  address2: ["address 2", "second address", "office 2"],
+  address3: ["address 3", "third address", "office 3"],
   deadline: ["deadline", "due", "due date", "reg due", "registration due", "suspension"],
   date: ["date", "appointment date", "visit date", "order date"],
   time: ["time", "appointment time", "start time"],
@@ -206,8 +222,17 @@ const FIELD_LABEL_DISPLAY = {
   typeOverride: "Category",
   date: "Date",
   time: "Time",
-  phone: "Phone",
-  address: "Address",
+  contactId: "Contact ID",
+  contactName: "Contact name",
+  phone: "Main phone",
+  directPhone: "Direct phone",
+  cellPhone: "Mobile phone",
+  fax: "Fax",
+  email: "Email",
+  address: "Primary address",
+  address2: "Second office / address",
+  address3: "Third office / address",
+  contactDetails: "Additional contact details",
   deadline: "Deadline",
   blockedBy: "Blocked by",
   person: "Person",
@@ -276,13 +301,42 @@ const REQUIRED_FIELDS_BY_TYPE = {
   "Phone / Lifeline": ["phone", "website"],
 };
 
-const MULTILINE_FIELDS = new Set(["details", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
+const MULTILINE_FIELDS = new Set(["details", "contactDetails", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
 const FORMATTED_TEXT_FIELDS = new Set(["notes", "followUpNotes"]);
 const DATE_PICKER_FIELDS = new Set(["date", "deadline", "effectiveDate"]);
 const TIME_PICKER_FIELDS = new Set(["time"]);
 const shouldUseFormattingToolbar = (field) => FORMATTED_TEXT_FIELDS.has(field);
 const DOCUMENT_DETAIL_FIELDS = new Set(["fileName", "documents"]);
 const NOTE_DETAIL_FIELDS = new Set(["notes", "followUpNotes"]);
+
+const SCHEDULE_FORM_FIELDS = ["date", "time", "deadline", "effectiveDate"];
+const CONTACT_FORM_FIELDS = [
+  "contactName",
+  "person",
+  "organization",
+  "company",
+  "email",
+  "phone",
+  "directPhone",
+  "cellPhone",
+  "fax",
+  "website",
+  "address",
+  "address2",
+  "address3",
+  "contactDetails",
+];
+const ALWAYS_VISIBLE_CONTACT_FIELDS = new Set([
+  "contactName",
+  "person",
+  "organization",
+  "email",
+  "phone",
+  "fax",
+  "website",
+  "address",
+]);
+const PREPARATION_FORM_FIELDS = ["questions", "documents", "fileName", "outcome", "notes", "followUpNotes"];
 
 const orderTaskFormFields = (fields = []) => {
   const uniqueFields = Array.from(new Set(fields));
@@ -779,13 +833,32 @@ const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeho
 
 const buildContactTaskDetails = (contact = {}) => {
   const details = [];
-  const officeLocations = Array.isArray(contact.officeLocations)
+  const formatOfficeAddress = (office = {}) => {
+    const cityStateZip = [
+      office.city,
+      [office.state, office.zip].filter(Boolean).join(" "),
+    ].filter(Boolean).join(", ");
+    return [office.address, cityStateZip].filter(Boolean).join(", ");
+  };
+  const officeLocations = Array.isArray(contact.officeLocations) && contact.officeLocations.length
     ? contact.officeLocations
-        .map((office) => ({
-          fax: String(office?.fax || "").trim(),
-        }))
-        .filter((office) => office.fax)
-    : [];
+    : [
+        { label: "Office 1", address: contact.address, city: contact.city, state: contact.state, zip: contact.zip, phone: contact.phone, fax: contact.fax },
+        { label: "Office 2", address: contact.address2, city: contact.city2, state: contact.state2, zip: contact.zip2 },
+        { label: "Office 3", address: contact.address3, city: contact.city3, state: contact.state3, zip: contact.zip3 },
+      ];
+
+  officeLocations.filter((office) => office?.address || office?.phone || office?.fax).forEach((office, index) => {
+    const officeParts = [];
+    const officeAddress = formatOfficeAddress(office);
+    if (officeAddress) officeParts.push(officeAddress);
+    if (office.phone) officeParts.push(`Phone: ${office.phone}`);
+    if (office.fax) officeParts.push(`Fax: ${office.fax}`);
+    if (officeParts.length) details.push(`${office.label || `Office ${index + 1}`}: ${officeParts.join(" | ")}`);
+  });
+
+  if (contact.directPhone) details.push(`Direct phone: ${contact.directPhone}`);
+  if (contact.cellPhone) details.push(`Mobile phone: ${contact.cellPhone}`);
 
   if (contact.treatmentRequested) {
     details.push(`Treatment Requested: ${contact.treatmentRequested}`);
@@ -795,17 +868,7 @@ const buildContactTaskDetails = (contact = {}) => {
     details.push(`Comments: ${contact.comments}`);
   }
 
-  officeLocations.forEach((office) => {
-    if (office.fax) details.push(`Fax: ${office.fax}`);
-  });
-
-  if (contact.fax) {
-    details.push(`Fax: ${contact.fax}`);
-  }
-
-  if (contact.email) {
-    details.push(`Email: ${contact.email}`);
-  }
+  if (contact.notes) details.push(`Contact Notes: ${contact.notes}`);
 
   if (contact.scannedDocumentName) {
     details.push(`Scanned Document: ${contact.scannedDocumentName}`);
@@ -827,6 +890,13 @@ const appendContactTaskDetails = (currentDetails = "", nextDetails = "") => {
 
 const applyContactToTaskData = (task = {}, contact = {}, replaceExisting = false) => {
   const next = { ...task };
+  const fillField = (field, value) => {
+    if (value && (replaceExisting || !String(next[field] || "").trim())) next[field] = value;
+  };
+  const formatOfficeAddress = (office = {}) => {
+    const cityStateZip = [office.city, [office.state, office.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    return [office.address, cityStateZip].filter(Boolean).join(", ");
+  };
 
   const contactCategory = cleanTaskCategoryName(contact.category);
   if (contactCategory && (replaceExisting || !next.type || next.type === "General")) {
@@ -835,19 +905,21 @@ const applyContactToTaskData = (task = {}, contact = {}, replaceExisting = false
   }
 
   CONTACT_APPLY_FIELDS.forEach((field) => {
-    if (contact[field] && (replaceExisting || !String(next[field] || "").trim())) {
-      next[field] = contact[field];
-    }
+    if (["address", "address2", "address3"].includes(field)) return;
+    fillField(field, contact[field]);
   });
 
-  if (contact.directPhone && (replaceExisting || !String(next.phone || "").trim())) {
-    next.phone = contact.directPhone;
-  }
+  fillField("contactId", contact.id);
+  fillField("contactName", contact.name);
+
+  const officeLocations = Array.isArray(contact.officeLocations) ? contact.officeLocations : [];
+  const formattedAddresses = officeLocations.map(formatOfficeAddress).filter(Boolean);
+  fillField("address", formattedAddresses[0] || contact.address);
+  fillField("address2", formattedAddresses[1] || contact.address2);
+  fillField("address3", formattedAddresses[2] || contact.address3);
 
   const contactTaskDetails = buildContactTaskDetails(contact);
-  if (contactTaskDetails) {
-    next.details = appendContactTaskDetails(next.details, contactTaskDetails);
-  }
+  fillField("contactDetails", contactTaskDetails);
 
   return normalizeDerivedFields(next);
 };
@@ -2235,10 +2307,24 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
 
     return orderTaskFormFields(
       Array.from(new Set([...typeFields, ...valuedFields])).filter(
-        (field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field)
+        (field) => !["taskName", "details", "type", "typeOverride", "blockedBy", "contactId", "completed", "id"].includes(field)
       )
     );
   }, [form]);
+
+  const scheduleFormFields = SCHEDULE_FORM_FIELDS.filter(
+    (field) => ["date", "time", "deadline"].includes(field) || visibleFormFields.includes(field)
+  );
+  const contactFormFields = CONTACT_FORM_FIELDS.filter(
+    (field) => ALWAYS_VISIBLE_CONTACT_FIELDS.has(field) || visibleFormFields.includes(field) || Boolean(form[field])
+  );
+  const preparationFormFields = PREPARATION_FORM_FIELDS.filter((field) => visibleFormFields.includes(field));
+  const organizedFormFieldNames = new Set([
+    ...scheduleFormFields,
+    ...contactFormFields,
+    ...preparationFormFields,
+  ]);
+  const categoryDetailFormFields = visibleFormFields.filter((field) => !organizedFormFieldNames.has(field));
 
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -2611,7 +2697,7 @@ const addParsedTasks = () => {
 };
 
   const saveTaskContact = (task = {}) => {
-    const contactName = String(task.person || task.organization || task.company || task.taskName || "").trim();
+    const contactName = String(task.contactName || task.person || task.organization || task.company || task.taskName || "").trim();
     const contactPhone = String(task.phone || "").trim();
     const contactAddress = String(task.address || "").trim();
 
@@ -2626,7 +2712,17 @@ const addParsedTasks = () => {
       task.details ? `Details: ${stripTodoCalendarHtml(task.details)}` : "",
       task.outcome ? `Outcome: ${stripTodoCalendarHtml(task.outcome)}` : "",
       task.notes ? `Notes: ${stripTodoCalendarHtml(task.notes)}` : "",
+      task.contactDetails ? stripTodoCalendarHtml(task.contactDetails) : "",
     ].filter(Boolean);
+
+    const officeLocations = [task.address, task.address2, task.address3]
+      .map((address, index) => ({
+        label: index === 0 ? "Office" : `Office ${index + 1}`,
+        address: String(address || "").trim(),
+        phone: index === 0 ? contactPhone : "",
+        fax: index === 0 ? String(task.fax || "").trim() : "",
+      }))
+      .filter((office) => office.address || office.phone || office.fax);
 
     const taskContact = normalizeContact({
       name: contactName || contactPhone || "Saved task contact",
@@ -2635,7 +2731,14 @@ const addParsedTasks = () => {
       organization: task.organization || "",
       company: task.company || "",
       phone: contactPhone,
+      directPhone: task.directPhone || "",
+      cellPhone: task.cellPhone || "",
+      fax: task.fax || "",
+      email: task.email || "",
       address: contactAddress,
+      address2: task.address2 || "",
+      address3: task.address3 || "",
+      officeLocations,
       website: task.website || task.systemLink || "",
       notes: noteParts.join("\n"),
       updatedAt: new Date().toISOString(),
@@ -2677,7 +2780,14 @@ const addParsedTasks = () => {
           organization: contact.organization || taskContact.organization,
           company: contact.company || taskContact.company,
           phone: contact.phone || taskContact.phone,
+          directPhone: contact.directPhone || taskContact.directPhone,
+          cellPhone: contact.cellPhone || taskContact.cellPhone,
+          fax: contact.fax || taskContact.fax,
+          email: contact.email || taskContact.email,
           address: contact.address || taskContact.address,
+          address2: contact.address2 || taskContact.address2,
+          address3: contact.address3 || taskContact.address3,
+          officeLocations: contact.officeLocations?.length ? contact.officeLocations : taskContact.officeLocations,
           website: contact.website || taskContact.website,
           notes: [contact.notes, taskContact.notes].filter(Boolean).join("\n"),
           updatedAt: new Date().toISOString(),
@@ -3542,12 +3652,18 @@ const addParsedTasks = () => {
         contact.category,
         contact.phone,
         contact.directPhone,
+        contact.cellPhone,
+        contact.fax,
+        contact.email,
         contact.website,
         contact.address,
+        contact.address2,
+        contact.address3,
         contact.organization,
         contact.company,
         contact.person,
         contact.notes,
+        JSON.stringify(contact.officeLocations || []),
       ]
         .filter(Boolean)
         .join(" ")
@@ -3815,8 +3931,18 @@ const addParsedTasks = () => {
     );
   };
 
+  const renderTaskFormFields = (fields = []) => fields.map((field) => (
+    <label
+      key={field}
+      className={`text-sm font-medium ${MULTILINE_FIELDS.has(field) ? "md:col-span-2" : ""}`}
+    >
+      {getFieldLabel(form, field)}
+      <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
+    </label>
+  ));
+
   return (
-    <PageContainer className="space-y-6 bg-green-50 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-emerald-50" className="flex flex-col gap-6 bg-emerald-50 py-6">
       {completionCelebration && (
         <div
           key={completionCelebration.id}
@@ -3905,22 +4031,18 @@ const addParsedTasks = () => {
         </div>
       )}
 
-      <div className="rounded-xl border-2 border-black bg-gradient-to-r from-green-50 to-emerald-100 px-6 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <ListTodo className="h-6 w-6 text-green-700" />
-              <h2 className="text-2xl font-black text-slate-900">To-Do</h2>
-            </div>
-            <p className="mt-1 text-sm font-medium text-slate-600">Manage tasks here. Budget details stay on the Dashboard tab.</p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
+      <TabPageHeader
+        icon={ListTodo}
+        title="To-Do"
+        subtitle="Manage tasks, deadlines, contacts, documents, follow-ups, and completion history."
+        theme="emerald"
+        actions={
+          <>
             <button
               type="button"
               onClick={() => setIsImportOpen(true)}
               title="Import structured text"
-              className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+              className={`${TAB_HEADER_ACTION_CLASS} bg-white text-emerald-900 hover:bg-emerald-50`}
             >
               <FileText className="h-4 w-4" />
               Import
@@ -3935,7 +4057,7 @@ const addParsedTasks = () => {
                 setIsCreateOpen(true);
               }}
               title="Add task"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+              className={`${TAB_HEADER_ACTION_CLASS} bg-slate-950 text-white hover:bg-slate-800`}
             >
               <Plus className="h-4 w-4" />
               Add Task
@@ -3945,7 +4067,7 @@ const addParsedTasks = () => {
               type="button"
               onClick={() => setIsExportOpen(true)}
               title="Open export options"
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+              className={`${TAB_HEADER_ACTION_CLASS} bg-indigo-600 text-white hover:bg-indigo-500`}
             >
               <Download className="h-4 w-4" />
               Export
@@ -3955,14 +4077,14 @@ const addParsedTasks = () => {
               type="button"
               onClick={() => setShowPremiumTodoView(true)}
               title="View premium To-Do list"
-              className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
+              className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
             >
               <ListTodo className="h-4 w-4" />
               Premium View
             </button>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <section className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 p-3 shadow-md">
         <div className="flex flex-wrap items-center gap-3">
@@ -4762,51 +4884,91 @@ const addParsedTasks = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
-              <div className="grid gap-3 md:grid-cols-2">
-                {renderContactPicker("form")}
+              <div className="space-y-4">
+                <section className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="mb-3">
+                    <h4 className="font-black text-slate-900">Task Details</h4>
+                    <p className="text-xs font-semibold text-slate-500">Name the task, choose its category, and record what needs to happen.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="text-sm font-medium md:col-span-2">
+                      Task name
+                      <input value={form.taskName} onChange={(event) => updateForm("taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                    </label>
 
-                <label className="text-sm font-medium md:col-span-2">
-                  Task name
-                  <input value={form.taskName} onChange={(event) => updateForm("taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                </label>
+                    <label className="text-sm font-medium">
+                      Category
+                      <select
+                        value={form.type}
+                        onChange={(event) => updateForm("type", event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        {taskCategoryTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                      </select>
+                    </label>
 
-                <label className="text-sm font-medium">
-                  Category
-                  <select
-                    value={form.type}
-                    onChange={(event) => updateForm("type", event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    {taskCategoryTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-                  </select>
-                </label>
+                    <label className="text-sm font-medium">
+                      Blocked by
+                      <select value={form.blockedBy} onChange={(event) => updateForm("blockedBy", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option value="">Not blocked</option>
+                        {tasks.filter((task) => task.id !== editingId).map((task) => <option key={task.id} value={task.id}>{task.taskName}</option>)}
+                      </select>
+                    </label>
 
-                <label className="text-sm font-medium">
-                  Blocked by
-                  <select value={form.blockedBy} onChange={(event) => updateForm("blockedBy", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    <option value="">Not blocked</option>
-                    {tasks.filter((task) => task.id !== editingId).map((task) => <option key={task.id} value={task.id}>{task.taskName}</option>)}
-                  </select>
-                </label>
+                    <label className="text-sm font-medium md:col-span-2">
+                      Details
+                      <textarea
+                        value={form.details || ""}
+                        onChange={(event) => updateForm("details", event.target.value)}
+                        rows={4}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+                </section>
 
-                <label className="text-sm font-medium md:col-span-2">
-                  Details
-                  <textarea
-                    value={form.details || ""}
-                    onChange={(event) => updateForm("details", event.target.value)}
-                    rows={4}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </label>
+                <section className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+                  <div className="mb-3">
+                    <h4 className="font-black text-slate-900">Schedule</h4>
+                    <p className="text-xs font-semibold text-slate-500">Keep the appointment date separate from the final deadline.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(scheduleFormFields)}</div>
+                </section>
 
-                {visibleFormFields.map((field) => (
-                  <label key={field} className="text-sm font-medium">
-                    {getFieldLabel(form, field)}
-                    <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
-                  </label>
-                ))}
+                <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+                  <div className="mb-3">
+                    <h4 className="font-black text-slate-900">Contact Information</h4>
+                    <p className="text-xs font-semibold text-slate-500">Choose a saved contact or enter the person, organization, phones, email, website, and offices manually.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {renderContactPicker("form")}
+                    {renderTaskFormFields(contactFormFields)}
+                  </div>
+                </section>
 
-                {renderTaskScanPanel()}
+                {categoryDetailFormFields.length > 0 && (
+                  <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+                    <div className="mb-3">
+                      <h4 className="font-black text-slate-900">Category Details</h4>
+                      <p className="text-xs font-semibold text-slate-500">Fields specific to {form.type || "this task"}.</p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(categoryDetailFormFields)}</div>
+                  </section>
+                )}
+
+                {preparationFormFields.length > 0 && (
+                  <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
+                    <div className="mb-3">
+                      <h4 className="font-black text-slate-900">Preparation & Follow-up</h4>
+                      <p className="text-xs font-semibold text-slate-500">Keep questions, documents, outcomes, and notes together.</p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(preparationFormFields)}</div>
+                  </section>
+                )}
+
+                <section className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
+                  {renderTaskScanPanel()}
+                </section>
               </div>
 
               <button type="button" onClick={() => setShowAdvanced((value) => !value)} title={showAdvanced ? "Hide advanced task fields" : "Show advanced task fields"} className="mt-3 text-sm font-medium text-slate-700 underline">
@@ -4816,8 +4978,8 @@ const addParsedTasks = () => {
               {showAdvanced && (
                 <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3 md:grid-cols-2">
                   {Object.keys(DEFAULT_FORM)
-                    .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id"].includes(field))
-                    .filter((field) => !visibleFormFields.includes(field))
+                    .filter((field) => !["taskName", "details", "type", "typeOverride", "blockedBy", "contactId", "completed", "id"].includes(field))
+                    .filter((field) => !organizedFormFieldNames.has(field) && !categoryDetailFormFields.includes(field))
                     .map((field) => (
                       <label key={field} className="text-sm font-medium">
                         {getFieldLabel(form, field)}

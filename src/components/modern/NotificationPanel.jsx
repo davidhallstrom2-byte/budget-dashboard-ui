@@ -4,6 +4,7 @@ import { Bell, AlertCircle, Clock, X, CheckCircle } from 'lucide-react';
 
 const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
 const CSC_STORAGE_KEY = 'cscShifts.v1';
+const CSC_OPPORTUNITIES_STORAGE_KEY = 'cscOpportunities.v1';
 
 const readJsonStorage = (key, fallback = []) => {
   if (typeof window === 'undefined') return fallback;
@@ -150,6 +151,47 @@ const getCscItems = () => {
     .filter((item) => item.status === 'overdue' || item.status === 'dueSoon');
 };
 
+const getCscOpportunityItems = () => {
+  const opportunities = readJsonStorage(CSC_OPPORTUNITIES_STORAGE_KEY);
+
+  return opportunities
+    .filter((opportunity) => opportunity?.status !== 'Cancelled' && opportunity?.eventDate)
+    .map((opportunity) => {
+      const status = getReminderStatus(opportunity.eventDate);
+      const needsAction =
+        opportunity.status === 'New' ||
+        opportunity.status === 'Shift Requested' ||
+        !opportunity.eventTime ||
+        (opportunity.status === 'Scheduled' && !opportunity.linkedCscShiftId);
+
+      return {
+        id: opportunity.id,
+        key: `csc-opportunity-${opportunity.id}`,
+        source: 'opportunity',
+        status,
+        label: opportunity.eventName || 'CSC opportunity',
+        subLabel: `${opportunity.venue || 'CSC venue'} · ${opportunity.status || 'New'}${opportunity.eventTime ? '' : ' · time missing'}`,
+        dateValue: opportunity.eventDate,
+        amount: 0,
+        needsAction,
+        raw: opportunity,
+      };
+    })
+    .filter((item) => item.needsAction && (item.status === 'overdue' || item.status === 'dueSoon'));
+};
+
+const openNotificationItem = (item) => {
+  if (!item?.id) return;
+
+  if (item.source === 'todo') {
+    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { tab: 'todo', recordId: item.id } }));
+  } else if (item.source === 'csc') {
+    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { tab: 'cscShifts', recordId: item.id } }));
+  } else if (item.source === 'opportunity') {
+    window.dispatchEvent(new CustomEvent('app:navigate', { detail: { tab: 'cscOpportunities', recordId: item.id } }));
+  }
+};
+
 export default function NotificationPanel({ state, activeTab = 'budget', onMarkPaid }) {
   const [isOpen, setIsOpen] = useState(false);
   const [storageRefreshKey, setStorageRefreshKey] = useState(0);
@@ -162,6 +204,7 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
     window.addEventListener('focus', refresh);
     window.addEventListener('todoTab:updated', refresh);
     window.addEventListener('cscShifts:updated', refresh);
+    window.addEventListener('cscOpportunities:updated', refresh);
 
     const interval = window.setInterval(refresh, 30000);
 
@@ -170,6 +213,7 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
       window.removeEventListener('focus', refresh);
       window.removeEventListener('todoTab:updated', refresh);
       window.removeEventListener('cscShifts:updated', refresh);
+      window.removeEventListener('cscOpportunities:updated', refresh);
       window.clearInterval(interval);
     };
   }, []);
@@ -196,11 +240,11 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
     }
 
     return {
-      title: 'Payment Reminders',
-      emptyTitle: 'All caught up! No urgent payments.',
-      buttonTitle: 'Payment Reminders',
+      title: 'Dashboard Alerts',
+      emptyTitle: 'All caught up. No urgent app alerts.',
+      buttonTitle: 'Dashboard Alerts',
       showMarkPaid: true,
-      totalLabel: 'Total',
+      totalLabel: 'Alerts',
     };
   }, [activeTab]);
 
@@ -212,7 +256,12 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
     } else if (activeTab === 'cscShifts') {
       items = getCscItems();
     } else {
-      items = getBudgetItems(state);
+      items = [
+        ...getBudgetItems(state),
+        ...getTodoItems(),
+        ...getCscItems(),
+        ...getCscOpportunityItems(),
+      ];
     }
 
     return [...items].sort((a, b) => {
@@ -319,7 +368,7 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
                       </div>
                     </div>
 
-                    {notificationConfig.showMarkPaid && (
+                    {notificationConfig.showMarkPaid && item.source === 'budget' ? (
                       <button
                         onClick={() => {
                           onMarkPaid(item.bucket, item.id);
@@ -328,7 +377,17 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
                       >
                         Mark Paid
                       </button>
-                    )}
+                    ) : item.source !== 'budget' ? (
+                      <button
+                        onClick={() => {
+                          openNotificationItem(item);
+                          setIsOpen(false);
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 text-white rounded hover:bg-slate-900 text-xs font-medium whitespace-nowrap flex-shrink-0"
+                      >
+                        Open
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -350,15 +409,9 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
                     </span>
                   )}
                 </div>
-                {activeTab === 'budget' ? (
-                  <span className="text-slate-600">
-                    Total: {formatMoney(allItems.reduce((sum, item) => sum + item.amount, 0))}
-                  </span>
-                ) : (
-                  <span className="text-slate-600">
-                    {notificationConfig.totalLabel}: {allItems.length}
-                  </span>
-                )}
+                <span className="text-slate-600">
+                  {notificationConfig.totalLabel}: {allItems.length}
+                </span>
               </div>
             </div>
           )}

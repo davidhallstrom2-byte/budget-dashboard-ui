@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarCheck2,
   CalendarDays,
-  CheckCircle2,
   CircleAlert,
   ClipboardCheck,
   Edit3,
   ExternalLink,
+  ListTodo,
   MapPin,
   Plus,
   RefreshCcw,
@@ -17,16 +17,23 @@ import {
   X,
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
+import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
 
 const OPPORTUNITIES_STORAGE_KEY = 'cscOpportunities.v1';
 const VENUE_CONTACTS_STORAGE_KEY = 'cscVenueContacts.v1';
 const OPPORTUNITIES_SNAPSHOT_STORAGE_KEY = 'cscOpportunities.safetySnapshot.v1';
 const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
-const CSC_SNAPSHOT_STORAGE_KEY = 'cscShifts.safetySnapshot.v1';
 const OPPORTUNITIES_UPDATE_EVENT = 'cscOpportunities:updated';
 const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
 const CSC_OPEN_SHIFT_STORAGE_KEY = 'cscShifts.openLinkedShiftId.v1';
+const CSC_RETURN_CONTEXT_STORAGE_KEY = 'cscShifts.returnContext.v1';
+const CSC_CREATE_DRAFT_STORAGE_KEY = 'cscShifts.createDraftFromOpportunity.v1';
+const OPPORTUNITY_OPEN_STORAGE_KEY = 'cscOpportunities.openLinkedOpportunityId.v1';
+const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
+const TODO_BACKUP_STORAGE_KEY = 'todoTab.tasks.backup.v1';
+const TODO_UPDATE_EVENT = 'todoTab:updated';
+const APP_NAVIGATE_EVENT = 'app:navigate';
 const KIA_FORUM_EVENTS_URL = 'https://thekiaforum.com/events/';
 const SOFI_STADIUM_EVENTS_URL = 'https://www.sofistadium.com/events';
 const INTUIT_DOME_EVENTS_URL = 'https://www.intuitdome.com/events/event-schedule';
@@ -35,13 +42,52 @@ const HOLLYWOOD_BOWL_EVENTS_URL =
   'https://www.hollywoodbowl.com/events/performances?Venue=Hollywood+Bowl&Season=upcoming';
 const DEFAULT_HOURLY_RATE = '19.50';
 
-const STATUS_OPTIONS = [
+const EDITABLE_STATUS_OPTIONS = [
   'New',
+  'Monitoring',
   'Shift Requested',
-  'Scheduled',
   'No Shifts Available',
   'Cancelled',
+  'Completed',
 ];
+
+const STATUS_OPTIONS = [...EDITABLE_STATUS_OPTIONS, 'Scheduled'];
+
+const normalizeStatusText = (value = '') =>
+  String(value || '')
+    .trim()
+    .toLowerCase();
+
+const isCompletedShiftStatus = (status = '') => {
+  const normalizedStatus = normalizeStatusText(status);
+  return normalizedStatus === 'done' || normalizedStatus === 'completed';
+};
+
+const isCancelledShiftStatus = (status = '') => {
+  const normalizedStatus = normalizeStatusText(status);
+  return normalizedStatus === 'cancelled' || normalizedStatus === 'canceled';
+};
+
+const getOpportunityStatusFromLinkedShift = (shift = {}) => {
+  if (isCancelledShiftStatus(shift.shiftStatus)) return 'Cancelled';
+  if (isCompletedShiftStatus(shift.shiftStatus)) return 'Completed';
+  return 'Scheduled';
+};
+
+const isActiveOpportunityStatus = (status = '') =>
+  !['cancelled', 'canceled', 'completed'].includes(normalizeStatusText(status));
+
+const normalizeOpportunityStatus = (status = '', linkedCscShiftId = '') => {
+  const normalizedStatus = String(status || '').trim();
+
+  if (normalizedStatus === 'Completed') return 'Completed';
+  if (normalizedStatus === 'Cancelled') return 'Cancelled';
+
+  if (linkedCscShiftId) return 'Scheduled';
+
+  if (normalizedStatus === 'Scheduled') return 'New';
+  return EDITABLE_STATUS_OPTIONS.includes(normalizedStatus) ? normalizedStatus : 'New';
+};
 
 const VENUE_DEFINITIONS = [
   {
@@ -69,10 +115,20 @@ const VENUE_DEFINITIONS = [
   },
   {
     venue: 'The Shrine',
-    aliases: ['the shrine', 'shrine auditorium', 'the shrine auditorium'],
+    aliases: [
+      'the shrine',
+      'shrine',
+      'shrine auditorium',
+      'the shrine auditorium',
+      'shrine auditorium and expo hall',
+      'shrine auditorium & expo hall',
+      'shrine expo hall',
+      'shrine auditorium and expo hall los angeles',
+    ],
     address: '665 W Jefferson Blvd, Los Angeles, CA 90007',
     logoPath: '/budget-dashboard-fs/venue-logos/shrine-auditorium.png',
     sourceUrl: '',
+    schedulerPhone: '310-320-7223',
   },
   {
     venue: 'Intuit Dome',
@@ -156,6 +212,19 @@ const formatShortDateTime = (value) => {
     year: '2-digit',
     hour: 'numeric',
     minute: '2-digit',
+  });
+};
+
+const getOpportunityMonthKey = (value = '') => String(value || '').slice(0, 7);
+
+const formatOpportunityMonth = (monthKey = '') => {
+  const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return monthKey || 'Month not entered';
+
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
   });
 };
 
@@ -245,14 +314,22 @@ const createBlankOpportunity = (defaults = {}) => ({
   callFrequency: defaults.callFrequency || 'Daily',
   lastCalledDate: defaults.lastCalledDate || '',
   nextCallDate: defaults.nextCallDate || '',
-  status: STATUS_OPTIONS.includes(defaults.status) ? defaults.status : 'New',
+  status: normalizeOpportunityStatus(defaults.status, defaults.linkedCscShiftId),
   linkedCscShiftId: defaults.linkedCscShiftId || '',
+  linkedTodoTaskId: defaults.linkedTodoTaskId || '',
+  linkedRideId: defaults.linkedRideId || '',
+  googleCalendarEventId: defaults.googleCalendarEventId || '',
+  googleCalendarEventLink: defaults.googleCalendarEventLink || '',
+  googleCalendarAddedAt: defaults.googleCalendarAddedAt || '',
   notes: defaults.notes || '',
   notesUpdatedAt: defaults.notesUpdatedAt || '',
   venueLogo: getVenueDefinition(defaults.venue || 'Kia Forum')?.logoPath || defaults.venueLogo || '',
   callHistory: Array.isArray(defaults.callHistory) ? defaults.callHistory : [],
+  activityLog: Array.isArray(defaults.activityLog) ? defaults.activityLog : [],
+  lastScannedAt: defaults.lastScannedAt || '',
+  lastVerifiedAt: defaults.lastVerifiedAt || '',
   createdAt: defaults.createdAt || new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
+  updatedAt: defaults.updatedAt || new Date().toISOString(),
 });
 
 const createDefaultContacts = () =>
@@ -1012,6 +1089,197 @@ const parseHollywoodBowlEvents = (text = '', sourceUrl = HOLLYWOOD_BOWL_EVENTS_U
   return Array.from(byKey.values());
 };
 
+
+const SHRINE_DEFAULT_SCAN_YEAR = 2026;
+
+const SHRINE_MONTH_INDEX = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+const parseShrineTime = (value = '') => {
+  const normalized = sanitizeScannedLine(value).replace(/\./g, '').trim();
+  const match = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+
+  if (!match) return '';
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || 0);
+  const meridiem = match[3].toUpperCase();
+
+  if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return '';
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+  if (meridiem === 'PM' && hours !== 12) hours += 12;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
+const isShrineWeekdayLine = (value = '') =>
+  /^(Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)$/i.test(sanitizeScannedLine(value));
+
+const parseShrineDateLine = (line = '', fallbackYear = SHRINE_DEFAULT_SCAN_YEAR) => {
+  const cleaned = sanitizeScannedLine(line);
+  const match = cleaned.match(
+    /^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\s+)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(20\d{2}))?$/i
+  );
+
+  if (!match) return null;
+
+  const month = SHRINE_MONTH_INDEX[match[1].toLowerCase()];
+  const day = Number(match[2]);
+  const year = Number(match[3] || fallbackYear || SHRINE_DEFAULT_SCAN_YEAR);
+
+  if (!month || !day || day > 31 || !year) return null;
+
+  return {
+    eventDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    year,
+  };
+};
+
+const parseShrineInlineEventLine = (line = '', fallbackYear = SHRINE_DEFAULT_SCAN_YEAR) => {
+  const cleaned = sanitizeScannedLine(line);
+  const match = cleaned.match(
+    /^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\s+)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(20\d{2}))?\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(.+)$/i
+  );
+
+  if (!match) return null;
+
+  const month = SHRINE_MONTH_INDEX[match[1].toLowerCase()];
+  const day = Number(match[2]);
+  const year = Number(match[3] || fallbackYear || SHRINE_DEFAULT_SCAN_YEAR);
+  const eventTime = parseShrineTime(match[4]);
+  const eventName = sanitizeScannedLine(match[5]);
+
+  if (!month || !day || day > 31 || !year || !eventName) return null;
+
+  return {
+    eventName,
+    eventDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    eventTime,
+    sourceText: cleaned,
+  };
+};
+
+const isShrineScannerNoiseLine = (value = '') => {
+  const cleaned = sanitizeScannedLine(value);
+  const line = normalizeText(cleaned);
+
+  if (!line) return true;
+  if (isShrineWeekdayLine(cleaned)) return true;
+  if (/^https?:\/\//i.test(cleaned)) return true;
+  if (/^\d+\s+tickets?\s+left$/i.test(cleaned)) return true;
+  if (/^lowest\s+price$/i.test(cleaned)) return true;
+
+  return /^(tickets|ticket|buy tickets|more info|info|learn more|view details|event details|event info|all events|upcoming events|events|shrine auditorium and expo hall los angeles los angeles ca|shrine auditorium expo hall los angeles los angeles ca)$/.test(
+    line
+  );
+};
+
+const parseShrineEvents = (text = '', sourceUrl = '') => {
+  const lines = String(text || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\r/g, '\n')
+    .split(/\n+/)
+    .map(sanitizeScannedLine)
+    .filter(Boolean);
+
+  const parsed = [];
+  let currentYear = SHRINE_DEFAULT_SCAN_YEAR;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const inlineEvent = parseShrineInlineEventLine(lines[index], currentYear);
+
+    if (inlineEvent && !isShrineScannerNoiseLine(inlineEvent.eventName)) {
+      parsed.push(
+        createBlankOpportunity({
+          eventName: inlineEvent.eventName,
+          venue: 'The Shrine',
+          eventDate: inlineEvent.eventDate,
+          eventTime: inlineEvent.eventTime,
+          sourceText: inlineEvent.sourceText,
+          eventUrl: sourceUrl || '',
+          status: 'New',
+        })
+      );
+      currentYear = Number(inlineEvent.eventDate.slice(0, 4)) || currentYear;
+      continue;
+    }
+
+    const dateDetails = parseShrineDateLine(lines[index], currentYear);
+
+    if (!dateDetails) continue;
+
+    currentYear = dateDetails.year;
+
+    let eventTime = '';
+    let eventName = '';
+    let eventLine = '';
+    let cursor = index + 1;
+
+    while (cursor < lines.length) {
+      const candidate = lines[cursor];
+
+      if (parseShrineDateLine(candidate, currentYear) || parseShrineInlineEventLine(candidate, currentYear)) break;
+
+      const parsedTime = parseShrineTime(candidate);
+      if (parsedTime && !eventTime) {
+        eventTime = parsedTime;
+        cursor += 1;
+        continue;
+      }
+
+      if (!isShrineScannerNoiseLine(candidate) && !parseShrineTime(candidate) && !eventName) {
+        eventName = candidate;
+        eventLine = candidate;
+      }
+
+      if (eventName) break;
+      cursor += 1;
+    }
+
+    if (!eventName) continue;
+
+    parsed.push(
+      createBlankOpportunity({
+        eventName,
+        venue: 'The Shrine',
+        eventDate: dateDetails.eventDate,
+        eventTime,
+        sourceText: [lines[index], eventTime ? formatTime(eventTime) : '', eventLine].filter(Boolean).join('\n'),
+        eventUrl: sourceUrl || '',
+        status: 'New',
+      })
+    );
+  }
+
+  const byKey = new Map();
+  parsed.forEach((item) => byKey.set(opportunityKey(item), item));
+  return Array.from(byKey.values());
+};
+
 const parseVenueEvents = (text = '', selectedVenue = '', sourceUrl = '') => {
   const venue = canonicalVenueName(selectedVenue);
 
@@ -1035,6 +1303,10 @@ const parseVenueEvents = (text = '', selectedVenue = '', sourceUrl = '') => {
     return parseHollywoodBowlEvents(text, sourceUrl || HOLLYWOOD_BOWL_EVENTS_URL);
   }
 
+  if (venue === 'The Shrine') {
+    return parseShrineEvents(text, sourceUrl || '');
+  }
+
   return [];
 };
 
@@ -1055,8 +1327,35 @@ const readCscShifts = () => {
   return [...active, ...archived];
 };
 
+const getLinkedCscShiftForOpportunity = (opportunity = {}, allShifts = readCscShifts()) => {
+  if (!opportunity?.linkedCscShiftId && !opportunity?.id) return null;
+
+  return (
+    allShifts.find((shift) => opportunity.linkedCscShiftId && shift.id === opportunity.linkedCscShiftId) ||
+    allShifts.find(
+      (shift) =>
+        opportunity.id &&
+        (shift.createdFromOpportunityId === opportunity.id || shift.linkedOpportunityId === opportunity.id)
+    ) ||
+    null
+  );
+};
+
+const getResolvedOpportunityStatus = (opportunity = {}, allShifts = readCscShifts()) => {
+  const linkedShift = getLinkedCscShiftForOpportunity(opportunity, allShifts);
+  if (linkedShift) return getOpportunityStatusFromLinkedShift(linkedShift);
+  return normalizeOpportunityStatus(opportunity.status, opportunity.linkedCscShiftId);
+};
+
+const isOpportunityCompleted = (opportunity = {}, allShifts = readCscShifts()) =>
+  getResolvedOpportunityStatus(opportunity, allShifts) === 'Completed';
+
 const findMatchingCscShift = (opportunity = {}) => {
-  const candidates = readCscShifts().filter((shift) => shift.startDate === opportunity.eventDate);
+  const candidates = readCscShifts().filter(
+    (shift) =>
+      !isCancelledShiftStatus(shift.shiftStatus) &&
+      shift.startDate === opportunity.eventDate
+  );
   if (!candidates.length) return null;
 
   const canonicalOpportunityVenue = canonicalVenueName(opportunity.venue);
@@ -1075,7 +1374,7 @@ const findMatchingCscShift = (opportunity = {}) => {
 };
 
 const isOpportunityActiveForDateConflict = (opportunity = {}) =>
-  Boolean(opportunity.eventDate) && opportunity.status !== 'Cancelled';
+  Boolean(opportunity.eventDate) && isActiveOpportunityStatus(opportunity.status);
 
 const getSameDateVenueConflicts = (opportunities = [], candidate = {}) => {
   if (!isOpportunityActiveForDateConflict(candidate)) return [];
@@ -1125,6 +1424,7 @@ const buildSameDateConflictGroups = (opportunities = []) => {
 
 const getStatusClass = (status) => {
   if (status === 'Scheduled') return 'bg-emerald-100 text-emerald-900 border-emerald-200';
+  if (status === 'Completed') return 'bg-slate-100 text-slate-700 border-slate-200';
   if (status === 'Shift Requested') return 'bg-blue-100 text-blue-900 border-blue-200';
   if (status === 'No Shifts Available' || status === 'Cancelled') return 'bg-slate-200 text-slate-800 border-slate-300';
   return 'bg-amber-100 text-amber-900 border-amber-200';
@@ -1179,12 +1479,46 @@ const VenueLogo = ({ opportunity, sizeClass = 'h-12 w-12' }) => {
   );
 };
 
+const navigateToAppTab = (tab, recordId = '', extra = {}) => {
+  window.dispatchEvent(
+    new CustomEvent(APP_NAVIGATE_EVENT, {
+      detail: { tab, recordId, ...extra },
+    })
+  );
+};
+
+const storeLinkedShiftReturnContext = (opportunityId = '', shiftId = '') => {
+  const returnContext = {
+    returnTab: 'cscOpportunities',
+    returnRecordId: String(opportunityId || '').trim(),
+    openedShiftId: String(shiftId || '').trim(),
+    createdAt: new Date().toISOString(),
+  };
+  const serializedContext = JSON.stringify(returnContext);
+
+  try {
+    sessionStorage.setItem(CSC_RETURN_CONTEXT_STORAGE_KEY, serializedContext);
+    localStorage.setItem(CSC_RETURN_CONTEXT_STORAGE_KEY, serializedContext);
+    sessionStorage.setItem(CSC_OPEN_SHIFT_STORAGE_KEY, returnContext.openedShiftId);
+    localStorage.setItem(CSC_OPEN_SHIFT_STORAGE_KEY, returnContext.openedShiftId);
+  } catch (error) {
+    console.error('Failed to save the CSC shift return location:', error);
+  }
+
+  return returnContext;
+};
+
+const readStoredTodoTasks = () => readArray(TODO_STORAGE_KEY, []);
+
 const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [opportunities, setOpportunities] = useState(() => loadOpportunities());
   const [venueContacts, setVenueContacts] = useState(() => loadVenueContacts());
   const [localSearch, setLocalSearch] = useState('');
   const [venueFilter, setVenueFilter] = useState('All');
+  const [monthFilter, setMonthFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [summaryFilter, setSummaryFilter] = useState('active');
+  const [showMonthOverview, setShowMonthOverview] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [showFormDrawer, setShowFormDrawer] = useState(false);
   const [showScanDrawer, setShowScanDrawer] = useState(false);
@@ -1199,8 +1533,117 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [notesDrafts, setNotesDrafts] = useState({});
   const [expandedNoteIds, setExpandedNoteIds] = useState(() => new Set());
   const [overflowingNoteIds, setOverflowingNoteIds] = useState(() => new Set());
+  const [cscShiftSyncVersion, setCscShiftSyncVersion] = useState(0);
   const noteTextareaRefs = useRef(new Map());
   const importInputRef = useRef(null);
+
+  useEffect(() => {
+    const refreshExternalOpportunities = (event) => {
+      const nextOpportunities = event?.detail?.opportunities;
+      if (!Array.isArray(nextOpportunities)) return;
+
+      setOpportunities((current) => {
+        if (nextOpportunities === current) return current;
+        if (JSON.stringify(nextOpportunities) === JSON.stringify(current)) return current;
+        return nextOpportunities.map((item) => createBlankOpportunity(item));
+      });
+    };
+
+    window.addEventListener(OPPORTUNITIES_UPDATE_EVENT, refreshExternalOpportunities);
+
+    return () => {
+      window.removeEventListener(OPPORTUNITIES_UPDATE_EVENT, refreshExternalOpportunities);
+    };
+  }, []);
+
+  useEffect(() => {
+    const reconcileWithCscShifts = () => {
+      const allShifts = readCscShifts();
+
+      setOpportunities((current) => {
+        let changed = false;
+        const next = current.map((opportunity) => {
+          const linkedShift = getLinkedCscShiftForOpportunity(opportunity, allShifts);
+
+          if (!linkedShift) {
+            if (!opportunity.linkedCscShiftId) return opportunity;
+            changed = true;
+            return createBlankOpportunity({
+              ...opportunity,
+              linkedCscShiftId: '',
+              status: opportunity.status === 'Scheduled' ? 'New' : opportunity.status,
+            });
+          }
+
+          const nextStatus = getOpportunityStatusFromLinkedShift(linkedShift);
+          if (
+            opportunity.linkedCscShiftId === linkedShift.id &&
+            opportunity.status === nextStatus
+          ) {
+            return opportunity;
+          }
+
+          changed = true;
+          return createBlankOpportunity({
+            ...opportunity,
+            linkedCscShiftId: linkedShift.id,
+            status: nextStatus,
+          });
+        });
+
+        return changed ? next : current;
+      });
+    };
+
+    const refreshCscShiftSync = () => {
+      setCscShiftSyncVersion((current) => current + 1);
+      reconcileWithCscShifts();
+    };
+
+    reconcileWithCscShifts();
+    window.addEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShiftSync);
+    window.addEventListener(APP_NAVIGATE_EVENT, refreshCscShiftSync);
+    window.addEventListener('storage', refreshCscShiftSync);
+    window.addEventListener('focus', refreshCscShiftSync);
+
+    const intervalId = window.setInterval(refreshCscShiftSync, 2000);
+
+    return () => {
+      window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShiftSync);
+      window.removeEventListener(APP_NAVIGATE_EVENT, refreshCscShiftSync);
+      window.removeEventListener('storage', refreshCscShiftSync);
+      window.removeEventListener('focus', refreshCscShiftSync);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let opportunityId = '';
+
+    try {
+      opportunityId =
+        sessionStorage.getItem(OPPORTUNITY_OPEN_STORAGE_KEY) ||
+        localStorage.getItem(OPPORTUNITY_OPEN_STORAGE_KEY) ||
+        '';
+      sessionStorage.removeItem(OPPORTUNITY_OPEN_STORAGE_KEY);
+      localStorage.removeItem(OPPORTUNITY_OPEN_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to read linked CSC opportunity request:', error);
+    }
+
+    if (!opportunityId) return;
+
+    setLocalSearch('');
+    setVenueFilter('All');
+    setMonthFilter('All');
+    setStatusFilter('All');
+    window.requestAnimationFrame(() => {
+      document.getElementById(`csc-opportunity-${opportunityId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(OPPORTUNITIES_STORAGE_KEY, JSON.stringify(opportunities));
@@ -1211,9 +1654,19 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     localStorage.setItem(VENUE_CONTACTS_STORAGE_KEY, JSON.stringify(venueContacts));
   }, [venueContacts]);
 
+  const allCscShiftsForStatus = useMemo(() => readCscShifts(), [cscShiftSyncVersion, opportunities]);
+
   const sameDateConflictGroups = useMemo(
-    () => buildSameDateConflictGroups(opportunities),
-    [opportunities]
+    () =>
+      buildSameDateConflictGroups(
+        opportunities
+          .map((opportunity) => ({
+            ...opportunity,
+            status: getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus),
+          }))
+          .filter((opportunity) => isActiveOpportunityStatus(opportunity.status))
+      ),
+    [allCscShiftsForStatus, opportunities]
   );
 
   const sameDateConflictMap = useMemo(() => {
@@ -1307,21 +1760,6 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       return;
     }
 
-    const currentOpportunity = opportunities.find((item) => item.id === prepared.id);
-    const scheduledDetailsChanged =
-      prepared.status === 'Scheduled' &&
-      (!currentOpportunity ||
-        currentOpportunity.status !== 'Scheduled' ||
-        currentOpportunity.eventDate !== prepared.eventDate ||
-        canonicalVenueName(currentOpportunity.venue) !== canonicalVenueName(prepared.venue));
-
-    if (
-      scheduledDetailsChanged &&
-      !confirmSameDateConflict(prepared, 'save this opportunity as scheduled')
-    ) {
-      return;
-    }
-
     saveSnapshot('Before CSC opportunity save');
     setOpportunities((current) => {
       const existingIndex = current.findIndex((item) => item.id === prepared.id);
@@ -1348,12 +1786,17 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       if (!confirmSameDateConflict(opportunity, 'link this scheduled CSC shift')) return;
 
       saveSnapshot('Before CSC opportunity shift link');
+      const nextStatus = getOpportunityStatusFromLinkedShift(match);
       updateOpportunity(opportunity.id, {
-        status: 'Scheduled',
+        status: nextStatus,
         linkedCscShiftId: match.id,
-        nextCallDate: '',
+        nextCallDate: nextStatus === 'Completed' ? '' : opportunity.nextCallDate || '',
       });
-      flashMessage(`Scheduled shift found and linked for ${opportunity.eventName}.`);
+      flashMessage(
+        nextStatus === 'Completed'
+          ? `Completed CSC shift found and linked for ${opportunity.eventName}.`
+          : `Scheduled shift found and linked for ${opportunity.eventName}.`
+      );
       return;
     }
 
@@ -1361,41 +1804,73 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     flashMessage(`No CSC shift match found for ${opportunity.eventName}.`);
   };
 
-  const handleOpenLinkedShift = (linkedShift) => {
+  const handleOpenLinkedShift = (linkedShift, opportunity) => {
     if (!linkedShift?.id) {
       flashMessage('The linked CSC shift could not be found.');
       return;
     }
 
-    try {
-      sessionStorage.setItem(CSC_OPEN_SHIFT_STORAGE_KEY, linkedShift.id);
-      localStorage.removeItem(CSC_OPEN_SHIFT_STORAGE_KEY);
-    } catch (error) {
-      console.error('Failed to queue linked CSC shift:', error);
-      localStorage.setItem(CSC_OPEN_SHIFT_STORAGE_KEY, linkedShift.id);
-    }
+    const returnContext = storeLinkedShiftReturnContext(opportunity?.id, linkedShift.id);
 
-    const cscShiftsTabButton = document.querySelector('button[aria-label="Open CSC Shifts tab"]');
+    navigateToAppTab('cscShifts', linkedShift.id, {
+      shiftId: linkedShift.id,
+      returnTab: returnContext.returnTab,
+      returnRecordId: returnContext.returnRecordId,
+    });
+  };
 
-    if (cscShiftsTabButton) {
-      cscShiftsTabButton.click();
+  const handleCreateOrOpenTodo = (opportunity) => {
+    const tasks = readStoredTodoTasks();
+    const linkedTask = tasks.find((task) => task.id === opportunity.linkedTodoTaskId);
+
+    if (linkedTask) {
+      navigateToAppTab('todo', linkedTask.id);
       return;
     }
 
-    flashMessage('CSC Shifts tab could not be opened.');
-  };
+    const now = new Date().toISOString();
+    const taskId = createId('todo-csc-opportunity');
+    const venueDefinition = getVenueDefinition(opportunity.venue);
+    const task = {
+      id: taskId,
+      taskName: `Follow up on ${opportunity.eventName}`,
+      details: `CSC opportunity at ${opportunity.venue}`,
+      type: 'Work',
+      typeOverride: 'Work',
+      date: opportunity.eventDate || '',
+      deadline: opportunity.eventDate || '',
+      time: opportunity.eventTime || '',
+      organization: opportunity.venue || '',
+      address: venueDefinition?.address || '',
+      website: opportunity.eventUrl || '',
+      systemLink: opportunity.eventUrl || '',
+      notes: opportunity.notes || '',
+      requiredAction: 'Check CSC scheduling availability and update the linked opportunity.',
+      completed: false,
+      completedAt: '',
+      sourceOpportunityId: opportunity.id,
+      createdAt: now,
+      updatedAt: now,
+      history: [
+        {
+          id: createId('todo-history'),
+          action: 'Task created from CSC opportunity',
+          detail: `${opportunity.eventName} at ${opportunity.venue}`,
+          createdAt: now,
+        },
+      ],
+    };
 
-  const handleMarkScheduled = (opportunity) => {
-    if (!confirmSameDateConflict(opportunity, 'mark this opportunity as scheduled')) return;
-
-    const match = findMatchingCscShift(opportunity);
-    saveSnapshot('Before CSC opportunity marked scheduled');
-    updateOpportunity(opportunity.id, {
-      status: 'Scheduled',
-      linkedCscShiftId: match?.id || opportunity.linkedCscShiftId || '',
-      nextCallDate: '',
-    });
-    flashMessage(match ? 'Opportunity linked to an existing CSC shift.' : 'Opportunity marked scheduled.');
+    try {
+      localStorage.setItem(TODO_BACKUP_STORAGE_KEY, JSON.stringify(tasks));
+      localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify([task, ...tasks]));
+      window.dispatchEvent(new CustomEvent(TODO_UPDATE_EVENT, { detail: { tasks: [task, ...tasks] } }));
+      updateOpportunity(opportunity.id, { linkedTodoTaskId: taskId });
+      navigateToAppTab('todo', taskId);
+    } catch (error) {
+      console.error('Failed to create To-Do from CSC opportunity:', error);
+      flashMessage('The follow-up task could not be created.');
+    }
   };
 
   const measureOpportunityNotes = (opportunityId, textarea = noteTextareaRefs.current.get(opportunityId)) => {
@@ -1569,44 +2044,26 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       status: 'Scheduled',
     };
 
-    if (!confirmSameDateConflict(shiftConflictCandidate, 'create and link this CSC shift')) return;
+    if (!confirmSameDateConflict(shiftConflictCandidate, 'open this CSC shift draft')) return;
 
-    const activeShifts = readArray(CSC_STORAGE_KEY, []);
-    const archivedShifts = readArray(CSC_ARCHIVE_STORAGE_KEY, []);
-    localStorage.setItem(
-      CSC_SNAPSHOT_STORAGE_KEY,
-      JSON.stringify({
-        id: createId('csc-snapshot'),
-        label: 'Before CSC opportunity created shift',
-        createdAt: new Date().toISOString(),
-        activeShifts,
-        archivedShifts,
-      })
-    );
-
-    const newShift = {
+    const queuedShift = {
       ...shiftDraft,
       id: createId('csc-opportunity-shift'),
       finishDate: shiftDraft.finishDate || shiftDraft.startDate,
       createdFromOpportunityId: shiftDraft.opportunityId,
+      linkedOpportunityId: shiftDraft.opportunityId,
     };
-    delete newShift.opportunityId;
-    const nextShifts = [...activeShifts, newShift].sort((first, second) =>
-      `${first.startDate}T${first.startTime}`.localeCompare(`${second.startDate}T${second.startTime}`)
-    );
-    localStorage.setItem(CSC_STORAGE_KEY, JSON.stringify(nextShifts));
-    window.dispatchEvent(new CustomEvent(CSC_SHIFT_UPDATE_EVENT, { detail: { shifts: nextShifts } }));
+    delete queuedShift.opportunityId;
 
-    updateOpportunity(shiftDraft.opportunityId, {
-      status: 'Scheduled',
-      linkedCscShiftId: newShift.id,
-      eventTime: shiftDraft.startTime,
-      expectedEndTime: shiftDraft.finishTime,
-      nextCallDate: '',
-    });
-    setShowCreateShiftDrawer(false);
-    setShiftDraft(null);
-    flashMessage('CSC shift created and linked to the opportunity.');
+    try {
+      sessionStorage.setItem(CSC_CREATE_DRAFT_STORAGE_KEY, JSON.stringify(queuedShift));
+      setShowCreateShiftDrawer(false);
+      setShiftDraft(null);
+      navigateToAppTab('cscShifts');
+    } catch (error) {
+      console.error('Failed to queue CSC shift draft:', error);
+      flashMessage('The CSC shift draft could not be opened.');
+    }
   };
 
   const handleScan = () => {
@@ -1618,6 +2075,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         createBlankOpportunity({
           ...item,
           venueLogo: contact?.venueLogo || item.venueLogo,
+          lastScannedAt: new Date().toISOString(),
+          lastVerifiedAt: new Date().toISOString(),
         }),
         item.venue
       )
@@ -1726,16 +2185,112 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
   const combinedSearch = [searchQuery, localSearch].filter(Boolean).join(' ').trim().toLowerCase();
 
-  const filteredOpportunities = useMemo(() => {
+  const matchesSummaryFilter = (opportunity, resolvedStatus) => {
+    if (summaryFilter === 'active') return isActiveOpportunityStatus(resolvedStatus);
+    if (summaryFilter === 'notes') {
+      return isActiveOpportunityStatus(resolvedStatus) && Boolean(String(opportunity.notes || '').trim());
+    }
+    if (summaryFilter === 'upcoming') {
+      return isActiveOpportunityStatus(resolvedStatus) && Boolean(opportunity.eventDate) && opportunity.eventDate >= todayIso();
+    }
+    if (summaryFilter === 'conflicts') {
+      return isActiveOpportunityStatus(resolvedStatus) && sameDateConflictMap.has(opportunity.id);
+    }
+    return true;
+  };
+
+  const handleStatusFilterChange = (nextStatus) => {
+    setStatusFilter(nextStatus);
+    setSummaryFilter(nextStatus === 'All' ? 'active' : '');
+  };
+
+  const applySummaryFilter = (nextSummaryFilter) => {
+    if (nextSummaryFilter === 'scheduled') {
+      setSummaryFilter('');
+      setStatusFilter('Scheduled');
+      setShowConflictSection(false);
+      return;
+    }
+
+    setSummaryFilter(nextSummaryFilter);
+    setStatusFilter('All');
+    if (nextSummaryFilter !== 'conflicts') setShowConflictSection(false);
+    if (nextSummaryFilter === 'conflicts') setShowConflictSection(true);
+  };
+
+  const summaryCardClassName = (key, colorClassName) => {
+    const isActive =
+      (key === 'scheduled' && statusFilter === 'Scheduled' && !summaryFilter) ||
+      (key !== 'scheduled' && summaryFilter === key);
+
+    return `${colorClassName} rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 ${
+      isActive ? 'ring-2 ring-slate-950 ring-offset-2' : ''
+    }`;
+  };
+
+  const monthOptions = useMemo(() => {
+    const counts = new Map();
+
+    opportunities.forEach((opportunity) => {
+      const resolvedStatus = getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus);
+
+      if (venueFilter !== 'All' && canonicalVenueName(opportunity.venue) !== venueFilter) return;
+      if (statusFilter === 'All' && resolvedStatus === 'Completed') return;
+      if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return;
+      if (!matchesSummaryFilter(opportunity, resolvedStatus)) return;
+
+      if (combinedSearch) {
+        const haystack = [
+          opportunity.eventName,
+          opportunity.venue,
+          opportunity.eventDate,
+          opportunity.eventTime,
+          resolvedStatus,
+          opportunity.status,
+          opportunity.notes,
+          opportunity.sourceText,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        if (!haystack.includes(combinedSearch)) return;
+      }
+
+      const monthKey = getOpportunityMonthKey(opportunity.eventDate);
+      if (!monthKey) return;
+      counts.set(monthKey, (counts.get(monthKey) || 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+      .map(([monthKey, count]) => ({ monthKey, count, label: formatOpportunityMonth(monthKey) }))
+      .sort((first, second) => first.monthKey.localeCompare(second.monthKey));
+  }, [
+    allCscShiftsForStatus,
+    combinedSearch,
+    opportunities,
+    statusFilter,
+    summaryFilter,
+    venueFilter,
+    sameDateConflictMap,
+  ]);
+
+  const opportunitiesMatchingNonMonthFilters = useMemo(() => {
     return opportunities.filter((opportunity) => {
+      const resolvedStatus = getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus);
+
       if (venueFilter !== 'All' && canonicalVenueName(opportunity.venue) !== venueFilter) return false;
-      if (statusFilter !== 'All' && opportunity.status !== statusFilter) return false;
+      if (statusFilter === 'All' && resolvedStatus === 'Completed') return false;
+      if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return false;
+      if (!matchesSummaryFilter(opportunity, resolvedStatus)) return false;
       if (!combinedSearch) return true;
+
       const haystack = [
         opportunity.eventName,
         opportunity.venue,
         opportunity.eventDate,
         opportunity.eventTime,
+        resolvedStatus,
         opportunity.status,
         opportunity.notes,
         opportunity.sourceText,
@@ -1743,22 +2298,76 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
+
       return haystack.includes(combinedSearch);
     });
-  }, [combinedSearch, opportunities, statusFilter, venueFilter]);
+  }, [
+    allCscShiftsForStatus,
+    combinedSearch,
+    opportunities,
+    statusFilter,
+    summaryFilter,
+    venueFilter,
+    sameDateConflictMap,
+  ]);
 
-  const upcomingOpportunities = useMemo(
-    () => filteredOpportunities.filter((item) => item.eventDate >= todayIso()),
-    [filteredOpportunities]
+  const monthlyOpportunityGroups = useMemo(() => {
+    const groups = new Map();
+
+    opportunitiesMatchingNonMonthFilters.forEach((opportunity) => {
+      const monthKey = getOpportunityMonthKey(opportunity.eventDate);
+      if (!monthKey) return;
+
+      const current = groups.get(monthKey) || {
+        monthKey,
+        label: formatOpportunityMonth(monthKey),
+        opportunities: [],
+        venueCounts: new Map(),
+      };
+      const venue = canonicalVenueName(opportunity.venue) || 'Venue not entered';
+
+      current.opportunities.push(opportunity);
+      current.venueCounts.set(venue, (current.venueCounts.get(venue) || 0) + 1);
+      groups.set(monthKey, current);
+    });
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        venueCounts: Array.from(group.venueCounts.entries()).sort((first, second) => first[0].localeCompare(second[0])),
+      }))
+      .sort((first, second) => first.monthKey.localeCompare(second.monthKey));
+  }, [opportunitiesMatchingNonMonthFilters]);
+
+  const filteredOpportunities = useMemo(() => {
+    return opportunitiesMatchingNonMonthFilters.filter((opportunity) => {
+      if (monthFilter === 'All') return true;
+      return getOpportunityMonthKey(opportunity.eventDate) === monthFilter;
+    });
+  }, [monthFilter, opportunitiesMatchingNonMonthFilters]);
+
+  const activeOpportunities = useMemo(
+    () =>
+      opportunities.filter((item) =>
+        isActiveOpportunityStatus(getResolvedOpportunityStatus(item, allCscShiftsForStatus))
+      ),
+    [allCscShiftsForStatus, opportunities]
   );
 
-  const scheduledCount = opportunities.filter((item) => item.status === 'Scheduled').length;
-  const notesCount = opportunities.filter((item) => String(item.notes || '').trim()).length;
+  const upcomingOpportunities = useMemo(
+    () => activeOpportunities.filter((item) => item.eventDate >= todayIso()),
+    [activeOpportunities]
+  );
+
+  const scheduledCount = activeOpportunities.filter(
+    (item) => getResolvedOpportunityStatus(item, allCscShiftsForStatus) === 'Scheduled'
+  ).length;
+  const notesCount = activeOpportunities.filter((item) => String(item.notes || '').trim()).length;
 
   const renderOpportunityCard = (opportunity) => {
-    const match = opportunity.linkedCscShiftId
-      ? readCscShifts().find((shift) => shift.id === opportunity.linkedCscShiftId)
-      : null;
+    const match = getLinkedCscShiftForOpportunity(opportunity, allCscShiftsForStatus);
+    const resolvedStatus = getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus);
+    const linkedTask = readStoredTodoTasks().find((task) => task.id === opportunity.linkedTodoTaskId) || null;
     const dateConflicts = sameDateConflictMap.get(opportunity.id) || [];
     const notesValue = notesDrafts[opportunity.id] ?? opportunity.notes ?? '';
     const notesChanged = notesValue !== (opportunity.notes ?? '');
@@ -1766,15 +2375,15 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const notesHaveMore = overflowingNoteIds.has(opportunity.id);
 
     return (
-      <article key={opportunity.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <article id={`csc-opportunity-${opportunity.id}`} key={opportunity.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 gap-3">
             <VenueLogo opportunity={opportunity} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-lg font-normal text-slate-950"><FormattedEventName value={opportunity.eventName} /></h3>
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-extrabold ${getStatusClass(opportunity.status)}`}>
-                  {opportunity.status}
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-extrabold ${getStatusClass(resolvedStatus)}`}>
+                  {resolvedStatus}
                 </span>
                 {match ? (
                   <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-extrabold text-white">Shift Linked</span>
@@ -1810,41 +2419,81 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 lg:max-w-[460px] lg:justify-end">
-            {match ? (
+          <aside className="w-fit shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-100 px-3 py-2">
+              <p className="text-xs font-black uppercase tracking-wide text-slate-700">Actions</p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 p-2.5">
+              {match ? (
+                <button
+                  type="button"
+                  onClick={() => handleOpenLinkedShift(match, opportunity)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-cyan-700 text-white hover:bg-cyan-800"
+                  title="Open linked CSC shift"
+                  aria-label="Open linked CSC shift"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleCheckScheduled(opportunity)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-blue-700 text-white hover:bg-blue-800"
+                  title="Check for scheduled CSC shift"
+                  aria-label="Check for scheduled CSC shift"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                </button>
+              )}
+
+              {!match ? (
+                <button
+                  type="button"
+                  onClick={() => openCreateShift(opportunity)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800"
+                  title="Create CSC shift"
+                  aria-label="Create CSC shift"
+                >
+                  <CalendarCheck2 className="h-4 w-4" />
+                </button>
+              ) : (
+                <span className="h-9 w-9" aria-hidden="true" />
+              )}
+
               <button
                 type="button"
-                onClick={() => handleOpenLinkedShift(match)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-700 px-3 py-2 text-xs font-extrabold text-white hover:bg-cyan-800"
+                onClick={() => handleCreateOrOpenTodo(opportunity)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-emerald-700 text-white hover:bg-emerald-800"
+                title={linkedTask ? 'Open linked To-Do' : 'Create To-Do'}
+                aria-label={linkedTask ? 'Open linked To-Do' : 'Create To-Do'}
               >
-                <ExternalLink className="h-4 w-4" />
-                Open Linked Shift
+                <ListTodo className="h-4 w-4" />
               </button>
-            ) : (
-              <button type="button" onClick={() => handleCheckScheduled(opportunity)} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-3 py-2 text-xs font-extrabold text-white hover:bg-blue-800">
-                <RefreshCcw className="h-4 w-4" />
-                Check Scheduled
+
+              <button
+                type="button"
+                onClick={() => openEditOpportunity(opportunity)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-600 text-white hover:bg-slate-700"
+                title="Edit opportunity"
+                aria-label="Edit opportunity"
+              >
+                <Edit3 className="h-4 w-4" />
               </button>
-            )}
-            {!match && opportunity.status !== 'Scheduled' ? (
-              <button type="button" onClick={() => handleMarkScheduled(opportunity)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white hover:bg-emerald-700">
-                <CheckCircle2 className="h-4 w-4" />
-                Mark Scheduled
+
+              <button
+                type="button"
+                onClick={() => handleDeleteOpportunity(opportunity)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-red-600 text-white hover:bg-red-700"
+                title="Delete opportunity"
+                aria-label="Delete opportunity"
+              >
+                <Trash2 className="h-4 w-4" />
               </button>
-            ) : null}
-            {!match ? (
-              <button type="button" onClick={() => openCreateShift(opportunity)} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-extrabold text-white hover:bg-slate-800">
-                <CalendarCheck2 className="h-4 w-4" />
-                Create CSC Shift
-              </button>
-            ) : null}
-            <button type="button" onClick={() => openEditOpportunity(opportunity)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-600 text-white hover:bg-slate-700" title="Edit opportunity" aria-label="Edit opportunity">
-              <Edit3 className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={() => handleDeleteOpportunity(opportunity)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-red-600 text-white hover:bg-red-700" title="Delete opportunity" aria-label="Delete opportunity">
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
+
+              <span className="h-9 w-9" aria-hidden="true" />
+            </div>
+          </aside>
         </div>
 
         {dateConflicts.length ? (
@@ -1857,94 +2506,189 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               {dateConflicts.map((conflict) => (
                 <div
                   key={conflict.id}
-                  className="flex flex-col gap-0.5 rounded-lg bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-2 rounded-lg bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <span className="font-normal text-red-950">
+                  <span className="min-w-0 font-normal text-red-950">
                     <span className="font-extrabold">{conflict.venue}:</span>{' '}
                     <FormattedEventName value={conflict.eventName} />
                   </span>
-                  <span className="text-xs font-bold text-red-800">
-                    {conflict.eventTime ? formatTime(conflict.eventTime) : 'Time not listed'}
-                    {conflict.status === 'Scheduled' ? ', Scheduled' : `, ${conflict.status}`}
-                  </span>
+                  <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
+                    <span className="text-xs font-bold text-red-800">
+                      {conflict.eventTime ? formatTime(conflict.eventTime) : 'Time not listed'}
+                      {conflict.status === 'Scheduled' ? ', Scheduled' : `, ${conflict.status}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteOpportunity(conflict)}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition hover:border-red-300 hover:bg-red-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1"
+                      title={`Delete ${conflict.eventName}`}
+                      aria-label={`Delete ${conflict.eventName}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         ) : null}
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div className="rounded-xl bg-slate-50 p-3">
-            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">CSC Shift Link</p>
-            {match ? (
-              <>
-                <p className="mt-1 text-sm font-extrabold text-slate-950">
-                  {match.jobName || match.event || 'Linked CSC shift'}
+        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+          <div
+            className={`rounded-xl border p-4 xl:col-span-2 ${
+              match ? 'border-cyan-200 bg-cyan-50' : 'border-slate-200 bg-slate-50'
+            }`}
+          >
+            <div
+              className={`flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-start sm:justify-between ${
+                match ? 'border-cyan-200' : 'border-slate-200'
+              }`}
+            >
+              <div className="min-w-0">
+                <p
+                  className={`text-[11px] font-black uppercase tracking-wide ${
+                    match ? 'text-cyan-800' : 'text-slate-500'
+                  }`}
+                >
+                  {match ? 'Linked CSC Shift' : 'CSC Shift'}
                 </p>
-                <p className="text-xs font-bold text-emerald-700">
-                  {match.shiftStatus || 'Scheduled'}, {match.paidStatus || 'Unpaid'}
-                  {match.recordSource === 'archived' ? ', Archived' : ''}
+                <p className="mt-1 truncate text-base font-black text-slate-950">
+                  {match
+                    ? match.jobName || match.event || 'Linked CSC shift'
+                    : opportunity.linkedCscShiftId
+                      ? 'Linked shift not found'
+                      : 'No shift linked'}
                 </p>
-                <p className="text-xs text-slate-600">
-                  {formatDate(match.startDate)} {formatTime(match.startTime)}
-                  {match.finishTime ? ` to ${formatTime(match.finishTime)}` : ''}
+                <p className="mt-1 text-sm font-semibold text-slate-600">
+                  {match
+                    ? `${formatDate(match.startDate)}${
+                        match.startTime ? `, ${formatTime(match.startTime)}` : ''
+                      }${match.finishTime ? ` to ${formatTime(match.finishTime)}` : ''}`
+                    : 'Create or link a CSC shift when this opportunity becomes confirmed work.'}
                 </p>
-              </>
-            ) : (
-              <p className="mt-1 text-sm font-extrabold text-slate-950">
-                {opportunity.linkedCscShiftId ? 'Linked shift not found' : 'Not linked'}
-              </p>
-            )}
-          </div>
-          <div className="h-full rounded-xl bg-slate-50 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <label htmlFor={`opportunity-notes-${opportunity.id}`} className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-                  Notes
-                </label>
-                {notesHaveMore ? (
-                  <button
-                    type="button"
-                    onClick={() => toggleOpportunityNotes(opportunity.id)}
-                    className="text-xs font-normal text-blue-700 underline decoration-1 underline-offset-2 hover:text-blue-900"
-                    title={notesExpanded ? 'Show less notes' : 'Show more notes'}
-                    aria-label={notesExpanded ? 'Show less notes' : 'Show more notes'}
-                  >
-                    {notesExpanded ? 'less' : 'more'}
-                  </button>
-                ) : null}
               </div>
-              <button
-                type="button"
-                onClick={() => handleSaveNotes(opportunity)}
-                disabled={!notesChanged}
-                className={`rounded-lg px-3 py-1.5 text-xs font-extrabold text-white ${
-                  notesChanged ? 'bg-indigo-700 hover:bg-indigo-800' : 'cursor-not-allowed bg-slate-400'
+
+              <span
+                className={`inline-flex w-fit shrink-0 rounded-full px-3 py-1 text-xs font-black ${
+                  match
+                    ? match.recordSource === 'archived'
+                      ? 'bg-slate-700 text-white'
+                      : 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 text-slate-700'
                 }`}
               >
-                Save Notes
-              </button>
+                {match ? (match.recordSource === 'archived' ? 'Archived Shift' : 'Active Shift') : 'Not Linked'}
+              </span>
             </div>
-            <textarea
-              ref={(textarea) => setOpportunityNotesRef(opportunity.id, textarea)}
-              id={`opportunity-notes-${opportunity.id}`}
-              rows={notesExpanded ? 4 : 1}
-              wrap="soft"
-              value={notesValue}
-              onChange={(event) => {
-                const textarea = event.currentTarget;
-                handleNotesChange(opportunity.id, textarea.value, textarea);
-              }}
-              placeholder="Add notes about this event or shift opportunity..."
-              className={`mt-2 w-full whitespace-pre-wrap break-words rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 [overflow-wrap:anywhere] focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 ${
-                notesExpanded ? 'resize-y overflow-auto' : 'resize-none overflow-hidden'
-              }`}
-            />
-            {opportunity.notesUpdatedAt ? (
-              <p className="mt-1 text-right text-[11px] font-semibold text-slate-500">
-                {formatShortDateTime(opportunity.notesUpdatedAt)}
-              </p>
+
+            {match ? (
+              <>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-lg border border-cyan-200 bg-white/80 p-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-cyan-800">Status</p>
+                    <p className="mt-1 text-sm font-black text-slate-950">{match.shiftStatus || 'Scheduled'}</p>
+                  </div>
+                  <div className="rounded-lg border border-cyan-200 bg-white/80 p-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-cyan-800">Work Time</p>
+                    <p className="mt-1 text-sm font-black text-slate-950">
+                      {[match.startTime ? formatTime(match.startTime) : '', match.finishTime ? formatTime(match.finishTime) : '']
+                        .filter(Boolean)
+                        .join(' to ') || 'Managed in CSC Shifts'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-cyan-200 bg-white/80 p-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-cyan-800">Payment</p>
+                    <p className="mt-1 text-sm font-black text-slate-950">{match.paidStatus || 'Unpaid'}</p>
+                  </div>
+                  <div className="rounded-lg border border-cyan-200 bg-white/80 p-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-cyan-800">Calendar</p>
+                    <p className="mt-1 text-sm font-black text-slate-950">
+                      {match.googleCalendarEventId || match.googleCalendarEventLink ? 'Added' : 'Not added'}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs font-semibold text-cyan-950">
+                  Calendar, rides, paychecks, pay, completion, and cancellation are managed in CSC Shifts.
+                </p>
+              </>
             ) : null}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Follow-Up</p>
+                <p className="mt-1 text-sm font-black text-slate-950">
+                  {linkedTask
+                    ? linkedTask.completed
+                      ? 'To-Do completed'
+                      : 'To-Do is open'
+                    : 'No To-Do created'}
+                </p>
+              </div>
+              <span
+                className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${
+                  linkedTask
+                    ? linkedTask.completed
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-blue-100 text-blue-800'
+                    : 'bg-slate-200 text-slate-700'
+                }`}
+              >
+                {linkedTask ? (linkedTask.completed ? 'Completed' : 'Open') : 'Not Created'}
+              </span>
+            </div>
+
+            <div className="pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <label htmlFor={`opportunity-notes-${opportunity.id}`} className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                    Opportunity Notes
+                  </label>
+                  {notesHaveMore ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleOpportunityNotes(opportunity.id)}
+                      className="text-xs font-normal text-blue-700 underline decoration-1 underline-offset-2 hover:text-blue-900"
+                      title={notesExpanded ? 'Show less notes' : 'Show more notes'}
+                      aria-label={notesExpanded ? 'Show less notes' : 'Show more notes'}
+                    >
+                      {notesExpanded ? 'less' : 'more'}
+                    </button>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSaveNotes(opportunity)}
+                  disabled={!notesChanged}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-extrabold text-white ${
+                    notesChanged ? 'bg-indigo-700 hover:bg-indigo-800' : 'cursor-not-allowed bg-slate-400'
+                  }`}
+                >
+                  Save Notes
+                </button>
+              </div>
+              <textarea
+                ref={(textarea) => setOpportunityNotesRef(opportunity.id, textarea)}
+                id={`opportunity-notes-${opportunity.id}`}
+                rows={notesExpanded ? 5 : 2}
+                wrap="soft"
+                value={notesValue}
+                onChange={(event) => {
+                  const textarea = event.currentTarget;
+                  handleNotesChange(opportunity.id, textarea.value, textarea);
+                }}
+                placeholder="Add notes about this event or shift opportunity..."
+                className={`mt-2 w-full whitespace-pre-wrap break-words rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 [overflow-wrap:anywhere] focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 ${
+                  notesExpanded ? 'resize-y overflow-auto' : 'resize-none overflow-hidden'
+                }`}
+              />
+              {opportunity.notesUpdatedAt ? (
+                <p className="mt-1 text-right text-[11px] font-semibold text-slate-500">
+                  Updated {formatShortDateTime(opportunity.notesUpdatedAt)}
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
       </article>
@@ -1952,65 +2696,104 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   };
 
   return (
-    <PageContainer>
-      <div className="space-y-6 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-violet-100">
+      <div className="flex flex-col gap-6 bg-violet-100 py-6">
         <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
 
-        <section className="rounded-2xl border-2 border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-100 px-6 py-5 shadow-sm">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-6 w-6 text-indigo-700" />
-                <h2 className="text-2xl font-black text-slate-950">CSC Opportunities</h2>
-              </div>
-              <p className="mt-1 text-sm font-medium text-slate-600">
-                Track venue events, editable notes, and links to actual CSC shifts.
-              </p>
-              {saveMessage ? <p className="mt-3 inline-flex rounded-full bg-white px-3 py-1 text-xs font-extrabold text-indigo-900 shadow-sm">{saveMessage}</p> : null}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => setShowScanDrawer(true)} className="inline-flex items-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-800">
+        <TabPageHeader
+          icon={Sparkles}
+          title="CSC Opportunities"
+          subtitle="Track venue events, editable notes, and links to actual CSC shifts."
+          theme="violet"
+          message={saveMessage}
+          actions={
+            <>
+              <button
+                type="button"
+                onClick={() => setShowScanDrawer(true)}
+                className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
+              >
                 <ClipboardCheck className="h-4 w-4" />
                 Scan Events
               </button>
-              <button type="button" onClick={openAddOpportunity} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800">
+              <button
+                type="button"
+                onClick={openAddOpportunity}
+                className={`${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 hover:bg-violet-50`}
+              >
                 <Plus className="h-4 w-4" />
                 Add Opportunity
               </button>
-            </div>
-          </div>
-        </section>
+            </>
+          }
+        />
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950 shadow-sm">
-            <p className="text-sm font-bold">Active Opportunities</p>
-            <p className="mt-1 text-3xl font-black">{opportunities.length}</p>
-          </div>
-          <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-violet-950 shadow-sm">
-            <p className="text-sm font-bold">With Notes</p>
-            <p className="mt-1 text-3xl font-black">{notesCount}</p>
-          </div>
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 shadow-sm">
-            <p className="text-sm font-bold">Scheduled</p>
-            <p className="mt-1 text-3xl font-black">{scheduledCount}</p>
-          </div>
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-blue-950 shadow-sm">
-            <p className="text-sm font-bold">Upcoming Events</p>
-            <p className="mt-1 text-3xl font-black">{upcomingOpportunities.length}</p>
-          </div>
           <button
             type="button"
-            onClick={() => setShowConflictSection((current) => !current)}
+            onClick={() => applySummaryFilter('active')}
+            aria-pressed={summaryFilter === 'active'}
+            className={summaryCardClassName('active', 'border-indigo-200 bg-indigo-50 text-indigo-950')}
+            title="Show active opportunities"
+          >
+            <p className="text-sm font-bold">Active Opportunities</p>
+            <p className="mt-1 text-3xl font-black">{activeOpportunities.length}</p>
+            <p className="mt-1 text-xs font-bold text-indigo-800">
+              {summaryFilter === 'active' ? 'Filtered' : 'Click to filter'}
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => applySummaryFilter('notes')}
+            aria-pressed={summaryFilter === 'notes'}
+            className={summaryCardClassName('notes', 'border-violet-200 bg-violet-50 text-violet-950')}
+            title="Show active opportunities with notes"
+          >
+            <p className="text-sm font-bold">With Notes</p>
+            <p className="mt-1 text-3xl font-black">{notesCount}</p>
+            <p className="mt-1 text-xs font-bold text-violet-800">
+              {summaryFilter === 'notes' ? 'Filtered' : 'Click to filter'}
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => applySummaryFilter('scheduled')}
+            aria-pressed={statusFilter === 'Scheduled' && !summaryFilter}
+            className={summaryCardClassName('scheduled', 'border-emerald-200 bg-emerald-50 text-emerald-950')}
+            title="Show scheduled opportunities"
+          >
+            <p className="text-sm font-bold">Scheduled</p>
+            <p className="mt-1 text-3xl font-black">{scheduledCount}</p>
+            <p className="mt-1 text-xs font-bold text-emerald-800">
+              {statusFilter === 'Scheduled' && !summaryFilter ? 'Filtered' : 'Click to filter'}
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => applySummaryFilter('upcoming')}
+            aria-pressed={summaryFilter === 'upcoming'}
+            className={summaryCardClassName('upcoming', 'border-blue-200 bg-blue-50 text-blue-950')}
+            title="Show upcoming active events"
+          >
+            <p className="text-sm font-bold">Upcoming Events</p>
+            <p className="mt-1 text-3xl font-black">{upcomingOpportunities.length}</p>
+            <p className="mt-1 text-xs font-bold text-blue-800">
+              {summaryFilter === 'upcoming' ? 'Filtered' : 'Click to filter'}
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => applySummaryFilter('conflicts')}
+            aria-pressed={summaryFilter === 'conflicts'}
             aria-expanded={showConflictSection}
             aria-controls="same-date-venue-conflicts"
-            title={showConflictSection ? 'Hide same-date venue conflicts' : 'Show same-date venue conflicts'}
-            className="rounded-2xl border border-red-300 bg-red-50 p-4 text-left text-red-950 shadow-sm transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+            title="Show same-date venue conflicts"
+            className={summaryCardClassName('conflicts', 'border-red-300 bg-red-50 text-red-950')}
           >
             <p className="text-sm font-bold">Conflict Dates</p>
             <p className="mt-1 text-3xl font-black">{sameDateConflictGroups.length}</p>
             <p className="mt-1 text-xs font-bold text-red-800">
-              {showConflictSection ? 'Click to hide' : 'Click to view'}
+              {summaryFilter === 'conflicts' ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
         </section>
@@ -2062,20 +2845,115 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               <p className="text-sm text-slate-600">Opportunities stay separate from CSC Shifts until you create or link a shift.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <select value={venueFilter} onChange={(event) => setVenueFilter(event.target.value)} className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold">
+              <select value={venueFilter} onChange={(event) => setVenueFilter(event.target.value)} className="h-10 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-bold text-violet-950 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200">
                 <option value="All">All venues</option>
                 {VENUE_DEFINITIONS.map((definition) => <option key={definition.venue} value={definition.venue}>{definition.venue}</option>)}
               </select>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold">
+              <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="h-10 rounded-lg border border-purple-200 bg-purple-50 px-3 text-sm font-bold text-purple-950 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200">
+                <option value="All">All months</option>
+                {monthOptions.map((month) => (
+                  <option key={month.monthKey} value={month.monthKey}>
+                    {month.label} ({month.count})
+                  </option>
+                ))}
+              </select>
+              <select value={statusFilter} onChange={(event) => handleStatusFilterChange(event.target.value)} className="h-10 rounded-lg border border-fuchsia-200 bg-fuchsia-50 px-3 text-sm font-bold text-fuchsia-950 focus:border-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-200">
                 <option value="All">All statuses</option>
                 {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
+              <button
+                type="button"
+                onClick={() => setShowMonthOverview((current) => !current)}
+                aria-expanded={showMonthOverview}
+                aria-controls="csc-opportunities-month-overview"
+                className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-extrabold transition ${
+                  showMonthOverview
+                    ? 'border-violet-700 bg-violet-700 text-white hover:bg-violet-800'
+                    : 'border-violet-300 bg-white text-violet-800 hover:bg-violet-50'
+                }`}
+              >
+                <CalendarDays className="h-4 w-4" />
+                {showMonthOverview ? 'Hide Months' : 'View by Month'}
+              </button>
               <label className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input value={localSearch} onChange={(event) => setLocalSearch(event.target.value)} placeholder="Search opportunities" className="h-10 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm" />
               </label>
             </div>
           </div>
+
+          {showMonthOverview ? (
+            <div id="csc-opportunities-month-overview" className="mt-5 rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 p-4 shadow-inner">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-violet-950">Opportunities by Month</h3>
+                  <p className="text-sm font-medium text-slate-600">
+                    {venueFilter === 'All' ? 'Showing all venues.' : `Showing ${venueFilter}.`} Choose a month to filter the opportunity cards below.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMonthFilter('All')}
+                  className={`inline-flex w-fit items-center rounded-lg px-3 py-2 text-sm font-extrabold ${
+                    monthFilter === 'All'
+                      ? 'bg-violet-700 text-white'
+                      : 'border border-violet-300 bg-white text-violet-800 hover:bg-violet-50'
+                  }`}
+                >
+                  All Months
+                </button>
+              </div>
+
+              {monthlyOpportunityGroups.length ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {monthlyOpportunityGroups.map((group) => (
+                    <button
+                      key={group.monthKey}
+                      type="button"
+                      onClick={() => setMonthFilter(group.monthKey)}
+                      className={`rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                        monthFilter === group.monthKey
+                          ? 'border-violet-600 bg-violet-700 text-white shadow-md'
+                          : 'border-violet-200 bg-white text-slate-950 hover:border-violet-400'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-base font-black">{group.label}</p>
+                          <p className={`mt-1 text-sm font-bold ${monthFilter === group.monthKey ? 'text-violet-100' : 'text-slate-600'}`}>
+                            {group.opportunities.length} opportunit{group.opportunities.length === 1 ? 'y' : 'ies'}
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-black ${
+                          monthFilter === group.monthKey ? 'bg-white/20 text-white' : 'bg-violet-100 text-violet-900'
+                        }`}>
+                          View
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {group.venueCounts.map(([venue, count]) => (
+                          <span
+                            key={venue}
+                            className={`rounded-full px-2 py-1 text-[11px] font-bold ${
+                              monthFilter === group.monthKey
+                                ? 'bg-white/15 text-white'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {venue}: {count}
+                          </span>
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-violet-300 bg-white/70 p-6 text-center text-sm font-bold text-slate-600">
+                  No months match the current venue, status, or search filters.
+                </div>
+              )}
+            </div>
+          ) : null}
 
           <div className="mt-4 grid gap-4">
             {filteredOpportunities.length ? filteredOpportunities.map(renderOpportunityCard) : (
@@ -2110,8 +2988,19 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 </select>
               </label>
               <label className="text-sm font-bold text-slate-700">Status
-                <select value={editingOpportunity.status} onChange={(event) => setEditingOpportunity((current) => ({ ...current, status: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal">
-                  {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+                <select
+                  value={editingOpportunity.linkedCscShiftId ? editingOpportunity.status || 'Scheduled' : editingOpportunity.status}
+                  disabled={Boolean(editingOpportunity.linkedCscShiftId)}
+                  onChange={(event) => setEditingOpportunity((current) => ({ ...current, status: event.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-600"
+                >
+                  {editingOpportunity.linkedCscShiftId ? (
+                    <option value={editingOpportunity.status || 'Scheduled'}>
+                      {editingOpportunity.status || 'Scheduled'}, managed by CSC Shifts
+                    </option>
+                  ) : (
+                    EDITABLE_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)
+                  )}
                 </select>
               </label>
               <label className="text-sm font-bold text-slate-700">Event date
@@ -2299,6 +3188,7 @@ export {
   parseSofiEvents,
   parseIntuitDomeEvents,
   parseHollywoodBowlEvents,
+  parseShrineEvents,
   parseVenueEvents,
   findMatchingCscShift,
 };

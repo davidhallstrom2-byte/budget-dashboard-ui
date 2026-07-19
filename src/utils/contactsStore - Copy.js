@@ -104,23 +104,11 @@ export const EMPTY_CONTACT_FORM = {
   name: "",
   category: "General",
   phone: "",
-  directPhone: "",
-  cellPhone: "",
   fax: "",
-  email: "",
   website: "",
   address: "",
-  city: "",
-  state: "",
-  zip: "",
   address2: "",
-  city2: "",
-  state2: "",
-  zip2: "",
   address3: "",
-  city3: "",
-  state3: "",
-  zip3: "",
   organization: "",
   company: "",
   person: "",
@@ -137,13 +125,7 @@ export const EMPTY_CONTACT_FORM = {
 
 export const CONTACT_APPLY_FIELDS = [
   "phone",
-  "directPhone",
-  "cellPhone",
-  "fax",
-  "email",
   "address",
-  "address2",
-  "address3",
   "website",
   "organization",
   "company",
@@ -188,18 +170,12 @@ function normalizeOfficeLocations(locations = []) {
   return locations
     .map((location) => ({
       address: cleanTextValue(location?.address || ""),
-      city: cleanTextValue(location?.city || ""),
-      state: cleanTextValue(location?.state || "").toUpperCase(),
-      zip: cleanTextValue(location?.zip || ""),
       phone: normalizePhone(location?.phone || ""),
       fax: normalizePhone(location?.fax || ""),
       label: cleanTextValue(location?.label || ""),
     }))
     .filter((location) => {
-      const key = [location.address, location.city, location.state, location.zip, location.phone, location.fax]
-        .filter(Boolean)
-        .join("|")
-        .toLowerCase();
+      const key = location.address.toLowerCase();
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -221,24 +197,20 @@ export function normalizeContact(contact = {}) {
     ...contact,
     id: contact.id || createContactId(),
     name: cleanTextValue(contact.name || contact.organization || contact.company || contact.person || "Untitled contact"),
-    phone: normalizePhone(contact.phone || contact.directPhone || contact.cellPhone || ""),
-    directPhone: normalizePhone(contact.directPhone || ""),
-    cellPhone: normalizePhone(contact.cellPhone || ""),
+    phone: normalizePhone(contact.phone || contact.directPhone || ""),
     fax: normalizePhone(contact.fax || ""),
-    email: cleanTextValue(contact.email || ""),
     address: uniqueAddresses[0] || "",
     address2: uniqueAddresses[1] || "",
     address3: uniqueAddresses[2] || "",
     officeLocations,
   };
 
+  delete out.directPhone;
+
   if (!out.officeLocations.length && uniqueAddresses.length) {
     out.officeLocations = uniqueAddresses.map((address, index) => ({
       label: `Office ${index + 1}`,
       address,
-      city: index === 0 ? cleanTextValue(contact.city || "") : cleanTextValue(contact[`city${index + 1}`] || ""),
-      state: index === 0 ? cleanTextValue(contact.state || "").toUpperCase() : cleanTextValue(contact[`state${index + 1}`] || "").toUpperCase(),
-      zip: index === 0 ? cleanTextValue(contact.zip || "") : cleanTextValue(contact[`zip${index + 1}`] || ""),
       phone: index === 0 ? out.phone : "",
       fax: index === 0 ? out.fax : "",
     }));
@@ -435,6 +407,7 @@ function extractComments(lines = [], labeled = {}) {
 
 function createNotes({ rawText, emailList, extraPhones, lines }) {
   const notes = [];
+  if (emailList.length) notes.push(`Email: ${emailList.join(", ")}`);
   if (extraPhones.length) notes.push(`Other phone: ${extraPhones.join(", ")}`);
   const medicalHints = lines.filter((line) =>
     /root canal|consultation|retreatment|apicoectomy|post-op|tooth|referred by|introducing/i.test(line)
@@ -490,7 +463,7 @@ function parseOfficeBlocksFromDentalReferral(text = "") {
   if (knownBlocks.length > 1) return knownBlocks;
 
   const possibleBlocks = [];
-  const locationPattern = /(\d{1,6}[ \t]+[A-Za-z0-9 .#,-]+?(?:Ave|Avenue|Blvd|Boulevard|St|Street|Rd|Road|Dr|Drive)[A-Za-z0-9 .#,-]*?[ \t]+[A-Z][a-zA-Z .'-]+,\s*CA\s*\d{5})([\s\S]{0,220})/gi;
+  const locationPattern = /(\d{3,6}\s+[A-Za-z0-9 .#,-]+?(?:Ave|Avenue|Blvd|Boulevard|St|Street|Rd|Road|Dr|Drive)[A-Za-z0-9 .#,-]*?\s+[A-Z][a-zA-Z .'-]+,\s*CA\s*\d{5})([\s\S]{0,220})/gi;
   let match;
   while ((match = locationPattern.exec(normalized)) !== null) {
     const address = cleanTextValue(match[1]);
@@ -522,9 +495,6 @@ function buildContactFromParts({
   category,
   phone,
   fax,
-  email,
-  directPhone,
-  cellPhone,
   website,
   addresses,
   officeLocations,
@@ -541,10 +511,7 @@ function buildContactFromParts({
     name: baseName || organization || person || "Scanned Contact",
     category,
     phone,
-    directPhone,
-    cellPhone,
     fax,
-    email,
     website,
     address: uniqueAddresses[0] || "",
     address2: uniqueAddresses[1] || "",
@@ -589,7 +556,6 @@ export function parseContactCandidatesFromText(rawText = "") {
         category,
         phone: primary.phone || phoneList[0] || "",
         fax: primary.fax || "",
-        email: emailList[0] || "",
         website,
         addresses,
         officeLocations: officeBlocks,
@@ -618,9 +584,6 @@ export function parseContactCandidatesFromText(rawText = "") {
       category,
       phone,
       fax,
-      email: labeled.email || labeled["email address"] || emailList[0] || "",
-      directPhone: normalizePhone(labeled["direct phone"] || labeled.direct || ""),
-      cellPhone: normalizePhone(labeled.cell || labeled.mobile || labeled["mobile phone"] || ""),
       website,
       addresses: [address],
       officeLocations: address ? [{ label: "Office 1", address, phone, fax }] : [],

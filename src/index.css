@@ -45,3 +45,10 @@
     background: #555;
   }
 }
+
+/* Stable tab headers: reserve layout space and isolate repaint work to reduce CLS. */
+@layer components {
+  .tab-page-header {
+    contain: layout paint;
+  }
+}

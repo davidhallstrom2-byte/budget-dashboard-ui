@@ -1,13 +1,13 @@
 // src/components/tabs/DashboardTab.jsx
 import React, { useState, useMemo, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Printer, Search, AlertCircle, Clock, Download, Plus, Minus, Archive } from 'lucide-react';
+import { ChevronDown, ChevronRight, Printer, AlertCircle, Clock, Download, Plus, Minus, Archive, CheckCircle2, Ban, Landmark, PauseCircle } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package, WalletCards
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
+import TabPageHeader from '../common/TabPageHeader.jsx';
 import EmergencyFundWidget from '../modern/EmergencyFundWidget';
-import EditorTab from './EditorTab.jsx';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -38,6 +38,9 @@ const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
 const PAYCHECK_STORAGE_KEY = 'paychecksTab.paychecks.v1';
 const PAYCHECK_UPDATE_EVENT = 'paychecksChanged';
+const RIDES_STORAGE_KEY = 'modivcareRides.v1';
+const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
+const RIDES_UPDATE_EVENT = 'modivcareRides:updated';
 const GUARD_CARD_PROOF_SUBMITTED_DATE = '2026-06-22';
 const FUTURE_EXPECTED_CSC_RATE = 19.5;
 const OVERTIME_HOUR_THRESHOLD = 8;
@@ -63,6 +66,23 @@ const loadPaycheckBudgetItems = () => {
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     console.error('Failed to load paychecks for budget dashboard:', error);
+    return [];
+  }
+};
+
+const loadRideBudgetItems = () => {
+  try {
+    const active = JSON.parse(localStorage.getItem(RIDES_STORAGE_KEY) || '[]');
+    const archived = JSON.parse(localStorage.getItem(RIDES_ARCHIVE_STORAGE_KEY) || '[]');
+    const byId = new Map();
+
+    [...(Array.isArray(active) ? active : []), ...(Array.isArray(archived) ? archived : [])].forEach((ride) => {
+      if (ride?.id) byId.set(ride.id, ride);
+    });
+
+    return Array.from(byId.values());
+  } catch (error) {
+    console.error('Failed to load rides for budget dashboard:', error);
     return [];
   }
 };
@@ -111,6 +131,24 @@ const getDashboardHourlyRate = (value) => {
   return number;
 };
 
+const getDashboardRideFinancials = (ride = {}) => {
+  const fare = getDashboardNumber(ride.fareAmount);
+  const tip = getDashboardNumber(ride.tipAmount);
+  const fees = getDashboardNumber(ride.feeAmount);
+  const itemizedTotal = fare + tip + fees;
+  const storedTotal = getDashboardNumber(ride.totalAmount);
+  const total = storedTotal > 0 ? storedTotal : itemizedTotal;
+  const fareAndFees = Math.max(total - tip, fare + fees);
+
+  return {
+    fare,
+    tip,
+    fees,
+    fareAndFees,
+    total,
+  };
+};
+
 const getDashboardPaycheckHours = (paycheck = {}) => {
   const hours = getDashboardNumber(paycheck?.hours);
   const grossPay = getDashboardNumber(paycheck?.grossPay);
@@ -154,6 +192,51 @@ const formatDashboardDate = (value = '') => {
   return `${month}/${day}/${year}`;
 };
 
+const getDebtDaysDelinquent = (item = {}) => {
+  const sourceDate = normalizeDashboardDate(item.delinquentSince);
+  if (!sourceDate) return 0;
+
+  const start = new Date(`${sourceDate}T12:00:00`);
+  if (Number.isNaN(start.getTime())) return 0;
+
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86400000));
+};
+
+const getDebtStage = (days = 0) => {
+  if (days >= 120) return '120+';
+  if (days >= 90) return '90-119';
+  if (days >= 60) return '60-89';
+  if (days >= 30) return '30-59';
+  if (days >= 1) return '1-29';
+  return 'Current';
+};
+
+const getDebtAmountOwed = (item = {}) =>
+  getDashboardNumber(item.currentAmountOwed || item.currentBalance);
+
+const hasDebtDetails = (item = {}) =>
+  Boolean(
+    item.accountStatus ||
+      item.currentAmountOwed ||
+      item.currentBalance ||
+      item.pastDueAmount ||
+      item.originalBalance ||
+      item.lastPaymentDate ||
+      item.delinquentSince ||
+      item.collectionAgency ||
+      item.sentToCollectionsDate ||
+      item.originalCreditor ||
+      item.accountLast4 ||
+      item.settlementAmount ||
+      item.debtStatusNotes ||
+      item.status === 'notPaying'
+  );
+
+const isBudgetItemPaused = (item = {}) => item.status === 'paused';
+const isBudgetItemActive = (item = {}) => !['notPaying', 'paused'].includes(item.status);
+
 const DashboardTab = ({
   state,
   setState,
@@ -169,8 +252,10 @@ const DashboardTab = ({
   const [showAllOverdue, setShowAllOverdue] = useState(false);
   const [showBudgetOverview, setShowBudgetOverview] = useState(false);
   const [showPaymentAlerts, setShowPaymentAlerts] = useState(false);
+  const [showDebtReconciliation, setShowDebtReconciliation] = useState(true);
   const [cscShifts, setCscShifts] = useState(() => loadCscBudgetShifts());
   const [paychecks, setPaychecks] = useState(() => loadPaycheckBudgetItems());
+  const [rides, setRides] = useState(() => loadRideBudgetItems());
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
@@ -202,11 +287,25 @@ const DashboardTab = ({
     };
   }, []);
 
+  useEffect(() => {
+    const refreshRides = () => setRides(loadRideBudgetItems());
+
+    window.addEventListener('storage', refreshRides);
+    window.addEventListener(RIDES_UPDATE_EVENT, refreshRides);
+
+    return () => {
+      window.removeEventListener('storage', refreshRides);
+      window.removeEventListener(RIDES_UPDATE_EVENT, refreshRides);
+    };
+  }, []);
+
   const toggleCategory = (category) => {
     setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
   };
 
   const getItemStatus = (item) => {
+    if (item.status === 'notPaying') return 'notPaying';
+    if (item.status === 'paused') return 'paused';
     if (item.status === 'paid') return 'paid';
     const today = new Date();
     const dueDate = new Date(item.dueDate);
@@ -223,6 +322,26 @@ const DashboardTab = ({
     const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
 
     switch (status) {
+      case 'notPaying':
+        return (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-1 text-xs font-bold text-slate-800"
+            title={item.notPayingReason || 'Excluded from active payment plan'}
+          >
+            <Ban className="h-3 w-3" />
+            Excluded
+          </span>
+        );
+      case 'paused':
+        return (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-800"
+            title={item.pausedReason || 'Temporarily paused'}
+          >
+            <PauseCircle className="h-3 w-3" />
+            Paused
+          </span>
+        );
       case 'paid':
         return <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Paid</span>;
       case 'overdue':
@@ -235,12 +354,14 @@ const DashboardTab = ({
   };
 
   const getCategoryStatusCounts = (items) => {
-    const counts = { overdue: 0, dueSoon: 0, pending: 0, paid: 0 };
+    const counts = { overdue: 0, dueSoon: 0, pending: 0, paid: 0, paused: 0, notPaying: 0 };
     items.forEach(item => {
       const status = getItemStatus(item);
       if (status === 'overdue') counts.overdue++;
       else if (status === 'dueSoon') counts.dueSoon++;
       else if (status === 'paid') counts.paid++;
+      else if (status === 'paused') counts.paused++;
+      else if (status === 'notPaying') counts.notPaying++;
       else counts.pending++;
     });
     return counts;
@@ -347,9 +468,154 @@ const DashboardTab = ({
     isSystemItem: true,
   }), [paycheckIncome]);
 
+  const rideExpenses = useMemo(() => {
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const normalized = rides
+      .map((ride) => {
+        const rideDate = normalizeDashboardDate(ride?.rideDate);
+        return {
+          ...ride,
+          rideDate,
+          financials: getDashboardRideFinancials(ride),
+        };
+      })
+      .filter((ride) => ride.rideDate);
+
+    const currentMonthRides = normalized.filter((ride) => ride.rideDate.startsWith(currentMonth));
+    const sumFinancials = (rideList) =>
+      rideList.reduce(
+        (totals, ride) => {
+          totals.fare += ride.financials.fare;
+          totals.tip += ride.financials.tip;
+          totals.fees += ride.financials.fees;
+          totals.fareAndFees += ride.financials.fareAndFees;
+          totals.total += ride.financials.total;
+          return totals;
+        },
+        { fare: 0, tip: 0, fees: 0, fareAndFees: 0, total: 0 }
+      );
+
+    return {
+      rideCount: normalized.length,
+      currentMonthRideCount: currentMonthRides.length,
+      allTime: sumFinancials(normalized),
+      currentMonth: sumFinancials(currentMonthRides),
+    };
+  }, [rides]);
+
+  const rideFareFeesItem = useMemo(() => ({
+    id: 'system-ride-fares-fees',
+    category: 'Ride Fares & Fees',
+    estBudget: 0,
+    actualCost: rideExpenses.currentMonth.fareAndFees,
+    dueDate: '',
+    status: 'paid',
+    note: `${rideExpenses.currentMonthRideCount} ride${rideExpenses.currentMonthRideCount === 1 ? '' : 's'} this month · fares ${formatDashboardCurrency(rideExpenses.currentMonth.fare)} · fees ${formatDashboardCurrency(rideExpenses.currentMonth.fees)} · all tracked ${formatDashboardCurrency(rideExpenses.allTime.fareAndFees)}`,
+    isSystemItem: true,
+  }), [rideExpenses]);
+
+  const rideTipsItem = useMemo(() => ({
+    id: 'system-ride-tips',
+    category: 'Ride Tips',
+    estBudget: 0,
+    actualCost: rideExpenses.currentMonth.tip,
+    dueDate: '',
+    status: 'paid',
+    note: `${rideExpenses.currentMonthRideCount} ride${rideExpenses.currentMonthRideCount === 1 ? '' : 's'} this month · all tracked tips ${formatDashboardCurrency(rideExpenses.allTime.tip)}`,
+    isSystemItem: true,
+  }), [rideExpenses]);
+
+  const debtSummary = useMemo(() => {
+    const accounts = [];
+
+    Object.entries(state?.buckets || {}).forEach(([bucketName, items]) => {
+      if (bucketName === 'income') return;
+
+      (items || []).forEach((item) => {
+        if (!hasDebtDetails(item)) return;
+
+        const amountOwed = getDebtAmountOwed(item);
+        const pastDueAmount = getDashboardNumber(item.pastDueAmount);
+        const daysDelinquent = getDebtDaysDelinquent(item);
+        const accountStatus = String(item.accountStatus || 'Not specified').trim();
+        const normalizedStatus = accountStatus.toLowerCase();
+
+        accounts.push({
+          ...item,
+          bucketName,
+          bucketDisplayName: categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName,
+          amountOwed,
+          pastDueAmount,
+          daysDelinquent,
+          delinquencyStage: getDebtStage(daysDelinquent),
+          accountStatus,
+          normalizedStatus,
+          excludedFromPaymentPlan: item.status === 'notPaying',
+          pausedFromPaymentPlan: item.status === 'paused',
+        });
+      });
+    });
+
+    const stageCounts = {
+      current: 0,
+      '1-29': 0,
+      '30-59': 0,
+      '60-89': 0,
+      '90-119': 0,
+      '120+': 0,
+    };
+
+    accounts.forEach((account) => {
+      const stage = account.delinquencyStage;
+      stageCounts[stage === 'Current' ? 'current' : stage] += 1;
+    });
+
+    const isClosed = (account) => /closed|paid in full|settled/i.test(account.accountStatus);
+    const isCollections = (account) =>
+      /collection/i.test(account.accountStatus) || Boolean(account.collectionAgency || account.sentToCollectionsDate);
+    const isChargedOff = (account) => /charged off/i.test(account.accountStatus);
+
+    return {
+      accounts: [...accounts].sort((first, second) => {
+        if (second.daysDelinquent !== first.daysDelinquent) return second.daysDelinquent - first.daysDelinquent;
+        return second.amountOwed - first.amountOwed;
+      }),
+      accountCount: accounts.length,
+      totalOwed: accounts.reduce((sum, account) => sum + account.amountOwed, 0),
+      totalPastDue: accounts.reduce((sum, account) => sum + account.pastDueAmount, 0),
+      activePlanOwed: accounts
+        .filter((account) => !account.excludedFromPaymentPlan && !account.pausedFromPaymentPlan)
+        .reduce((sum, account) => sum + account.amountOwed, 0),
+      pausedOwed: accounts
+        .filter((account) => account.pausedFromPaymentPlan)
+        .reduce((sum, account) => sum + account.amountOwed, 0),
+      pausedCount: accounts.filter((account) => account.pausedFromPaymentPlan).length,
+      excludedOwed: accounts
+        .filter((account) => account.excludedFromPaymentPlan)
+        .reduce((sum, account) => sum + account.amountOwed, 0),
+      excludedCount: accounts.filter((account) => account.excludedFromPaymentPlan).length,
+      closedCount: accounts.filter(isClosed).length,
+      collectionsCount: accounts.filter(isCollections).length,
+      chargedOffCount: accounts.filter(isChargedOff).length,
+      delinquentCount: accounts.filter((account) => account.daysDelinquent > 0).length,
+      stageCounts,
+    };
+  }, [state?.buckets, categoryNames]);
+
   const getBudgetItemsForBucket = (bucketName) => {
     const items = state?.buckets?.[bucketName] || [];
+
+    if (bucketName === 'transportation') {
+      const rideItems = [];
+      if (rideExpenses.currentMonthRideCount || rideExpenses.currentMonth.total) {
+        rideItems.push(rideFareFeesItem, rideTipsItem);
+      }
+      return [...items, ...rideItems];
+    }
+
     if (bucketName !== 'income') return items;
+
     const systemIncomeItems = [];
     if (paycheckIncome.paycheckCount || paycheckIncome.totalNetPay) systemIncomeItems.push(paycheckIncomeItem);
     if (cscIncome.unpaidShiftCount || cscIncome.unpaidPay) systemIncomeItems.push(cscIncomeItem);
@@ -365,20 +631,26 @@ const DashboardTab = ({
 
     const income = manualIncome + paycheckIncome.totalNetPay + cscIncome.unpaidPay;
 
-    const expenses = allItems
-      .filter(item => {
-        const bucketKeys = Object.keys(state?.buckets || {});
-        for (const key of bucketKeys) {
-          if (key !== 'income' && state.buckets[key].includes(item)) {
-            return true;
+    const expenses =
+      allItems
+        .filter(item => {
+          const bucketKeys = Object.keys(state?.buckets || {});
+          for (const key of bucketKeys) {
+            if (key !== 'income' && state.buckets[key].includes(item)) {
+              return true;
+            }
           }
-        }
-        return false;
-      })
-      .reduce((sum, item) => sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0);
+          return false;
+        })
+        .filter(isBudgetItemActive)
+        .reduce((sum, item) => sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0) +
+      rideExpenses.currentMonth.total;
 
-    const totalBudgeted = allItems.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
-    const totalActual = allItems.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+    const activeBudgetItems = allItems.filter(isBudgetItemActive);
+    const totalBudgeted = activeBudgetItems.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+    const totalActual =
+      activeBudgetItems.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0) +
+      rideExpenses.currentMonth.total;
 
     return {
       income,
@@ -389,21 +661,24 @@ const DashboardTab = ({
       netIncome: income - expenses,
       budgetVariance: totalActual - totalBudgeted
     };
-  }, [state?.buckets, cscIncome, paycheckIncome]);
+  }, [state?.buckets, cscIncome, paycheckIncome, rideExpenses]);
 
 
   const budgetOverview = useMemo(() => {
     const allItems = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName));
     const totalItems = allItems.length;
-    const paidItems = allItems.filter((item) => item.status === 'paid').length;
-    const pendingItems = allItems.filter((item) => item.status !== 'paid').length;
-    const overdueItems = allItems.filter((item) => getItemStatus(item) === 'overdue').length;
-    const dueSoonItems = allItems.filter((item) => getItemStatus(item) === 'dueSoon').length;
-    const totalEstimated = allItems.reduce(
+    const activeItems = allItems.filter(isBudgetItemActive);
+    const paidItems = activeItems.filter((item) => item.status === 'paid').length;
+    const pendingItems = activeItems.filter((item) => !['paid', 'notPaying'].includes(item.status)).length;
+    const pausedItems = allItems.filter(isBudgetItemPaused).length;
+    const notPayingItems = allItems.filter((item) => item.status === 'notPaying').length;
+    const overdueItems = activeItems.filter((item) => getItemStatus(item) === 'overdue').length;
+    const dueSoonItems = activeItems.filter((item) => getItemStatus(item) === 'dueSoon').length;
+    const totalEstimated = activeItems.reduce(
       (sum, item) => sum + Number(item.estBudget || item.estimatedBudget || item.estimatedCost || 0),
       0
     );
-    const totalActual = allItems.reduce(
+    const totalActual = activeItems.reduce(
       (sum, item) => sum + Number(item.actualCost || item.actualSpent || 0),
       0
     );
@@ -412,13 +687,15 @@ const DashboardTab = ({
       totalItems,
       paidItems,
       pendingItems,
+      pausedItems,
+      notPayingItems,
       overdueItems,
       dueSoonItems,
       totalEstimated,
       totalActual,
       archivedItems: state?.archived?.length || 0,
     };
-  }, [state?.buckets, state?.archived, categoryOrder, cscIncome, paycheckIncome]);
+  }, [state?.buckets, state?.archived, categoryOrder, cscIncome, paycheckIncome, rideExpenses]);
 
   const alerts = useMemo(() => {
     const allItems = [];
@@ -430,11 +707,12 @@ const DashboardTab = ({
       });
     });
 
-    const overdue = allItems.filter(item => getItemStatus(item) === 'overdue');
-    const upcoming = allItems.filter(item => getItemStatus(item) === 'dueSoon');
+    const activeItems = allItems.filter(isBudgetItemActive);
+    const overdue = activeItems.filter(item => getItemStatus(item) === 'overdue');
+    const upcoming = activeItems.filter(item => getItemStatus(item) === 'dueSoon');
 
     return { overdue, upcoming };
-  }, [state?.buckets, categoryOrder, cscIncome, paycheckIncome]);
+  }, [state?.buckets, categoryOrder, cscIncome, paycheckIncome, rideExpenses]);
 
   const handleFilterChange = (filterId) => {
     setStatusFilter(filterId);
@@ -466,6 +744,8 @@ const DashboardTab = ({
         if (statusFilter === 'dueSoon') return status === 'dueSoon';
         if (statusFilter === 'paid') return status === 'paid';
         if (statusFilter === 'pending') return status === 'pending';
+        if (statusFilter === 'paused') return status === 'paused';
+        if (statusFilter === 'notPaying') return status === 'notPaying';
         return true;
       });
     }
@@ -485,7 +765,28 @@ const DashboardTab = ({
   };
 
   const exportAllToCSV = () => {
-    const headers = ['Category', 'Item', 'Est. Budget', 'Paid', 'Due Date', 'Status'];
+    const headers = [
+      'Category',
+      'Item',
+      'Est. Budget',
+      'Paid',
+      'Due Date',
+      'Payment Plan Status',
+      'Not Paying Reason',
+      'Pause Reason',
+      'Paused At',
+      'Account Status',
+      'Amount Owed',
+      'Past Due',
+      'Delinquent Since',
+      'Days Delinquent',
+      'Delinquency Stage',
+      'Collection Agency',
+      'Original Creditor',
+      'Account Last 4',
+      'Settlement Amount',
+      'Debt Notes',
+    ];
     const rows = [];
 
     categoryOrder.forEach(bucketName => {
@@ -499,7 +800,21 @@ const DashboardTab = ({
           item.estBudget || 0,
           item.actualCost || 0,
           item.dueDate || '',
-          item.status || 'pending'
+          item.status || 'pending',
+          item.notPayingReason || '',
+          item.pausedReason || '',
+          item.pausedAt || '',
+          item.accountStatus || '',
+          getDebtAmountOwed(item),
+          getDashboardNumber(item.pastDueAmount),
+          item.delinquentSince || '',
+          getDebtDaysDelinquent(item),
+          getDebtStage(getDebtDaysDelinquent(item)),
+          item.collectionAgency || '',
+          item.originalCreditor || '',
+          item.accountLast4 || '',
+          getDashboardNumber(item.settlementAmount),
+          item.debtStatusNotes || ''
         ]);
       });
     });
@@ -546,6 +861,7 @@ const DashboardTab = ({
           .overdue { background-color: #fee; }
           .due-soon { background-color: #ffc; }
           .paid { background-color: #efe; }
+          .paused { background-color: #eef2ff; }
         </style>
       </head>
       <body>
@@ -561,6 +877,21 @@ const DashboardTab = ({
           </div>
           <div class="summary-card">
             <strong>CSC Unpaid Shift Projection:</strong> ${formatDashboardCurrency(cscIncome.unpaidPay)}
+          </div>
+          <div class="summary-card">
+            <strong>Ride Expenses This Month:</strong> ${formatDashboardCurrency(rideExpenses.currentMonth.total)}
+          </div>
+          <div class="summary-card">
+            <strong>Total Debt Owed:</strong> ${formatDashboardCurrency(debtSummary.totalOwed)}
+          </div>
+          <div class="summary-card">
+            <strong>Total Past Due:</strong> ${formatDashboardCurrency(debtSummary.totalPastDue)}
+          </div>
+          <div class="summary-card">
+            <strong>Excluded From Payment Plan:</strong> ${formatDashboardCurrency(debtSummary.excludedOwed)}
+          </div>
+          <div class="summary-card">
+            <strong>Paused Budget Items:</strong> ${budgetOverview.pausedItems}
           </div>
           <div class="summary-card">
             <strong>Expenses:</strong> $${summary.expenses.toFixed(2)}
@@ -589,7 +920,7 @@ const DashboardTab = ({
             <tbody>
               ${items.map(item => {
                 const status = getItemStatus(item);
-                const rowClass = status === 'overdue' ? 'overdue' : status === 'dueSoon' ? 'due-soon' : status === 'paid' ? 'paid' : '';
+                const rowClass = status === 'overdue' ? 'overdue' : status === 'dueSoon' ? 'due-soon' : status === 'paid' ? 'paid' : status === 'paused' ? 'paused' : '';
                 return `
                   <tr class="${rowClass}">
                     <td>${item.category || ''}</td>
@@ -597,7 +928,18 @@ const DashboardTab = ({
                     <td>$${(item.actualCost || 0).toFixed(2)}</td>
                     <td>${item.dueDate || ''}</td>
                     <td>${status}</td>
-                    <td>${item.note || ''}</td>
+                    <td>${[
+                      item.note || '',
+                      item.accountStatus ? `Account status: ${item.accountStatus}` : '',
+                      getDebtAmountOwed(item) ? `Amount owed: ${formatDashboardCurrency(getDebtAmountOwed(item))}` : '',
+                      item.pastDueAmount ? `Past due: ${formatDashboardCurrency(item.pastDueAmount)}` : '',
+                      item.delinquentSince ? `Delinquent since: ${item.delinquentSince} (${getDebtDaysDelinquent(item)} days)` : '',
+                      item.collectionAgency ? `Collections: ${item.collectionAgency}` : '',
+                      item.notPayingReason ? `Payment plan: ${item.notPayingReason}` : '',
+                      item.pausedReason ? `Paused: ${item.pausedReason}` : '',
+                      item.pausedAt ? `Paused at: ${formatDashboardDate(item.pausedAt)}` : '',
+                      item.debtStatusNotes || '',
+                    ].filter(Boolean).join(' | ')}</td>
                   </tr>
                 `;
               }).join('')}
@@ -623,6 +965,8 @@ const DashboardTab = ({
         if (statusFilter === 'dueSoon') return status === 'dueSoon';
         if (statusFilter === 'paid') return status === 'paid';
         if (statusFilter === 'pending') return status === 'pending';
+        if (statusFilter === 'paused') return status === 'paused';
+        if (statusFilter === 'notPaying') return status === 'notPaying';
         return true;
       });
     }
@@ -640,14 +984,14 @@ const DashboardTab = ({
   };
 
   return (
-    <PageContainer className="py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-blue-50" className="bg-blue-50 py-6">
       {/* Urgent Payment Alert Modal */}
       {(() => {
         const urgentItems = [];
         Object.entries(state?.buckets || {}).forEach(([bucket, items]) => {
           if (bucket === 'income') return; // Skip income items
           items.forEach(item => {
-            if (item.status !== 'paid') {
+            if (item.status !== 'paid' && isBudgetItemActive(item)) {
               const today = new Date();
               const dueDate = new Date(item.dueDate);
               const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
@@ -724,25 +1068,19 @@ const DashboardTab = ({
 );
       })()}
 
-      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border border-blue-200 bg-blue-50 shadow-sm">
-        <div className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left">
-          <div>
-            <div className="flex items-center gap-2">
-              <WalletCards className="h-6 w-6 text-blue-700" />
-              <h2 className="text-2xl font-black text-slate-900">Budget Overview</h2>
-            </div>
-            <p className="mt-1 text-sm font-medium text-slate-600">Budget status, due dates, saved items, and spending totals.</p>
-          </div>
+      <TabPageHeader
+        icon={WalletCards}
+        title="Budget Overview"
+        subtitle="Review budget status, due dates, saved items, spending totals, CSC income, and paycheck activity."
+        theme="blue"
+        actions={budgetSubnav}
+      />
 
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            {budgetSubnav}
-          </div>
-        </div>
-
+      <section className="mx-auto mb-6 mt-6 max-w-6xl overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
         <button
           type="button"
           onClick={() => setShowBudgetOverview((prev) => !prev)}
-          className="flex w-full items-center gap-2 border-t border-blue-100 bg-blue-100/60 px-6 py-2 text-left text-sm font-medium text-slate-600 hover:bg-blue-100 transition-colors"
+          className="flex w-full items-center gap-2 border-b border-blue-100 bg-blue-100/60 px-6 py-3 text-left text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100"
         >
           {showBudgetOverview ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           {showBudgetOverview ? 'Hide Stats' : 'Show Stats'}
@@ -804,7 +1142,7 @@ const DashboardTab = ({
                     <p className="text-sm font-bold">Budget Items</p>
                     <p className="mt-1 text-2xl font-extrabold">{budgetOverview.totalItems}</p>
                     <p className="mt-1 text-xs opacity-80">
-                      {budgetOverview.pendingItems} pending · {budgetOverview.paidItems} paid
+                      {budgetOverview.pendingItems} pending · {budgetOverview.paidItems} paid · {budgetOverview.pausedItems} paused · {budgetOverview.notPayingItems} excluded
                     </p>
                   </div>
                   <CreditCard className="h-8 w-8 opacity-80" />
@@ -837,6 +1175,22 @@ const DashboardTab = ({
                     </p>
                   </div>
                   <DollarSign className="h-8 w-8 opacity-80" />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold">Ride Expenses</p>
+                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(rideExpenses.currentMonth.total)}</p>
+                    <p className="mt-1 text-xs opacity-80">
+                      This month · fares and fees {formatDashboardCurrency(rideExpenses.currentMonth.fareAndFees)} · tips {formatDashboardCurrency(rideExpenses.currentMonth.tip)}
+                    </p>
+                    <p className="mt-1 text-xs opacity-80">
+                      All tracked rides: {formatDashboardCurrency(rideExpenses.allTime.total)}
+                    </p>
+                  </div>
+                  <Car className="h-8 w-8 opacity-80" />
                 </div>
               </div>
 
@@ -940,6 +1294,168 @@ const DashboardTab = ({
       </section>
 
 
+
+      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-2xl border-2 border-amber-300 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => setShowDebtReconciliation((current) => !current)}
+          className="flex w-full flex-col gap-3 bg-gradient-to-r from-amber-100 via-orange-50 to-rose-50 px-5 py-4 text-left sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-center gap-3">
+            {showDebtReconciliation ? <ChevronDown className="h-5 w-5 text-amber-800" /> : <ChevronRight className="h-5 w-5 text-amber-800" />}
+            <Landmark className="h-6 w-6 text-amber-800" />
+            <div>
+              <h2 className="text-xl font-black text-slate-950">Debt and Delinquency Reconciliation</h2>
+              <p className="text-sm font-semibold text-slate-600">
+                Track amount owed, past-due balances, delinquency stages, closed accounts, charge-offs, collections, and payment-plan decisions.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-black">
+            <span className="rounded-full bg-white px-3 py-1 text-slate-800 shadow-sm">
+              Owed {formatDashboardCurrency(debtSummary.totalOwed)}
+            </span>
+            <span className="rounded-full bg-red-600 px-3 py-1 text-white">
+              Past Due {formatDashboardCurrency(debtSummary.totalPastDue)}
+            </span>
+            <span className="rounded-full bg-slate-700 px-3 py-1 text-white">
+              Excluded {formatDashboardCurrency(debtSummary.excludedOwed)}
+            </span>
+          </div>
+        </button>
+
+        {showDebtReconciliation && (
+          <div className="border-t border-amber-200 p-5">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                <p className="text-xs font-black uppercase tracking-wide text-rose-700">Total Amount Owed</p>
+                <p className="mt-1 text-2xl font-black text-rose-950">{formatDashboardCurrency(debtSummary.totalOwed)}</p>
+                <p className="mt-1 text-xs font-semibold text-rose-800">{debtSummary.accountCount} tracked account{debtSummary.accountCount === 1 ? '' : 's'}</p>
+              </div>
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                <p className="text-xs font-black uppercase tracking-wide text-red-700">Total Past Due</p>
+                <p className="mt-1 text-2xl font-black text-red-950">{formatDashboardCurrency(debtSummary.totalPastDue)}</p>
+                <p className="mt-1 text-xs font-semibold text-red-800">{debtSummary.delinquentCount} delinquent account{debtSummary.delinquentCount === 1 ? '' : 's'}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Still Planning to Pay</p>
+                <p className="mt-1 text-2xl font-black text-emerald-950">{formatDashboardCurrency(debtSummary.activePlanOwed)}</p>
+                <p className="mt-1 text-xs font-semibold text-emerald-800">Included in the active payment plan</p>
+              </div>
+              <div className="rounded-xl border border-slate-300 bg-slate-100 p-4">
+                <p className="text-xs font-black uppercase tracking-wide text-slate-700">Excluded From Plan</p>
+                <p className="mt-1 text-2xl font-black text-slate-950">{formatDashboardCurrency(debtSummary.excludedOwed)}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-700">{debtSummary.excludedCount} account{debtSummary.excludedCount === 1 ? '' : 's'}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-xs font-bold text-slate-500">Closed / Settled</p>
+                <p className="mt-1 text-2xl font-black text-slate-900">{debtSummary.closedCount}</p>
+              </div>
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <p className="text-xs font-bold text-violet-700">In Collections</p>
+                <p className="mt-1 text-2xl font-black text-violet-950">{debtSummary.collectionsCount}</p>
+              </div>
+              <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
+                <p className="text-xs font-bold text-orange-700">Charged Off</p>
+                <p className="mt-1 text-2xl font-black text-orange-950">{debtSummary.chargedOffCount}</p>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <p className="text-xs font-bold text-amber-700">120+ Days</p>
+                <p className="mt-1 text-2xl font-black text-amber-950">{debtSummary.stageCounts['120+']}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+              {[
+                ['Current', debtSummary.stageCounts.current],
+                ['1-29 Days', debtSummary.stageCounts['1-29']],
+                ['30-59 Days', debtSummary.stageCounts['30-59']],
+                ['60-89 Days', debtSummary.stageCounts['60-89']],
+                ['90-119 Days', debtSummary.stageCounts['90-119']],
+                ['120+ Days', debtSummary.stageCounts['120+']],
+              ].map(([label, count]) => (
+                <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center">
+                  <p className="text-xs font-bold text-slate-600">{label}</p>
+                  <p className="mt-1 text-xl font-black text-slate-950">{count}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[1150px]">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-black text-slate-700">Account</th>
+                    <th className="px-3 py-2 text-left text-xs font-black text-slate-700">Category</th>
+                    <th className="px-3 py-2 text-left text-xs font-black text-slate-700">Account Status</th>
+                    <th className="px-3 py-2 text-right text-xs font-black text-slate-700">Amount Owed</th>
+                    <th className="px-3 py-2 text-right text-xs font-black text-slate-700">Past Due</th>
+                    <th className="px-3 py-2 text-right text-xs font-black text-slate-700">Days</th>
+                    <th className="px-3 py-2 text-left text-xs font-black text-slate-700">Stage</th>
+                    <th className="px-3 py-2 text-left text-xs font-black text-slate-700">Collections</th>
+                    <th className="px-3 py-2 text-left text-xs font-black text-slate-700">Payment Plan</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {debtSummary.accounts.length ? (
+                    debtSummary.accounts.map((account) => (
+                      <tr key={`${account.bucketName}-${account.id}`} className={account.excludedFromPaymentPlan ? 'bg-slate-50' : ''}>
+                        <td className="px-3 py-2 text-sm font-bold text-slate-950">
+                          {account.category || 'Unnamed account'}
+                          {account.accountLast4 ? <span className="ml-1 text-xs text-slate-500">•••• {account.accountLast4}</span> : null}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-slate-700">{account.bucketDisplayName}</td>
+                        <td className="px-3 py-2 text-sm">
+                          <span className="rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-800">
+                            {account.accountStatus}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm font-black text-rose-700">{formatDashboardCurrency(account.amountOwed)}</td>
+                        <td className="px-3 py-2 text-right text-sm font-black text-red-700">{formatDashboardCurrency(account.pastDueAmount)}</td>
+                        <td className="px-3 py-2 text-right text-sm font-bold text-slate-900">{account.daysDelinquent}</td>
+                        <td className="px-3 py-2 text-sm font-bold text-amber-800">{account.delinquencyStage}</td>
+                        <td className="px-3 py-2 text-sm text-slate-700">
+                          {account.collectionAgency || (account.sentToCollectionsDate ? `Sent ${formatDashboardDate(account.sentToCollectionsDate)}` : 'None listed')}
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          {account.excludedFromPaymentPlan ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-700 px-2 py-1 text-xs font-bold text-white">
+                              <Ban className="h-3 w-3" />
+                              Excluded
+                            </span>
+                          ) : account.pausedFromPaymentPlan ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-800">
+                              <PauseCircle className="h-3 w-3" />
+                              Paused
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Active
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="9" className="px-4 py-8 text-center text-sm font-semibold text-slate-500">
+                        No debt or account-status details have been entered yet. Use the amber document icon in Budget Editor actions.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
+
+
+
       <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
@@ -973,7 +1489,9 @@ const DashboardTab = ({
               { id: 'overdue', label: 'Overdue', color: 'bg-red-500/80 hover:bg-red-500' },
               { id: 'dueSoon', label: 'Due Soon', color: 'bg-yellow-500/80 hover:bg-yellow-500' },
               { id: 'pending', label: 'Pending', color: 'bg-blue-400/80 hover:bg-blue-400' },
-              { id: 'paid', label: 'Paid', color: 'bg-green-500/80 hover:bg-green-500' }
+              { id: 'paid', label: 'Paid', color: 'bg-green-500/80 hover:bg-green-500' },
+              { id: 'paused', label: 'Paused', color: 'bg-indigo-500/80 hover:bg-indigo-500' },
+              { id: 'notPaying', label: 'Excluded', color: 'bg-slate-500/80 hover:bg-slate-500' }
             ].map(filter => (
               <button
                 key={filter.id}
@@ -1036,6 +1554,8 @@ const DashboardTab = ({
                 <tbody className="bg-white">
                   {flatItems.map(item => {
                     const rowColor = (() => {
+                      if (item.status === 'notPaying') return 'bg-slate-100 border-slate-300';
+                      if (item.status === 'paused') return 'bg-indigo-50 border-indigo-200';
                       if (item.status === 'paid') return 'bg-green-100 border-green-200';
                       const today = new Date();
                       const diffDays = Math.ceil((new Date(item.dueDate) - today) / (1000 * 60 * 60 * 24));
@@ -1093,8 +1613,9 @@ const DashboardTab = ({
           const displayTitle = categoryNames[bucketName] || DEFAULT_TITLES[bucketName] || bucketName;
           const isExpanded = expandedCategories[bucketName] === true;
 
-          const totalBudgeted = items.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
-          const totalActual = items.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+          const activeItems = items.filter(isBudgetItemActive);
+          const totalBudgeted = activeItems.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+          const totalActual = activeItems.reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
           
           // Banking-specific totals
           const totalBalance = bucketName === 'banking' ? items.reduce((sum, item) => sum + (Number(item.currentBalance) || 0), 0) : 0;
@@ -1125,6 +1646,18 @@ const DashboardTab = ({
                       <span className="px-2 py-0.5 bg-yellow-500 text-white text-xs rounded-full flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         {statusCounts.dueSoon}
+                      </span>
+                    )}
+                    {statusCounts.paused > 0 && (
+                      <span className="px-2 py-0.5 bg-indigo-600 text-white text-xs rounded-full flex items-center gap-1">
+                        <PauseCircle className="w-3 h-3" />
+                        {statusCounts.paused}
+                      </span>
+                    )}
+                    {statusCounts.notPaying > 0 && (
+                      <span className="px-2 py-0.5 bg-slate-600 text-white text-xs rounded-full flex items-center gap-1">
+                        <Ban className="w-3 h-3" />
+                        {statusCounts.notPaying}
                       </span>
                     )}
                   </div>
@@ -1237,20 +1770,6 @@ const DashboardTab = ({
         })}
       </div>
 
-      <section className="mx-auto mb-6 max-w-6xl rounded-xl border border-orange-200 bg-orange-50 px-6 py-4 shadow-sm">
-        <h2 className="text-2xl font-bold text-slate-900">Budget Editor</h2>
-        <p className="mt-1 text-sm font-medium text-slate-600">
-          Edit budget items, categories, amounts, due dates, notes, and payment details.
-        </p>
-      </section>
-
-      <EditorTab
-        state={state}
-        setState={setState}
-        saveBudget={saveBudget}
-        searchQuery={searchQuery}
-      />
-
       {/* Grand Totals */}
       <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3">
@@ -1267,20 +1786,20 @@ const DashboardTab = ({
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Est. Budget</p>
               <p className="text-2xl font-bold text-blue-900">
-                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
+                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).filter(isBudgetItemActive).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Paid</p>
               <p className="text-2xl font-bold text-purple-900">
-                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
+                ${categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).filter(isBudgetItemActive).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Variance</p>
               {(() => {
-                const totalBudget = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
-                const totalActual = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
+                const totalBudget = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).filter(isBudgetItemActive).reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
+                const totalActual = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName)).filter(isBudgetItemActive).reduce((sum, item) => sum + (Number(item.actualCost) || 0), 0);
                 const variance = totalActual - totalBudget;
                 return (
                   <p className={`text-2xl font-bold ${variance > 0 ? 'text-red-600' : variance < 0 ? 'text-green-600' : 'text-gray-600'}`}>
