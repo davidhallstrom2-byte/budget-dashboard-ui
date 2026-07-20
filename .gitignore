@@ -1,56 +1,87 @@
-﻿node_modules/
+# Dependencies and generated build output
+node_modules/
 dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Environment files and private configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+**/mobile-config.php
+**/config.local.php
+**/*-config.local.php
+
+# Private and runtime application data
+restore/
+public/restore/
+private-data/
+public/private-data/
+uploads/
+public/uploads/
+documents/
+public/documents/
+attachments/
+public/attachments/
+paycheck-files/
+public/paycheck-files/
+task-files/
+public/task-files/
+
+# Budget data and safety copies
+**/budget-data.json
+**/budget-data.json.*
+**/budget-data-before-*.json
+!**/budget-data.example.json
+!**/budget-data.sample.json
+
+# Credentials, certificates, and private keys
+**/credentials*.json
+**/service-account*.json
+**/secrets*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Local databases and database exports
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
+
+# Backups, temporary files, and deployment packages
+backups/
+backup-*/
+.restore_tmp_*/
+*.bak
+*.backup
+*.tmp
+*.temp
+*.zip
+*.tar
+*.tar.gz
+
+# Logs and test artifacts
+*.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+screenshots/
+
+# Editor and operating-system files
 .DS_Store
+Thumbs.db
 .vscode/
-.restore_tmp_*/
-screenshots/
+.idea/
 
-.restore_tmp_*/
-screenshots/
-
-.env.local
-
-.env.local
-
-.env.local
-
-.env.local
-
-.env.local
-.env.local
-*.bak
-public/restore/*.bak
-* - Copy*.jsx
-*Copy*.jsx
-one-click-*.ps1
-.env.local
-*.bak
-public/restore/*.bak
-* - Copy*.jsx
-*Copy*.jsx
-one-click-*.ps1
-.env.local
-*.bak
-public/restore/*.bak
-* - Copy*.jsx
-*Copy*.jsx
-one-click-*.ps1
-.env.local
-*.bak
-public/restore/*.bak
-* - Copy*.jsx
-*Copy*.jsx
-one-click-*.ps1
-.env.local
-*.bak
-public/restore/*.bak
-* - Copy*.jsx
-*Copy*.jsx
-one-click-*.ps1
-.env.local
-*.bak
-public/restore/*.bak
+# Accidental source copies and local convenience scripts
 * - Copy*.jsx
 *Copy*.jsx
 one-click-*.ps1

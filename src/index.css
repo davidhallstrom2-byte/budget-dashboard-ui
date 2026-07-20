@@ -5,12 +5,30 @@
 /* Reserve vertical scrollbar space to prevent CLS */
 @layer base {
   html {
-    overflow-y: scroll;
-    scrollbar-gutter: stable both-edges;
+    overflow-y: auto;
     height: 100%;
   }
   body, #root {
     min-height: 100%;
+    min-width: 0;
+  }
+  body {
+    overflow-x: hidden;
+  }
+
+  @media (min-width: 768px) {
+    html {
+      overflow-y: scroll;
+      scrollbar-gutter: stable both-edges;
+    }
+  }
+
+  @media (max-width: 767px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
 }
 
@@ -19,6 +37,14 @@
   .table-scroll-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .mobile-horizontal-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
   
   /* Banking table needs min-width on mobile */
@@ -50,5 +76,222 @@
 @layer components {
   .tab-page-header {
     contain: layout paint;
+  }
+}
+
+@media (max-width: 767px) {
+  .tab-page-header-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tab-page-header-actions > * {
+    width: 100%;
+    min-width: 0;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .mobile-filter-controls {
+    width: 100%;
+  }
+
+  .mobile-filter-controls > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mobile-filter-controls input,
+  .mobile-filter-controls select,
+  .mobile-filter-controls button {
+    width: 100%;
+  }
+
+  .todo-mobile-table-shell {
+    overflow: visible;
+    border-width: 0;
+    background: transparent;
+  }
+
+  .todo-mobile-table,
+  .todo-mobile-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .todo-mobile-table colgroup,
+  .todo-mobile-table thead {
+    display: none;
+  }
+
+  .todo-mobile-main-row {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.75rem;
+    margin: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid #bbf7d0;
+    border-radius: 0.75rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+  }
+
+  .todo-mobile-main-row > td {
+    display: block;
+    min-width: 0;
+    width: auto;
+    padding: 0 !important;
+  }
+
+  .todo-mobile-main-row > td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .todo-mobile-main-row > td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .todo-mobile-main-row > td:nth-child(n + 3) {
+    grid-column: 1 / -1;
+  }
+
+  .todo-mobile-main-row > td:nth-child(3)::before,
+  .todo-mobile-main-row > td:nth-child(4)::before,
+  .todo-mobile-main-row > td:nth-child(5)::before,
+  .todo-mobile-main-row > td:nth-child(6)::before {
+    display: block;
+    margin-bottom: 0.35rem;
+    color: #475569;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .todo-mobile-main-row > td:nth-child(3)::before { content: "Due date / time"; }
+  .todo-mobile-main-row > td:nth-child(4)::before { content: "Status"; }
+  .todo-mobile-main-row > td:nth-child(5)::before { content: "Details"; }
+  .todo-mobile-main-row > td:nth-child(6)::before { content: "Actions"; }
+
+  .todo-mobile-main-row > td:nth-child(6) > div:first-child {
+    width: 100% !important;
+    grid-template-columns: repeat(5, 1.9rem) !important;
+    justify-content: start;
+  }
+
+  .todo-mobile-details-row {
+    display: block;
+    margin: -0.25rem 0.75rem 0.75rem;
+    border: 1px solid #d1fae5;
+    border-radius: 0.75rem;
+    background: #f0fdf4;
+  }
+
+  .todo-mobile-details-row > td:first-child {
+    display: none;
+  }
+
+  .todo-mobile-details-row > td[colspan] {
+    display: block;
+    width: 100%;
+    padding: 0.75rem !important;
+  }
+
+  .paychecks-table-shell {
+    overflow: visible;
+    border-width: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .paychecks-mobile-table,
+  .paychecks-mobile-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .paychecks-mobile-table colgroup,
+  .paychecks-mobile-table thead {
+    display: none;
+  }
+
+  .paychecks-mobile-table tbody > tr {
+    display: block;
+    margin-bottom: 0.9rem;
+    padding: 0.65rem;
+    overflow: hidden;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.85rem;
+    background: #fff;
+    box-shadow: 0 1px 3px rgb(15 23 42 / 0.1);
+  }
+
+  .paychecks-mobile-table tbody > tr > td {
+    display: grid;
+    grid-template-columns: 5.75rem minmax(0, 1fr);
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.55rem 0.35rem !important;
+    border-top: 1px solid #e2e8f0;
+    text-align: left !important;
+  }
+
+  .paychecks-mobile-table tbody > tr > td:first-child {
+    border-top: 0;
+  }
+
+  .paychecks-mobile-table tbody > tr > td::before {
+    color: #475569;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .paychecks-mobile-table tbody > tr > td:nth-child(1)::before { content: "Date / Period"; }
+  .paychecks-mobile-table tbody > tr > td:nth-child(2)::before { content: "Check #"; }
+  .paychecks-mobile-table tbody > tr > td:nth-child(3)::before { content: "Earnings"; }
+  .paychecks-mobile-table tbody > tr > td:nth-child(4)::before { content: "Gross"; }
+  .paychecks-mobile-table tbody > tr > td:nth-child(5)::before { content: "Taxes"; }
+  .paychecks-mobile-table tbody > tr > td:nth-child(6)::before { content: "Net"; }
+  .paychecks-mobile-table tbody > tr > td:nth-child(7)::before { content: "Notes"; }
+  .paychecks-mobile-table tbody > tr > td:nth-child(8)::before { content: "Actions"; }
+
+  .paychecks-mobile-table tbody > tr > td:nth-child(3),
+  .paychecks-mobile-table tbody > tr > td:nth-child(7),
+  .paychecks-mobile-table tbody > tr > td:nth-child(8) {
+    display: block;
+  }
+
+  .paychecks-mobile-table tbody > tr > td:nth-child(3)::before,
+  .paychecks-mobile-table tbody > tr > td:nth-child(7)::before,
+  .paychecks-mobile-table tbody > tr > td:nth-child(8)::before {
+    display: block;
+    margin-bottom: 0.45rem;
+  }
+
+  .paychecks-mobile-table tbody > tr > td:nth-child(3) > div > div {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    row-gap: 0.3rem;
+  }
+
+  .paychecks-mobile-table tbody > tr > td[colspan] {
+    display: block;
+    text-align: center !important;
+  }
+
+  .paychecks-mobile-table tbody > tr > td[colspan]::before {
+    content: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .tab-page-header-actions {
+    display: flex;
   }
 }

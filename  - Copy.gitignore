@@ -1,0 +1,56 @@
+﻿node_modules/
+dist/
+npm-debug.log*
+.DS_Store
+.vscode/
+.restore_tmp_*/
+screenshots/
+
+.restore_tmp_*/
+screenshots/
+
+.env.local
+
+.env.local
+
+.env.local
+
+.env.local
+
+.env.local
+.env.local
+*.bak
+public/restore/*.bak
+* - Copy*.jsx
+*Copy*.jsx
+one-click-*.ps1
+.env.local
+*.bak
+public/restore/*.bak
+* - Copy*.jsx
+*Copy*.jsx
+one-click-*.ps1
+.env.local
+*.bak
+public/restore/*.bak
+* - Copy*.jsx
+*Copy*.jsx
+one-click-*.ps1
+.env.local
+*.bak
+public/restore/*.bak
+* - Copy*.jsx
+*Copy*.jsx
+one-click-*.ps1
+.env.local
+*.bak
+public/restore/*.bak
+* - Copy*.jsx
+*Copy*.jsx
+one-click-*.ps1
+.env.local
+*.bak
+public/restore/*.bak
+* - Copy*.jsx
+*Copy*.jsx
+one-click-*.ps1

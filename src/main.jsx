@@ -8,3 +8,13 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/budget-dashboard-fs/sw.js", {
+      scope: "/budget-dashboard-fs/",
+    }).catch((error) => {
+      console.warn("Mobile app installation support could not start.", error);
+    });
+  });
+}

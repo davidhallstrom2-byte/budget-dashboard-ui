@@ -31,6 +31,12 @@ function isWordPressHost() {
   );
 }
 
+function isHostedMobileApp() {
+  if (typeof window === "undefined") return false;
+  const hostname = String(window.location.hostname || "").toLowerCase();
+  return hostname !== "localhost" && hostname !== "127.0.0.1" && !hostname.endsWith(".local");
+}
+
 // ---------------- Data URL resolution ----------------
 function getDataUrlCandidates() {
   if (isViteDev()) {
@@ -336,8 +342,9 @@ async function _saveInternal() {
     console.error('localStorage save failed:', err);
   }
 
-  saveResults.file.attempted = true;
-  try {
+  if (!isHostedMobileApp()) {
+    saveResults.file.attempted = true;
+    try {
     const res = await fetch("/budget-dashboard-fs/save.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -352,9 +359,10 @@ async function _saveInternal() {
     } else {
       throw new Error(`HTTP ${res.status}`);
     }
-  } catch (err) {
-    saveResults.file.error = String(err);
-    console.error('❌ File save failed:', err);
+    } catch (err) {
+      saveResults.file.error = String(err);
+      console.error('❌ File save failed:', err);
+    }
   }
 
   if (isWordPressHost()) {

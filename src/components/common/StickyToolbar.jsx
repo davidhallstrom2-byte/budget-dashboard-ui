@@ -12,7 +12,7 @@ export default function StickyToolbar({ children, bgTint = "", contentClassName 
   return (
     <div
       className={[
-        "sticky top-0 z-50 w-full border-b backdrop-blur",
+        "sticky top-12 z-30 w-full border-b backdrop-blur",
         hasCustomTint ? bgTint : "bg-white/80 supports-[backdrop-filter]:bg-white/60",
         hasCustomTint ? "border-slate-800 shadow-lg" : "shadow-sm",
       ].join(" ")}

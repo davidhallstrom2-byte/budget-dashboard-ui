@@ -63,33 +63,49 @@ export default function TabPageHeader({
   message = '',
   theme = 'blue',
   className = '',
+  compactMobile = false,
 }) {
   const selectedTheme = THEME_CLASSES[theme] || THEME_CLASSES.blue;
+  const shellLayoutClass = compactMobile
+    ? 'min-h-0 rounded-xl px-3 py-3 sm:min-h-[140px] sm:rounded-2xl sm:px-6 sm:py-5 xl:min-h-[124px]'
+    : 'min-h-[156px] rounded-2xl px-5 py-5 sm:min-h-[140px] sm:px-6 xl:min-h-[124px]';
+  const contentLayoutClass = compactMobile
+    ? 'min-h-0 gap-3 sm:min-h-[114px] sm:gap-4 xl:min-h-[82px]'
+    : 'min-h-[114px] gap-4 xl:min-h-[82px]';
+  const iconLayoutClass = compactMobile
+    ? 'h-8 w-8 rounded-lg sm:h-10 sm:w-10 sm:rounded-xl'
+    : 'h-10 w-10 rounded-xl';
+  const titleLayoutClass = compactMobile
+    ? 'text-xl leading-7 sm:text-2xl sm:leading-8'
+    : 'text-2xl leading-8';
+  const subtitleLayoutClass = compactMobile ? 'hidden sm:block' : '';
+  const messageLayoutClass = compactMobile && !message ? 'hidden sm:block' : '';
+  const actionsLayoutClass = compactMobile ? 'min-h-0 sm:min-h-10' : 'min-h-10';
 
   return (
     <section
-      className={`tab-page-header box-border w-full flex-none min-h-[156px] rounded-2xl border-2 px-5 py-5 text-white shadow-lg sm:min-h-[140px] sm:px-6 xl:min-h-[124px] ${selectedTheme.shell} ${className}`}
+      className={`tab-page-header box-border w-full flex-none border-2 text-white shadow-lg ${shellLayoutClass} ${selectedTheme.shell} ${className}`}
       aria-labelledby={`tab-page-header-${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
     >
-      <div className="flex min-h-[114px] flex-col gap-4 xl:min-h-[82px] xl:flex-row xl:items-center xl:justify-between">
+      <div className={`flex flex-col xl:flex-row xl:items-center xl:justify-between ${contentLayoutClass}`}>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ${selectedTheme.icon}`}>
-              {Icon ? <Icon className="h-6 w-6" aria-hidden="true" /> : null}
+            <span className={`inline-flex shrink-0 items-center justify-center ring-1 ${iconLayoutClass} ${selectedTheme.icon}`}>
+              {Icon ? <Icon className={compactMobile ? 'h-5 w-5 sm:h-6 sm:w-6' : 'h-6 w-6'} aria-hidden="true" /> : null}
             </span>
             <h1
               id={`tab-page-header-${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
-              className="min-w-0 text-2xl font-black leading-8 tracking-tight text-white"
+              className={`min-w-0 font-black tracking-tight text-white ${titleLayoutClass}`}
             >
               {title}
             </h1>
           </div>
 
-          <p className={`mt-2 max-w-3xl text-sm font-medium leading-5 ${selectedTheme.subtitle}`}>
+          <p className={`mt-2 max-w-3xl text-sm font-medium leading-5 ${subtitleLayoutClass} ${selectedTheme.subtitle}`}>
             {subtitle}
           </p>
 
-          <div className="mt-3 min-h-6" aria-live="polite" aria-atomic="true">
+          <div className={`mt-3 min-h-6 ${messageLayoutClass}`} aria-live="polite" aria-atomic="true">
             {message ? (
               <p className={`inline-flex min-h-6 items-center rounded-full border px-3 py-1 text-xs font-extrabold leading-4 shadow-sm ${selectedTheme.message}`}>
                 {message}
@@ -103,7 +119,7 @@ export default function TabPageHeader({
         </div>
 
         {actions ? (
-          <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 xl:max-w-[58%] xl:justify-end">
+          <div className={`flex shrink-0 flex-wrap items-center gap-2 xl:max-w-[58%] xl:justify-end ${actionsLayoutClass}`}>
             {actions}
           </div>
         ) : (

@@ -618,7 +618,7 @@ const BudgetDashboard = () => {
       },
       {
         id: 'cscOpportunities',
-        label: 'CSC Opportunities',
+        label: 'CSC Opps',
         icon: CalendarDays,
         bgColor: 'bg-indigo-50',
         activeClass: 'bg-gradient-to-r from-indigo-700 to-violet-600 text-white border-indigo-800 shadow-md shadow-indigo-200',
@@ -1218,7 +1218,7 @@ const BudgetDashboard = () => {
           style={{ isolation: 'isolate' }}
         >
           <div
-            className={`absolute top-20 right-4 px-4 py-2 rounded-lg shadow-lg pointer-events-auto ${
+            className={`absolute inset-x-3 top-16 rounded-lg px-4 py-2 text-sm shadow-lg pointer-events-auto sm:left-auto sm:right-4 sm:top-20 sm:max-w-md ${
               saveStatus.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
             }`}
             role="status"
@@ -1230,8 +1230,8 @@ const BudgetDashboard = () => {
       )}
 
       <StickyToolbar bgTint="bg-slate-950" contentClassName="w-full px-3 sm:px-4 lg:px-6">
-        <div className="flex min-h-14 flex-wrap items-center justify-between gap-2 py-2 xl:flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 overflow-visible xl:flex-nowrap">
+        <div className="flex flex-col gap-2 py-2 xl:min-h-14 xl:flex-row xl:items-center xl:justify-between">
+          <div className="grid w-full min-w-0 grid-cols-3 gap-2 xl:flex xl:w-auto xl:flex-1 xl:flex-nowrap xl:items-center xl:gap-1.5">
             {tabs.map((tab) => {
               const TabIcon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -1247,21 +1247,21 @@ const BudgetDashboard = () => {
                   }}
                   title={`Open ${tab.label} tab`}
                   aria-label={`Open ${tab.label} tab`}
-                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-black whitespace-nowrap transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 sm:px-3 sm:text-sm ${
+                  className={`inline-flex min-h-12 min-w-0 items-center justify-center gap-1 rounded-xl border px-1.5 py-1.5 text-center text-[10px] font-black leading-tight whitespace-normal transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 sm:text-xs xl:min-h-10 xl:w-auto xl:shrink-0 xl:gap-1.5 xl:px-3 xl:text-sm xl:whitespace-nowrap ${
                     isActive
                       ? tab.activeClass
                       : tab.inactiveClass
                   }`}
                   aria-pressed={isActive}
                 >
-                  <TabIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                  <span>{tab.label}</span>
+                  <TabIcon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                  <span className="min-w-0">{tab.label}</span>
                 </button>
               );
             })}
           </div>
 
-          <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
+          <div className="mobile-horizontal-scroll flex w-full flex-shrink-0 flex-nowrap items-center gap-1 overflow-y-hidden pb-1 sm:gap-2 xl:w-auto xl:pb-0">
             {activeTab === 'budget' &&
             (activeBudgetTab === 'overview' || activeBudgetTab === 'editor') ? (
               <NotificationPanel
@@ -1392,8 +1392,8 @@ const BudgetDashboard = () => {
       />
 
       {showExportDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-y-auto px-4 py-6">
-          <div className="bg-white rounded-lg p-6 w-96 shadow-xl max-h-[calc(100vh-3rem)] overflow-y-auto">
+        <div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 px-3 py-4 sm:px-4 sm:py-6">
+          <div className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:max-h-[calc(100vh-3rem)] sm:p-6">
             <h3 className="text-lg font-bold mb-4">Export Budget</h3>
 
             <div className="mb-4">

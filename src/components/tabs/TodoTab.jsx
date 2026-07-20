@@ -4031,21 +4031,143 @@ const addParsedTasks = () => {
         </div>
       )}
 
+      <style>{`
+        .todo-mobile-field-label {
+          display: none;
+        }
+
+        .todo-task-time-field {
+          margin-top: 0.25rem;
+        }
+
+        @media (max-width: 639px) {
+          .todo-task-table,
+          .todo-task-body,
+          .todo-empty-row,
+          .todo-task-main-row,
+          .todo-task-detail-row,
+          .todo-empty-cell,
+          .todo-task-cell,
+          .todo-task-detail-cell {
+            display: block;
+          }
+
+          .todo-task-table {
+            width: 100%;
+            table-layout: auto;
+          }
+
+          .todo-task-table colgroup,
+          .todo-task-head,
+          .todo-task-detail-spacer {
+            display: none;
+          }
+
+          .todo-task-main-row {
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            margin: 0.75rem 0.5rem 0;
+            border-width: 1px;
+            border-style: solid;
+            border-color: #cbd5e1;
+            border-radius: 0.75rem 0.75rem 0 0;
+          }
+
+          .todo-task-check-cell {
+            position: absolute;
+            left: 0.75rem;
+            top: 3.5rem;
+            padding: 0;
+          }
+
+          .todo-task-name-cell {
+            padding: 0.75rem 0.75rem 0.5rem 2.5rem;
+          }
+
+          .todo-task-due-cell,
+          .todo-task-status-cell {
+            padding: 0 0.75rem 0.5rem;
+          }
+
+          .todo-task-details-cell {
+            padding: 0 0.75rem 0.75rem;
+          }
+
+          .todo-mobile-field-label {
+            display: block;
+            margin-bottom: 0.25rem;
+            color: #64748b;
+            font-size: 0.6875rem;
+            font-weight: 700;
+            letter-spacing: 0.025em;
+            text-transform: uppercase;
+          }
+
+          .todo-task-datetime-fields {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 0.5rem;
+          }
+
+          .todo-task-time-field {
+            margin-top: 0;
+          }
+
+          .todo-task-actions-cell {
+            order: -1;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #e2e8f0;
+            border-radius: 0.75rem 0.75rem 0 0;
+            background: #f8fafc;
+          }
+
+          .todo-task-action-row {
+            display: flex;
+            width: 100% !important;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.25rem !important;
+          }
+
+          .todo-task-detail-row {
+            margin: 0 0.5rem 0.75rem;
+            border-width: 0 1px 1px;
+            border-style: solid;
+            border-color: #cbd5e1;
+            border-radius: 0 0 0.75rem 0.75rem;
+          }
+
+          .todo-task-detail-cell {
+            padding: 0 0.75rem 0.75rem;
+          }
+
+          .todo-follow-up-compose {
+            flex-direction: column;
+          }
+
+          .todo-add-note-button {
+            width: 100%;
+          }
+        }
+      `}</style>
+
       <TabPageHeader
         icon={ListTodo}
         title="To-Do"
         subtitle="Manage tasks, deadlines, contacts, documents, follow-ups, and completion history."
         theme="emerald"
+        compactMobile
         actions={
           <>
             <button
               type="button"
               onClick={() => setIsImportOpen(true)}
               title="Import structured text"
-              className={`${TAB_HEADER_ACTION_CLASS} bg-white text-emerald-900 hover:bg-emerald-50`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 bg-white text-emerald-900 hover:bg-emerald-50`}
             >
               <FileText className="h-4 w-4" />
-              Import
+              <span className="hidden sm:inline">Import</span>
             </button>
 
             <button
@@ -4057,47 +4179,51 @@ const addParsedTasks = () => {
                 setIsCreateOpen(true);
               }}
               title="Add task"
-              className={`${TAB_HEADER_ACTION_CLASS} bg-slate-950 text-white hover:bg-slate-800`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 bg-slate-950 text-white hover:bg-slate-800`}
             >
               <Plus className="h-4 w-4" />
-              Add Task
+              <span className="hidden sm:inline">Add Task</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsExportOpen(true)}
               title="Open export options"
-              className={`${TAB_HEADER_ACTION_CLASS} bg-indigo-600 text-white hover:bg-indigo-500`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 bg-indigo-600 text-white hover:bg-indigo-500`}
             >
               <Download className="h-4 w-4" />
-              Export
+              <span className="hidden sm:inline">Export</span>
             </button>
 
             <button
               type="button"
               onClick={() => setShowPremiumTodoView(true)}
               title="View premium To-Do list"
-              className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 border border-white/30 bg-white/15 text-white hover:bg-white/25`}
             >
               <ListTodo className="h-4 w-4" />
-              Premium View
+              <span className="hidden sm:inline">Premium View</span>
             </button>
           </>
         }
       />
 
-      <section className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 p-3 shadow-md">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="min-w-[220px] shrink-0">
-            <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-              <span>Active Tasks</span>
-              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-blue-700 px-2 text-xs font-bold leading-none text-white shadow-sm">
+      <section className="rounded-xl border-2 border-green-300 bg-gradient-to-r from-green-50 to-green-100 p-1.5 shadow-md sm:p-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
+          <div className="min-w-fit shrink-0 sm:min-w-[220px]">
+            <h3
+              className="flex h-8 items-center gap-1 rounded-lg border border-black bg-white px-1.5 text-sm font-bold text-slate-900 shadow-sm sm:h-auto sm:gap-2 sm:border-0 sm:bg-transparent sm:px-0 sm:text-lg sm:shadow-none"
+              title={`${totalActiveTasks} active task${totalActiveTasks === 1 ? "" : "s"}`}
+            >
+              <ListTodo className="h-4 w-4 text-slate-700 sm:hidden" aria-hidden="true" />
+              <span className="hidden sm:inline">Active Tasks</span>
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-700 px-1.5 text-[11px] font-bold leading-none text-white shadow-sm sm:h-6 sm:min-w-6 sm:px-2 sm:text-xs">
                 {totalActiveTasks}
               </span>
             </h3>
           </div>
 
-          <div className="flex min-w-[280px] flex-1 flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto sm:min-w-[280px] sm:flex-wrap sm:gap-2 sm:overflow-visible">
             {activeCategorySummary.length > 0 ? (
               activeCategorySummary.map((item) => {
                 const Icon = TODO_CATEGORY_ICONS[item.type]?.icon || ListTodo;
@@ -4117,18 +4243,18 @@ const addParsedTasks = () => {
                         document.getElementById(getCategoryAnchorId(item.type))?.scrollIntoView({ behavior: "smooth", block: "start" });
                       });
                     }}
-                    className="group inline-flex items-center justify-between gap-2 rounded-lg border border-black bg-white px-4 py-2 text-left text-sm font-semibold shadow-sm transition hover:bg-green-100"
+                    className="group inline-flex h-8 shrink-0 items-center justify-between gap-1 rounded-lg border border-black bg-white px-1.5 text-left text-xs font-semibold shadow-sm transition hover:bg-green-100 sm:h-auto sm:gap-2 sm:px-4 sm:py-2 sm:text-sm"
                     title={`Go to ${item.type} active tasks`}
                     aria-label={`Go to ${item.type} active tasks`}
                   >
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-1 sm:gap-2">
                       <Icon className={`h-4 w-4 shrink-0 ${iconColor}`} aria-hidden="true" />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-900">{item.type}</div>
+                      <div className="hidden min-w-0 sm:block">
+                        <div className="truncate text-xs font-semibold text-slate-900 sm:text-sm">{item.type}</div>
                       </div>
                     </div>
                     <div
-                      className={`flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-bold leading-none text-white shadow-sm ${
+                      className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none text-white shadow-sm sm:h-6 sm:min-w-6 sm:px-2 sm:text-xs ${
                         item.overdueCount > 0 ? "bg-red-600 group-hover:bg-red-700" : "bg-blue-700 group-hover:bg-blue-800"
                       }`}
                       title={
@@ -4151,9 +4277,9 @@ const addParsedTasks = () => {
         </div>
       </section>
 
-      <section className="space-y-5">
+      <section className="space-y-3 sm:space-y-5">
         <div className="flex items-start justify-end gap-3">
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="grid w-full grid-cols-4 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
             <button
               type="button"
               onClick={() => {
@@ -4161,54 +4287,44 @@ const addParsedTasks = () => {
                 alert("Safety snapshot saved.");
               }}
               title="Save a manual safety snapshot of active and archived To-Do tasks"
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800"
+              aria-label="Save a manual safety snapshot of active and archived To-Do tasks"
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-700 px-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-800 sm:gap-2 sm:px-4 sm:text-sm"
             >
-              <History size={16} />
-              Safety Snapshot
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setArchivedTasks(readStoredArchivedTasks());
-                setIsArchiveDrawerOpen(true);
-              }}
-              title={`Open archive drawer with ${archivedTasks.length} archived task${archivedTasks.length === 1 ? "" : "s"}`}
-              aria-label={`Open archive drawer with ${archivedTasks.length} archived task${archivedTasks.length === 1 ? "" : "s"}`}
-              className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-800"
-            >
-              <Archive size={16} />
-              Archive Drawer
-              <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-black">{archivedTasks.length}</span>
+              <History size={18} />
+              <span className="hidden sm:inline">Safety Snapshot</span>
             </button>
             <button
               type="button"
               onClick={() => setShowActiveOnly((current) => !current)}
               title={showActiveOnly ? "Show all task categories" : "Show only categories with active tasks and hide completed tasks"}
+              aria-label={showActiveOnly ? "Show all task categories" : "Show only categories with active tasks and hide completed tasks"}
               aria-pressed={showActiveOnly}
-              className={`inline-flex min-w-[168px] items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm ${
+              className={`inline-flex h-10 items-center justify-center rounded-lg px-2 text-xs font-semibold text-white shadow-sm sm:min-w-[168px] sm:gap-2 sm:px-4 sm:text-sm ${
                 showActiveOnly ? "bg-blue-700 hover:bg-blue-800" : "bg-slate-600 hover:bg-slate-700"
               }`}
             >
-              <Check size={16} />
-              {showActiveOnly ? "Active Only" : "Show Active"}
+              <Check size={18} />
+              <span className="hidden sm:inline">{showActiveOnly ? "Active Only" : "Show Active"}</span>
             </button>
             <button
               type="button"
               onClick={() => setCollapsedCategories(taskCategoryTypes.reduce((map, type) => ({ ...map, [type]: true }), {}))}
               title="Collapse all categories"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-600 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              aria-label="Collapse all categories"
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-600 px-2 text-xs font-semibold text-white hover:bg-slate-700 sm:gap-2 sm:px-4 sm:text-sm"
             >
-              <ChevronDown size={16} />
-              Collapse All
+              <ChevronDown size={18} />
+              <span className="hidden sm:inline">Collapse All</span>
             </button>
             <button
               type="button"
               onClick={() => setCollapsedCategories({})}
               title="Expand all visible categories"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-600 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              aria-label="Expand all visible categories"
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-600 px-2 text-xs font-semibold text-white hover:bg-slate-700 sm:gap-2 sm:px-4 sm:text-sm"
             >
-              <ChevronRight size={16} />
-              Expand All
+              <ChevronRight size={18} />
+              <span className="hidden sm:inline">Expand All</span>
             </button>
           </div>
         </div>
@@ -4392,7 +4508,7 @@ const addParsedTasks = () => {
 
               {!isCollapsed && (
                 <div className="rounded-b-xl border-2 border-green-700 bg-green-50">
-                  <table className="w-full table-fixed text-sm">
+                  <table className="todo-task-table w-full table-fixed text-sm">
                     <colgroup>
                       <col className="w-8" />
                       <col className="w-[24%]" />
@@ -4401,7 +4517,7 @@ const addParsedTasks = () => {
                       <col />
                       <col style={{ width: "188px" }} />
                     </colgroup>
-                    <thead className="bg-green-100 text-green-950">
+                    <thead className="todo-task-head bg-green-100 text-green-950">
                       <tr className="border-b-2 border-green-700">
                         <th className="px-1 py-2 text-left font-medium text-gray-700"></th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Task</th>
@@ -4411,10 +4527,10 @@ const addParsedTasks = () => {
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Actions</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="todo-task-body">
                       {categoryTasks.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="px-4 py-4 text-sm text-slate-500">
+                        <tr className="todo-empty-row">
+                          <td colSpan={6} className="todo-empty-cell px-4 py-4 text-sm text-slate-500">
                             No tasks in this category.
                           </td>
                         </tr>
@@ -4456,8 +4572,8 @@ const addParsedTasks = () => {
 
                           return (
                             <React.Fragment key={task.id}>
-                              <tr className={`${rowClass} ${mainRowDividerClass}`}>
-                                <td className="align-top px-2 py-2">
+                              <tr className={`todo-task-main-row ${rowClass} ${mainRowDividerClass}`}>
+                                <td className="todo-task-cell todo-task-check-cell align-top px-2 py-2">
                                   <input
                                     type="checkbox"
                                     checked={checkedTaskIds.includes(task.id)}
@@ -4467,7 +4583,7 @@ const addParsedTasks = () => {
                                     aria-label={`Select ${task.taskName || "task"}`}
                                   />
                                 </td>
-                                <td className="align-top px-2 py-2">
+                                <td className="todo-task-cell todo-task-name-cell align-top px-2 py-2">
                                   <input
                                     value={task.taskName || ""}
                                     onChange={(event) => updateTaskField(task.id, "taskName", event.target.value)}
@@ -4484,24 +4600,29 @@ const addParsedTasks = () => {
                                     <div className="mt-1 text-xs font-semibold text-indigo-700">Related source: {task.sourceTaskName}</div>
                                   )}
                                 </td>
-                                <td className="align-top px-2 py-2">
-                                  <TodoDatePickerInput
-                                    value={task.deadline || task.date || ""}
-                                    onChange={(value) => updateTaskField(task.id, task.deadline !== undefined ? "deadline" : "date", value)}
-                                    className="w-full rounded border border-slate-300 bg-white p-1 text-sm"
-                                  />
-                                  <div className="mt-1">
-                                    <TodoTimePickerInput
-                                      value={task.time || ""}
-                                      onChange={(value) => updateTaskField(task.id, "time", value)}
+                                <td className="todo-task-cell todo-task-due-cell align-top px-2 py-2">
+                                  <div className="todo-mobile-field-label">Due date and time</div>
+                                  <div className="todo-task-datetime-fields">
+                                    <TodoDatePickerInput
+                                      value={task.deadline || task.date || ""}
+                                      onChange={(value) => updateTaskField(task.id, task.deadline !== undefined ? "deadline" : "date", value)}
                                       className="w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                     />
+                                    <div className="todo-task-time-field">
+                                      <TodoTimePickerInput
+                                        value={task.time || ""}
+                                        onChange={(value) => updateTaskField(task.id, "time", value)}
+                                        className="w-full rounded border border-slate-300 bg-white p-1 text-sm"
+                                      />
+                                    </div>
                                   </div>
                                 </td>
-                                <td className="align-top px-2 py-2">
+                                <td className="todo-task-cell todo-task-status-cell align-top px-2 py-2">
+                                  <div className="todo-mobile-field-label">Status</div>
                                   <span className={`inline-flex rounded px-2 py-1 text-xs font-bold ${statusClass}`}>{statusLabel}</span>
                                 </td>
-                                <td className="align-top px-2 py-2">
+                                <td className="todo-task-cell todo-task-details-cell align-top px-2 py-2">
+                                  <div className="todo-mobile-field-label">Details</div>
                                   <AutoResizeTextarea
                                     value={task.details || ""}
                                     onChange={(value) => updateTaskField(task.id, "details", value)}
@@ -4512,9 +4633,9 @@ const addParsedTasks = () => {
                                     className="min-h-[34px] w-full rounded border border-slate-300 bg-white p-1 text-sm"
                                   />
                                 </td>
-                                <td className="align-top px-2 py-2 text-left">
+                                <td className="todo-task-cell todo-task-actions-cell align-top px-2 py-2 text-left">
                                   <div
-                                    className="grid justify-items-center"
+                                    className="todo-task-action-row grid justify-items-center"
                                     style={{ gridTemplateColumns: "repeat(5, 28px)", gap: "6px", width: "164px" }}
                                   >
                                     <button
@@ -4630,9 +4751,9 @@ const addParsedTasks = () => {
                               </tr>
 
                               {hasDetailFields && (
-                                <tr className={`${getTaskDetailRowClass(task, isBlocked)} border-b border-slate-200`}>
-                                  <td></td>
-                                  <td colSpan={5} className="px-2 pb-3">
+                                <tr className={`todo-task-detail-row ${getTaskDetailRowClass(task, isBlocked)} border-b border-slate-200`}>
+                                  <td className="todo-task-detail-spacer"></td>
+                                  <td colSpan={5} className="todo-task-detail-cell px-2 pb-3">
 
                                     <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
                                       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Notes</div>
@@ -4718,7 +4839,7 @@ const addParsedTasks = () => {
                                         </div>
                                       )}
 
-                                      <div className="flex gap-2">
+                                      <div className="todo-follow-up-compose flex gap-2">
                                         <div className="flex-1">
                                           <FormattingTextarea
                                             value={followUpDrafts[task.id] || ""}
@@ -4731,7 +4852,7 @@ const addParsedTasks = () => {
                                         <button
                                           type="button"
                                           onClick={() => addFollowUpEntry(task.id)}
-                                          className="self-start rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                                          className="todo-add-note-button self-start rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
                                           title="Add follow-up entry"
                                         >
                                           Add Note
