@@ -10,6 +10,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
 
 const BUREAU_OPTIONS = ['Experian', 'Equifax', 'TransUnion'];
 const DEFAULT_BUCKETS = [
@@ -600,9 +601,7 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
             </div>
             <p className="mt-1 text-sm text-slate-600">Review every detected account before any budget or debt record changes.</p>
           </div>
-          <button type="button" onClick={resetAndClose} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-white" aria-label="Close credit report scanner">
-            <X className="h-5 w-5" />
-          </button>
+          <CloseScreenButton onClick={resetAndClose} />
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">

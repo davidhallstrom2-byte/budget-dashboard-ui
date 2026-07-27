@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { CATEGORY_OPTIONS } from "../../utils/receipts/vendors";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 
 export default function ReceiptReview({ seed, onCancel, onConfirm }) {
   const [categoryKey, setCategoryKey] = useState(seed.categoryKey || "misc");
@@ -30,7 +31,10 @@ export default function ReceiptReview({ seed, onCancel, onConfirm }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-semibold mb-4">Review Receipt</h2>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Review Receipt</h2>
+          <CloseScreenButton onClick={onCancel} />
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>

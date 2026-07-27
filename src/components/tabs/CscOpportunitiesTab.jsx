@@ -2,10 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarCheck2,
   CalendarDays,
+  ChevronDown,
   CircleAlert,
   ClipboardCheck,
   Edit3,
   ExternalLink,
+  Link2Off,
+  ListX,
   ListTodo,
   MapPin,
   Plus,
@@ -18,8 +21,11 @@ import {
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
+import { formatPhoneNumber } from '../../utils/phone';
 
 const OPPORTUNITIES_STORAGE_KEY = 'cscOpportunities.v1';
+const OPPORTUNITIES_ARCHIVE_STORAGE_KEY = 'cscOpportunities.archived.v1';
 const VENUE_CONTACTS_STORAGE_KEY = 'cscVenueContacts.v1';
 const OPPORTUNITIES_SNAPSHOT_STORAGE_KEY = 'cscOpportunities.safetySnapshot.v1';
 const CSC_STORAGE_KEY = 'cscShifts.v1';
@@ -177,7 +183,11 @@ const createId = (prefix = 'csc-opportunity') => {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000);
+  return localDate.toISOString().slice(0, 10);
+};
 
 
 const formatDate = (value) => {
@@ -308,7 +318,7 @@ const createBlankOpportunity = (defaults = {}) => ({
   sourceText: defaults.sourceText || '',
   eventUrl: defaults.eventUrl || '',
   schedulerName: defaults.schedulerName || '',
-  schedulerPhone: defaults.schedulerPhone || '',
+  schedulerPhone: formatPhoneNumber(defaults.schedulerPhone || ''),
   schedulerExtension: defaults.schedulerExtension || '',
   bestCallTime: defaults.bestCallTime || '',
   callFrequency: defaults.callFrequency || 'Daily',
@@ -337,7 +347,7 @@ const createDefaultContacts = () =>
     id: createId('csc-venue-contact'),
     venue: definition.venue,
     schedulerName: definition.schedulerName || '',
-    schedulerPhone: definition.schedulerPhone || '',
+    schedulerPhone: formatPhoneNumber(definition.schedulerPhone || ''),
     schedulerExtension: definition.schedulerExtension || '',
     bestCallTime: '',
     callFrequency: 'Daily',
@@ -357,8 +367,51 @@ const readArray = (storageKey, fallback = []) => {
   }
 };
 
+const isExpiredOpportunity = (opportunity = {}, currentDate = todayIso()) => {
+  const eventDate = String(opportunity.eventDate || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(eventDate) && eventDate < currentDate;
+};
+
+const archiveExpiredOpportunities = (items = []) => {
+  const opportunities = Array.isArray(items) ? items : [];
+  const currentDate = todayIso();
+  const expired = opportunities.filter((item) => isExpiredOpportunity(item, currentDate));
+
+  if (!expired.length) return opportunities;
+
+  try {
+    const archived = readArray(OPPORTUNITIES_ARCHIVE_STORAGE_KEY, []);
+    const archivedById = new Map(
+      archived
+        .filter((item) => item?.id)
+        .map((item) => [item.id, item])
+    );
+    const archivedAt = new Date().toISOString();
+
+    expired.forEach((item) => {
+      const existing = archivedById.get(item.id);
+      archivedById.set(item.id, {
+        ...item,
+        archivedAt: existing?.archivedAt || archivedAt,
+        archiveReason: 'Event date passed',
+      });
+    });
+
+    localStorage.setItem(
+      OPPORTUNITIES_ARCHIVE_STORAGE_KEY,
+      JSON.stringify(Array.from(archivedById.values()))
+    );
+  } catch (error) {
+    console.error('Failed to archive expired CSC opportunities:', error);
+  }
+
+  return opportunities.filter((item) => !isExpiredOpportunity(item, currentDate));
+};
+
 const loadOpportunities = () =>
-  readArray(OPPORTUNITIES_STORAGE_KEY, []).map((item) => createBlankOpportunity(item));
+  archiveExpiredOpportunities(
+    readArray(OPPORTUNITIES_STORAGE_KEY, []).map((item) => createBlankOpportunity(item))
+  );
 
 const loadVenueContacts = () => {
   const stored = readArray(VENUE_CONTACTS_STORAGE_KEY, []);
@@ -373,7 +426,7 @@ const loadVenueContacts = () => {
       ...storedContact,
       venue: contact.venue,
       schedulerName: storedContact.schedulerName || contact.schedulerName,
-      schedulerPhone: storedContact.schedulerPhone || contact.schedulerPhone,
+      schedulerPhone: formatPhoneNumber(storedContact.schedulerPhone || contact.schedulerPhone),
       schedulerExtension: storedContact.schedulerExtension || contact.schedulerExtension,
       eventUrl: storedContact.eventUrl || contact.eventUrl,
       venueLogo: contact.venueLogo || storedContact.venueLogo || '',
@@ -1514,11 +1567,13 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [opportunities, setOpportunities] = useState(() => loadOpportunities());
   const [venueContacts, setVenueContacts] = useState(() => loadVenueContacts());
   const [localSearch, setLocalSearch] = useState('');
-  const [venueFilter, setVenueFilter] = useState('All');
+  const [excludedVenues, setExcludedVenues] = useState([]);
+  const [showVenueFilter, setShowVenueFilter] = useState(false);
   const [monthFilter, setMonthFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [summaryFilter, setSummaryFilter] = useState('active');
   const [showMonthOverview, setShowMonthOverview] = useState(false);
+  const [monthViewRequest, setMonthViewRequest] = useState(0);
   const [saveMessage, setSaveMessage] = useState('');
   const [showFormDrawer, setShowFormDrawer] = useState(false);
   const [showScanDrawer, setShowScanDrawer] = useState(false);
@@ -1536,6 +1591,69 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [cscShiftSyncVersion, setCscShiftSyncVersion] = useState(0);
   const noteTextareaRefs = useRef(new Map());
   const importInputRef = useRef(null);
+  const venueFilterRef = useRef(null);
+
+  const venueNames = useMemo(
+    () => VENUE_DEFINITIONS.map((definition) => definition.venue),
+    []
+  );
+  const excludedVenueSet = useMemo(() => new Set(excludedVenues), [excludedVenues]);
+  const selectedVenueCount = venueNames.length - excludedVenues.length;
+  const allVenuesSelected = excludedVenues.length === 0;
+  const someVenuesSelected = selectedVenueCount > 0 && !allVenuesSelected;
+  const venueFilterLabel = allVenuesSelected
+    ? 'All venues'
+    : selectedVenueCount === 0
+      ? 'No venues'
+      : `${selectedVenueCount} of ${venueNames.length} venues`;
+
+  const toggleVenue = (venue) => {
+    setExcludedVenues((current) =>
+      current.includes(venue)
+        ? current.filter((item) => item !== venue)
+        : [...current, venue]
+    );
+  };
+
+  useEffect(() => {
+    if (!showVenueFilter) return undefined;
+
+    const closeOnOutsideClick = (event) => {
+      if (!venueFilterRef.current?.contains(event.target)) setShowVenueFilter(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setShowVenueFilter(false);
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [showVenueFilter]);
+
+  useEffect(() => {
+    const removeExpiredOpportunities = () => {
+      setOpportunities((current) => archiveExpiredOpportunities(current));
+    };
+
+    const removeExpiredWhenVisible = () => {
+      if (document.visibilityState === 'visible') removeExpiredOpportunities();
+    };
+
+    removeExpiredOpportunities();
+    window.addEventListener('focus', removeExpiredOpportunities);
+    document.addEventListener('visibilitychange', removeExpiredWhenVisible);
+    const intervalId = window.setInterval(removeExpiredOpportunities, 60 * 1000);
+
+    return () => {
+      window.removeEventListener('focus', removeExpiredOpportunities);
+      document.removeEventListener('visibilitychange', removeExpiredWhenVisible);
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     const refreshExternalOpportunities = (event) => {
@@ -1545,7 +1663,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       setOpportunities((current) => {
         if (nextOpportunities === current) return current;
         if (JSON.stringify(nextOpportunities) === JSON.stringify(current)) return current;
-        return nextOpportunities.map((item) => createBlankOpportunity(item));
+        return archiveExpiredOpportunities(
+          nextOpportunities.map((item) => createBlankOpportunity(item))
+        );
       });
     };
 
@@ -1766,7 +1886,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       const next = [...current];
       if (existingIndex >= 0) next[existingIndex] = prepared;
       else next.unshift(prepared);
-      return next.sort((first, second) => `${first.eventDate} ${first.eventTime}`.localeCompare(`${second.eventDate} ${second.eventTime}`));
+      return archiveExpiredOpportunities(next).sort((first, second) =>
+        `${first.eventDate} ${first.eventTime}`.localeCompare(`${second.eventDate} ${second.eventTime}`)
+      );
     });
     setShowFormDrawer(false);
     flashMessage('CSC opportunity saved.');
@@ -2082,11 +2204,21 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       )
     );
 
-    setScannedOpportunities(withDefaults);
+    const currentDate = todayIso();
+    const currentOpportunities = withDefaults.filter(
+      (item) => !isExpiredOpportunity(item, currentDate)
+    );
+    const expiredCount = withDefaults.length - currentOpportunities.length;
+
+    setScannedOpportunities(currentOpportunities);
     flashMessage(
-      withDefaults.length
-        ? `Scanner found ${withDefaults.length} event opportunit${withDefaults.length === 1 ? 'y' : 'ies'}. Review before importing.`
-        : 'No event opportunities found. Copy the event date and event name lines from the venue page.'
+      currentOpportunities.length
+        ? `Scanner found ${currentOpportunities.length} current event opportunit${
+            currentOpportunities.length === 1 ? 'y' : 'ies'
+          }.${expiredCount ? ` Skipped ${expiredCount} past event${expiredCount === 1 ? '' : 's'}.` : ''} Review before importing.`
+        : expiredCount
+          ? `Scanner skipped ${expiredCount} past event${expiredCount === 1 ? '' : 's'}.`
+          : 'No event opportunities found. Copy the event date and event name lines from the venue page.'
     );
   };
 
@@ -2110,8 +2242,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         byKey.set(key, createBlankOpportunity(item));
         added += 1;
       });
-      return Array.from(byKey.values()).sort((first, second) =>
-        `${first.eventDate} ${first.eventTime}`.localeCompare(`${second.eventDate} ${second.eventTime}`)
+      return archiveExpiredOpportunities(Array.from(byKey.values())).sort(
+        (first, second) =>
+          `${first.eventDate} ${first.eventTime}`.localeCompare(
+            `${second.eventDate} ${second.eventTime}`
+          )
       );
     });
     setScannedOpportunities([]);
@@ -2146,7 +2281,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         const incomingOpportunities = Array.isArray(parsed.opportunities) ? parsed.opportunities : [];
         const incomingContacts = Array.isArray(parsed.venueContacts) ? parsed.venueContacts : [];
         saveSnapshot('Before CSC opportunities JSON import');
-        setOpportunities(incomingOpportunities.map((item) => createBlankOpportunity(item)));
+        setOpportunities(
+          archiveExpiredOpportunities(
+            incomingOpportunities.map((item) => createBlankOpportunity(item))
+          )
+        );
         if (incomingContacts.length) setVenueContacts(incomingContacts);
         flashMessage('CSC opportunities imported.');
       } catch (error) {
@@ -2223,7 +2362,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       (key === 'scheduled' && statusFilter === 'Scheduled' && !summaryFilter) ||
       (key !== 'scheduled' && summaryFilter === key);
 
-    return `${colorClassName} rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 ${
+    return `csc-summary-card ${colorClassName} rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 ${
       isActive ? 'ring-2 ring-slate-950 ring-offset-2' : ''
     }`;
   };
@@ -2234,7 +2373,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     opportunities.forEach((opportunity) => {
       const resolvedStatus = getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus);
 
-      if (venueFilter !== 'All' && canonicalVenueName(opportunity.venue) !== venueFilter) return;
+      if (excludedVenueSet.has(canonicalVenueName(opportunity.venue))) return;
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return;
@@ -2271,7 +2410,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     opportunities,
     statusFilter,
     summaryFilter,
-    venueFilter,
+    excludedVenueSet,
     sameDateConflictMap,
   ]);
 
@@ -2279,7 +2418,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     return opportunities.filter((opportunity) => {
       const resolvedStatus = getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus);
 
-      if (venueFilter !== 'All' && canonicalVenueName(opportunity.venue) !== venueFilter) return false;
+      if (excludedVenueSet.has(canonicalVenueName(opportunity.venue))) return false;
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return false;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return false;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return false;
@@ -2307,7 +2446,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     opportunities,
     statusFilter,
     summaryFilter,
-    venueFilter,
+    excludedVenueSet,
     sameDateConflictMap,
   ]);
 
@@ -2346,6 +2485,28 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     });
   }, [monthFilter, opportunitiesMatchingNonMonthFilters]);
 
+  const handleViewMonth = (monthKey) => {
+    setMonthFilter(monthKey);
+    setShowMonthOverview(false);
+    setMonthViewRequest((current) => current + 1);
+  };
+
+  useEffect(() => {
+    if (!monthViewRequest) return undefined;
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const firstOpportunity = filteredOpportunities[0];
+      const target = firstOpportunity
+        ? document.getElementById(`csc-opportunity-${firstOpportunity.id}`)
+        : document.getElementById('csc-opportunities-list');
+
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setMonthViewRequest(0);
+    });
+
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [filteredOpportunities, monthViewRequest]);
+
   const activeOpportunities = useMemo(
     () =>
       opportunities.filter((item) =>
@@ -2375,8 +2536,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const notesHaveMore = overflowingNoteIds.has(opportunity.id);
 
     return (
-      <article id={`csc-opportunity-${opportunity.id}`} key={opportunity.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <article id={`csc-opportunity-${opportunity.id}`} key={opportunity.id} className="csc-opportunity-mobile-card rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="csc-opportunity-top flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 gap-3">
             <VenueLogo opportunity={opportunity} />
             <div className="min-w-0">
@@ -2419,12 +2580,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             </div>
           </div>
 
-          <aside className="w-fit shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 bg-slate-100 px-3 py-2">
+          <aside className="csc-opportunity-actions w-fit shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="csc-opportunity-actions-title border-b border-slate-200 bg-slate-100 px-3 py-2">
               <p className="text-xs font-black uppercase tracking-wide text-slate-700">Actions</p>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 p-2.5">
+            <div className="csc-opportunity-actions-grid grid grid-cols-3 gap-2 p-2.5">
               {match ? (
                 <button
                   type="button"
@@ -2458,7 +2619,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   <CalendarCheck2 className="h-4 w-4" />
                 </button>
               ) : (
-                <span className="h-9 w-9" aria-hidden="true" />
+                <span className="csc-opportunity-action-placeholder h-9 w-9" aria-hidden="true" />
               )}
 
               <button
@@ -2491,7 +2652,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <Trash2 className="h-4 w-4" />
               </button>
 
-              <span className="h-9 w-9" aria-hidden="true" />
+              <span className="csc-opportunity-action-placeholder h-9 w-9" aria-hidden="true" />
             </div>
           </aside>
         </div>
@@ -2533,14 +2694,14 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           </div>
         ) : null}
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+        <div className="csc-opportunity-meta-grid mt-4 grid gap-3 xl:grid-cols-3">
           <div
-            className={`rounded-xl border p-4 xl:col-span-2 ${
+            className={`csc-shift-card ${match ? 'csc-shift-card-linked' : 'csc-shift-card-empty'} rounded-xl border p-4 xl:col-span-2 ${
               match ? 'border-cyan-200 bg-cyan-50' : 'border-slate-200 bg-slate-50'
             }`}
           >
             <div
-              className={`flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-start sm:justify-between ${
+              className={`csc-shift-header flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-start sm:justify-between ${
                 match ? 'border-cyan-200' : 'border-slate-200'
               }`}
             >
@@ -2552,14 +2713,14 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 >
                   {match ? 'Linked CSC Shift' : 'CSC Shift'}
                 </p>
-                <p className="mt-1 truncate text-base font-black text-slate-950">
+                <p className={`${!match ? 'csc-mobile-empty-detail' : ''} mt-1 truncate text-base font-black text-slate-950`}>
                   {match
                     ? match.jobName || match.event || 'Linked CSC shift'
                     : opportunity.linkedCscShiftId
                       ? 'Linked shift not found'
                       : 'No shift linked'}
                 </p>
-                <p className="mt-1 text-sm font-semibold text-slate-600">
+                <p className={`${!match ? 'csc-mobile-empty-detail' : ''} mt-1 text-sm font-semibold text-slate-600`}>
                   {match
                     ? `${formatDate(match.startDate)}${
                         match.startTime ? `, ${formatTime(match.startTime)}` : ''
@@ -2569,15 +2730,24 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               </div>
 
               <span
-                className={`inline-flex w-fit shrink-0 rounded-full px-3 py-1 text-xs font-black ${
+                className={`${!match ? 'csc-empty-status-badge' : ''} inline-flex w-fit shrink-0 items-center rounded-full px-3 py-1 text-xs font-black ${
                   match
                     ? match.recordSource === 'archived'
                       ? 'bg-slate-700 text-white'
                       : 'bg-emerald-600 text-white'
                     : 'bg-slate-200 text-slate-700'
                 }`}
+                title={!match ? 'Not linked' : undefined}
+                aria-label={!match ? 'Not linked' : undefined}
               >
-                {match ? (match.recordSource === 'archived' ? 'Archived Shift' : 'Active Shift') : 'Not Linked'}
+                {match ? (
+                  match.recordSource === 'archived' ? 'Archived Shift' : 'Active Shift'
+                ) : (
+                  <>
+                    <Link2Off className="csc-mobile-status-icon h-4 w-4" aria-hidden="true" />
+                    <span className="csc-desktop-status-text">Not Linked</span>
+                  </>
+                )}
               </span>
             </div>
 
@@ -2614,11 +2784,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             ) : null}
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
+          <div className="csc-followup-card rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="csc-followup-header flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 pb-3">
               <div>
                 <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Follow-Up</p>
-                <p className="mt-1 text-sm font-black text-slate-950">
+                <p className={`${!linkedTask ? 'csc-mobile-empty-detail' : ''} mt-1 text-sm font-black text-slate-950`}>
                   {linkedTask
                     ? linkedTask.completed
                       ? 'To-Do completed'
@@ -2627,19 +2797,28 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 </p>
               </div>
               <span
-                className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${
+                className={`${!linkedTask ? 'csc-empty-status-badge' : ''} inline-flex items-center rounded-full px-3 py-1 text-xs font-black ${
                   linkedTask
                     ? linkedTask.completed
                       ? 'bg-emerald-100 text-emerald-800'
                       : 'bg-blue-100 text-blue-800'
                     : 'bg-slate-200 text-slate-700'
                 }`}
+                title={!linkedTask ? 'Not created' : undefined}
+                aria-label={!linkedTask ? 'Not created' : undefined}
               >
-                {linkedTask ? (linkedTask.completed ? 'Completed' : 'Open') : 'Not Created'}
+                {linkedTask ? (
+                  linkedTask.completed ? 'Completed' : 'Open'
+                ) : (
+                  <>
+                    <ListX className="csc-mobile-status-icon h-4 w-4" aria-hidden="true" />
+                    <span className="csc-desktop-status-text">Not Created</span>
+                  </>
+                )}
               </span>
             </div>
 
-            <div className="pt-3">
+            <div className="csc-opportunity-notes pt-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <label htmlFor={`opportunity-notes-${opportunity.id}`} className="text-[11px] font-black uppercase tracking-wide text-slate-500">
@@ -2679,7 +2858,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   handleNotesChange(opportunity.id, textarea.value, textarea);
                 }}
                 placeholder="Add notes about this event or shift opportunity..."
-                className={`mt-2 w-full whitespace-pre-wrap break-words rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 [overflow-wrap:anywhere] focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 ${
+                className={`csc-opportunity-notes-input mt-2 w-full whitespace-pre-wrap break-words rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 [overflow-wrap:anywhere] focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 ${
                   notesExpanded ? 'resize-y overflow-auto' : 'resize-none overflow-hidden'
                 }`}
               />
@@ -2697,7 +2876,213 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
   return (
     <PageContainer surfaceClassName="min-h-screen bg-violet-100">
-      <div className="flex flex-col gap-6 bg-violet-100 py-6">
+      <div className="csc-opportunities-page flex flex-col gap-6 bg-violet-100 py-6">
+        <style>{`
+          .csc-mobile-status-icon {
+            display: none;
+          }
+
+          .csc-summary-title-mobile {
+            display: none;
+          }
+
+          @media (max-width: 639px) {
+            .csc-opportunities-page {
+              gap: 0.75rem;
+              padding-top: 0.75rem;
+              padding-bottom: 0.75rem;
+            }
+
+            .csc-header-action {
+              width: 100%;
+              height: 2.25rem;
+              padding: 0 0.5rem;
+              font-size: 0.6875rem;
+            }
+
+            .csc-header-actions {
+              display: grid;
+              width: 100%;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 0.375rem;
+            }
+
+            .csc-opportunity-browser-heading,
+            .csc-month-label {
+              display: none;
+            }
+
+            .csc-opportunity-browser {
+              padding: 0.625rem;
+              border-radius: 1rem;
+            }
+
+            .csc-opportunity-browser-layout {
+              gap: 0;
+            }
+
+            .csc-filter-grid {
+              display: grid;
+              width: 100%;
+              grid-template-columns: repeat(3, minmax(0, 1fr));
+              gap: 0.375rem;
+            }
+
+            .csc-filter-control {
+              width: 100%;
+              min-width: 0;
+              height: 2.25rem;
+              padding-left: 0.5rem;
+              padding-right: 1.5rem;
+              font-size: 0.6875rem;
+            }
+
+            .csc-filter-month-button {
+              width: 2.25rem;
+              height: 2.25rem;
+              justify-content: center;
+              padding: 0;
+            }
+
+            .csc-filter-search {
+              grid-column: 2 / -1;
+              min-width: 0;
+            }
+
+            .csc-filter-search input {
+              width: 100%;
+              height: 2.25rem;
+            }
+
+            .csc-summary-grid {
+              grid-template-columns: repeat(5, minmax(0, 1fr));
+              gap: 0.5rem;
+            }
+
+            .csc-summary-card {
+              min-width: 0;
+              padding: 0.375rem 0.125rem;
+              border-radius: 0.75rem;
+              text-align: center;
+              transform: none;
+            }
+
+            .csc-summary-title-desktop,
+            .csc-summary-hint {
+              display: none;
+            }
+
+            .csc-summary-title-mobile {
+              display: inline;
+            }
+
+            .csc-summary-title {
+              overflow: hidden;
+              font-size: 0.625rem;
+              line-height: 0.75rem;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+
+            .csc-summary-count {
+              margin-top: 0.125rem;
+              font-size: 1.125rem;
+              line-height: 1.25rem;
+            }
+
+            .csc-opportunity-mobile-card {
+              padding: 0.75rem;
+            }
+
+            .csc-opportunity-top {
+              gap: 0.75rem;
+            }
+
+            .csc-opportunity-actions {
+              width: 100%;
+            }
+
+            .csc-opportunity-actions-title,
+            .csc-opportunity-action-placeholder,
+            .csc-mobile-empty-detail {
+              display: none;
+            }
+
+            .csc-empty-status-badge {
+              width: 2rem;
+              height: 2rem;
+              justify-content: center;
+              padding: 0;
+            }
+
+            .csc-empty-status-badge .csc-desktop-status-text {
+              display: none;
+            }
+
+            .csc-empty-status-badge .csc-mobile-status-icon {
+              display: block;
+            }
+
+            .csc-opportunity-actions-grid {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 0.375rem;
+              padding: 0.5rem;
+            }
+
+            .csc-opportunity-meta-grid {
+              grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+              gap: 0.5rem;
+              margin-top: 0.75rem;
+            }
+
+            .csc-shift-card {
+              padding: 0.75rem;
+            }
+
+            .csc-shift-card-linked {
+              grid-column: 1 / -1;
+            }
+
+            .csc-shift-header {
+              flex-direction: row;
+              align-items: center;
+              justify-content: space-between;
+              gap: 0.5rem;
+              padding-bottom: 0;
+              border-bottom-width: 0;
+            }
+
+            .csc-followup-card {
+              display: contents;
+            }
+
+            .csc-followup-header {
+              align-items: center;
+              flex-wrap: nowrap;
+              gap: 0.375rem;
+              padding: 0.75rem;
+              border: 1px solid #e2e8f0;
+              border-radius: 0.75rem;
+              background: #f8fafc;
+            }
+
+            .csc-opportunity-notes {
+              grid-column: 1 / -1;
+              padding: 0.75rem;
+              border: 1px solid #e2e8f0;
+              border-radius: 0.75rem;
+              background: #f8fafc;
+            }
+
+            .csc-opportunity-notes-input {
+              margin-top: 0.5rem;
+              min-height: 3.25rem;
+              padding: 0.5rem 0.625rem;
+            }
+          }
+        `}</style>
         <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
 
         <TabPageHeader
@@ -2706,29 +3091,34 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           subtitle="Track venue events, editable notes, and links to actual CSC shifts."
           theme="violet"
           message={saveMessage}
+          className="budget-mobile-header"
           actions={
-            <>
+            <div className="csc-header-actions flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => setShowScanDrawer(true)}
-                className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
+                title="Scan events"
+                aria-label="Scan events"
+                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
               >
                 <ClipboardCheck className="h-4 w-4" />
-                Scan Events
+                <span className="csc-header-action-label">Scan Events</span>
               </button>
               <button
                 type="button"
                 onClick={openAddOpportunity}
-                className={`${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 hover:bg-violet-50`}
+                title="Add opportunity"
+                aria-label="Add opportunity"
+                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 hover:bg-violet-50`}
               >
                 <Plus className="h-4 w-4" />
-                Add Opportunity
+                <span className="csc-header-action-label">Add Opportunity</span>
               </button>
-            </>
+            </div>
           }
         />
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="csc-summary-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <button
             type="button"
             onClick={() => applySummaryFilter('active')}
@@ -2736,9 +3126,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             className={summaryCardClassName('active', 'border-indigo-200 bg-indigo-50 text-indigo-950')}
             title="Show active opportunities"
           >
-            <p className="text-sm font-bold">Active Opportunities</p>
-            <p className="mt-1 text-3xl font-black">{activeOpportunities.length}</p>
-            <p className="mt-1 text-xs font-bold text-indigo-800">
+            <p className="csc-summary-title text-sm font-bold">
+              <span className="csc-summary-title-desktop">Active Opportunities</span>
+              <span className="csc-summary-title-mobile">Active</span>
+            </p>
+            <p className="csc-summary-count mt-1 text-3xl font-black">{activeOpportunities.length}</p>
+            <p className="csc-summary-hint mt-1 text-xs font-bold text-indigo-800">
               {summaryFilter === 'active' ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
@@ -2749,9 +3142,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             className={summaryCardClassName('notes', 'border-violet-200 bg-violet-50 text-violet-950')}
             title="Show active opportunities with notes"
           >
-            <p className="text-sm font-bold">With Notes</p>
-            <p className="mt-1 text-3xl font-black">{notesCount}</p>
-            <p className="mt-1 text-xs font-bold text-violet-800">
+            <p className="csc-summary-title text-sm font-bold">
+              <span className="csc-summary-title-desktop">With Notes</span>
+              <span className="csc-summary-title-mobile">Notes</span>
+            </p>
+            <p className="csc-summary-count mt-1 text-3xl font-black">{notesCount}</p>
+            <p className="csc-summary-hint mt-1 text-xs font-bold text-violet-800">
               {summaryFilter === 'notes' ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
@@ -2762,9 +3158,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             className={summaryCardClassName('scheduled', 'border-emerald-200 bg-emerald-50 text-emerald-950')}
             title="Show scheduled opportunities"
           >
-            <p className="text-sm font-bold">Scheduled</p>
-            <p className="mt-1 text-3xl font-black">{scheduledCount}</p>
-            <p className="mt-1 text-xs font-bold text-emerald-800">
+            <p className="csc-summary-title text-sm font-bold">
+              <span className="csc-summary-title-desktop">Scheduled</span>
+              <span className="csc-summary-title-mobile">Scheduled</span>
+            </p>
+            <p className="csc-summary-count mt-1 text-3xl font-black">{scheduledCount}</p>
+            <p className="csc-summary-hint mt-1 text-xs font-bold text-emerald-800">
               {statusFilter === 'Scheduled' && !summaryFilter ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
@@ -2775,9 +3174,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             className={summaryCardClassName('upcoming', 'border-blue-200 bg-blue-50 text-blue-950')}
             title="Show upcoming active events"
           >
-            <p className="text-sm font-bold">Upcoming Events</p>
-            <p className="mt-1 text-3xl font-black">{upcomingOpportunities.length}</p>
-            <p className="mt-1 text-xs font-bold text-blue-800">
+            <p className="csc-summary-title text-sm font-bold">
+              <span className="csc-summary-title-desktop">Upcoming Events</span>
+              <span className="csc-summary-title-mobile">Upcoming</span>
+            </p>
+            <p className="csc-summary-count mt-1 text-3xl font-black">{upcomingOpportunities.length}</p>
+            <p className="csc-summary-hint mt-1 text-xs font-bold text-blue-800">
               {summaryFilter === 'upcoming' ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
@@ -2790,9 +3192,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             title="Show same-date venue conflicts"
             className={summaryCardClassName('conflicts', 'border-red-300 bg-red-50 text-red-950')}
           >
-            <p className="text-sm font-bold">Conflict Dates</p>
-            <p className="mt-1 text-3xl font-black">{sameDateConflictGroups.length}</p>
-            <p className="mt-1 text-xs font-bold text-red-800">
+            <p className="csc-summary-title text-sm font-bold">
+              <span className="csc-summary-title-desktop">Conflict Dates</span>
+              <span className="csc-summary-title-mobile">Conflicts</span>
+            </p>
+            <p className="csc-summary-count mt-1 text-3xl font-black">{sameDateConflictGroups.length}</p>
+            <p className="csc-summary-hint mt-1 text-xs font-bold text-red-800">
               {summaryFilter === 'conflicts' ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
@@ -2838,18 +3243,66 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           </section>
         ) : null}
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div>
+        <section className="csc-opportunity-browser rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="csc-opportunity-browser-layout flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="csc-opportunity-browser-heading">
               <h2 className="text-xl font-black text-slate-950">Venue Event Opportunities</h2>
               <p className="text-sm text-slate-600">Opportunities stay separate from CSC Shifts until you create or link a shift.</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <select value={venueFilter} onChange={(event) => setVenueFilter(event.target.value)} className="h-10 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-bold text-violet-950 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200">
-                <option value="All">All venues</option>
-                {VENUE_DEFINITIONS.map((definition) => <option key={definition.venue} value={definition.venue}>{definition.venue}</option>)}
-              </select>
-              <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="h-10 rounded-lg border border-purple-200 bg-purple-50 px-3 text-sm font-bold text-purple-950 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200">
+            <div className="csc-filter-grid flex flex-wrap gap-2">
+              <div ref={venueFilterRef} className="csc-venue-filter-wrap relative">
+                <button
+                  type="button"
+                  onClick={() => setShowVenueFilter((current) => !current)}
+                  aria-haspopup="true"
+                  aria-expanded={showVenueFilter}
+                  className="csc-filter-control flex h-10 min-w-[12rem] items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-bold text-violet-950 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                >
+                  <span className="truncate">{venueFilterLabel}</span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showVenueFilter ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showVenueFilter ? (
+                  <div className="csc-venue-filter-menu absolute left-0 top-full z-50 mt-1 min-w-[15rem] overflow-hidden rounded-xl border border-violet-200 bg-white shadow-xl">
+                    <label className="flex cursor-pointer items-center gap-3 border-b border-violet-100 bg-violet-50 px-3 py-2.5 font-extrabold text-violet-950 hover:bg-violet-100">
+                      <input
+                        ref={(input) => {
+                          if (input) input.indeterminate = someVenuesSelected;
+                        }}
+                        type="checkbox"
+                        checked={allVenuesSelected}
+                        onChange={(event) => setExcludedVenues(event.target.checked ? [] : venueNames)}
+                        className="h-4 w-4 rounded border-violet-300 text-violet-700 focus:ring-violet-500"
+                      />
+                      <span>All venues</span>
+                    </label>
+                    <div className="max-h-72 overflow-y-auto py-1">
+                      {venueNames.map((venue) => (
+                        <label key={venue} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm font-semibold text-violet-950 hover:bg-violet-50">
+                          <input
+                            type="checkbox"
+                            checked={!excludedVenueSet.has(venue)}
+                            onChange={() => toggleVenue(venue)}
+                            className="h-4 w-4 rounded border-violet-300 text-violet-700 focus:ring-violet-500"
+                          />
+                          <span>{venue}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-violet-100 bg-slate-50 px-3 py-2">
+                      <span className="text-xs font-bold text-slate-600">{selectedVenueCount} selected</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowVenueFilter(false)}
+                        className="rounded-md bg-violet-700 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-violet-800"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="csc-filter-control h-10 rounded-lg border border-purple-200 bg-purple-50 px-3 text-sm font-bold text-purple-950 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200">
                 <option value="All">All months</option>
                 {monthOptions.map((month) => (
                   <option key={month.monthKey} value={month.monthKey}>
@@ -2857,7 +3310,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   </option>
                 ))}
               </select>
-              <select value={statusFilter} onChange={(event) => handleStatusFilterChange(event.target.value)} className="h-10 rounded-lg border border-fuchsia-200 bg-fuchsia-50 px-3 text-sm font-bold text-fuchsia-950 focus:border-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-200">
+              <select value={statusFilter} onChange={(event) => handleStatusFilterChange(event.target.value)} className="csc-filter-control h-10 rounded-lg border border-fuchsia-200 bg-fuchsia-50 px-3 text-sm font-bold text-fuchsia-950 focus:border-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-200">
                 <option value="All">All statuses</option>
                 {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
@@ -2866,16 +3319,18 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 onClick={() => setShowMonthOverview((current) => !current)}
                 aria-expanded={showMonthOverview}
                 aria-controls="csc-opportunities-month-overview"
-                className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-extrabold transition ${
+                aria-label={showMonthOverview ? 'Hide month overview' : 'View opportunities by month'}
+                title={showMonthOverview ? 'Hide month overview' : 'View opportunities by month'}
+                className={`csc-filter-month-button inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-extrabold transition ${
                   showMonthOverview
                     ? 'border-violet-700 bg-violet-700 text-white hover:bg-violet-800'
                     : 'border-violet-300 bg-white text-violet-800 hover:bg-violet-50'
                 }`}
               >
                 <CalendarDays className="h-4 w-4" />
-                {showMonthOverview ? 'Hide Months' : 'View by Month'}
+                <span className="csc-month-label">{showMonthOverview ? 'Hide Months' : 'View by Month'}</span>
               </button>
-              <label className="relative">
+              <label className="csc-filter-search relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input value={localSearch} onChange={(event) => setLocalSearch(event.target.value)} placeholder="Search opportunities" className="h-10 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm" />
               </label>
@@ -2888,7 +3343,10 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <div>
                   <h3 className="text-lg font-black text-violet-950">Opportunities by Month</h3>
                   <p className="text-sm font-medium text-slate-600">
-                    {venueFilter === 'All' ? 'Showing all venues.' : `Showing ${venueFilter}.`} Choose a month to filter the opportunity cards below.
+                    {allVenuesSelected
+                      ? 'Showing all venues.'
+                      : `Showing ${selectedVenueCount} of ${venueNames.length} venues.`}{' '}
+                    Choose a month to filter the opportunity cards below.
                   </p>
                 </div>
                 <button
@@ -2910,7 +3368,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                     <button
                       key={group.monthKey}
                       type="button"
-                      onClick={() => setMonthFilter(group.monthKey)}
+                      onClick={() => handleViewMonth(group.monthKey)}
                       className={`rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
                         monthFilter === group.monthKey
                           ? 'border-violet-600 bg-violet-700 text-white shadow-md'
@@ -2955,7 +3413,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             </div>
           ) : null}
 
-          <div className="mt-4 grid gap-4">
+          <div id="csc-opportunities-list" className="mt-4 grid gap-4">
             {filteredOpportunities.length ? filteredOpportunities.map(renderOpportunityCard) : (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
                 <CircleAlert className="mx-auto h-8 w-8 text-slate-400" />
@@ -2974,7 +3432,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <h3 className="text-2xl font-black text-slate-950">CSC Opportunity</h3>
                 <p className="text-sm text-slate-600">Enter the venue event details and notes.</p>
               </div>
-              <button type="button" onClick={() => setShowFormDrawer(false)} className="rounded-lg border border-slate-200 p-2"><X className="h-5 w-5" /></button>
+              <CloseScreenButton onClick={() => setShowFormDrawer(false)} />
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -3036,7 +3494,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <h3 className="text-2xl font-black text-slate-950">Scan Venue Events</h3>
                 <p className="text-sm text-slate-600">Open the venue page, copy the event listings, paste them here, then review before importing.</p>
               </div>
-              <button type="button" onClick={() => setShowScanDrawer(false)} className="rounded-lg border border-slate-200 p-2"><X className="h-5 w-5" /></button>
+              <CloseScreenButton onClick={() => setShowScanDrawer(false)} />
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -3110,7 +3568,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <h3 className="text-2xl font-black text-slate-950">Create CSC Shift</h3>
                 <p className="text-sm text-slate-600">Confirm the exact shift window before creating the CSC shift.</p>
               </div>
-              <button type="button" onClick={() => setShowCreateShiftDrawer(false)} className="rounded-lg border border-slate-200 p-2"><X className="h-5 w-5" /></button>
+              <CloseScreenButton onClick={() => setShowCreateShiftDrawer(false)} />
             </div>
             {getSameDateVenueConflicts(opportunities, {
               id: shiftDraft.opportunityId,

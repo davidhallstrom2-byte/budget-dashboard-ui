@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
 import { createGoogleCalendarEvent } from '../../utils/googleCalendarApi';
 
 const CSC_STORAGE_KEY = 'cscShifts.v1';
@@ -676,6 +677,8 @@ const getShiftHours = (shift) => {
 };
 
 const getEstimatedPay = (shift) => {
+  if (shift?.shiftStatus === 'Cancelled') return 0;
+
   const rate = Number.parseFloat(shift.hourlyRate);
   if (!Number.isFinite(rate) || rate <= 0) return 0;
 
@@ -689,6 +692,9 @@ const getEstimatedPay = (shift) => {
 
   return Math.round((regularPay + overtimePay + doubleTimePay) * 100) / 100;
 };
+
+const getShiftPaymentStatusLabel = (shift) =>
+  shift?.shiftStatus === 'Cancelled' ? 'Cancelled' : shift?.paidStatus || 'Unpaid';
 
 const getDeletedSeedShiftIds = () => {
   try {
@@ -1827,6 +1833,8 @@ const buildCsv = (shifts) => {
     ...shift,
     hours: getShiftHours(shift).toFixed(2),
     estimatedPay: getEstimatedPay(shift).toFixed(2),
+    paidStatus: getShiftPaymentStatusLabel(shift),
+    paymentDate: shift.shiftStatus === 'Cancelled' ? '' : shift.paymentDate,
   }));
 
   return [
@@ -1867,7 +1875,7 @@ const buildPremiumScheduleHtml = (shifts, summary) => {
               <tr><th>Hours</th><td>${getShiftHours(shift).toFixed(1)}</td></tr>
               <tr><th>Hourly Rate</th><td>${escapeHtml(formatCurrency(Number(shift.hourlyRate) || 0))}</td></tr>
               <tr><th>Estimated Pay</th><td>${escapeHtml(formatCurrency(getEstimatedPay(shift)))}</td></tr>
-              <tr><th>Paid Status</th><td>${escapeHtml(shift.paidStatus)}${shift.paymentDate ? `, ${escapeHtml(formatShortDate(shift.paymentDate))}` : ''}</td></tr>
+              <tr><th>Paid Status</th><td>${escapeHtml(getShiftPaymentStatusLabel(shift))}${shift.shiftStatus !== 'Cancelled' && shift.paymentDate ? `, ${escapeHtml(formatShortDate(shift.paymentDate))}` : ''}</td></tr>
               ${shift.parking ? `<tr><th>Parking</th><td>${escapeHtml(shift.parking)}</td></tr>` : ''}
               ${shift.supervisor ? `<tr><th>Supervisor</th><td>${escapeHtml(shift.supervisor)}</td></tr>` : ''}
               ${shift.notes ? `<tr><th>Notes</th><td>${escapeHtml(shift.notes)}</td></tr>` : ''}
@@ -1881,7 +1889,7 @@ const buildPremiumScheduleHtml = (shifts, summary) => {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Hallstrom Premium CSC Shifts</title>
+  <title>CSC Shifts List</title>
   <style>
     body { margin: 0; background: #f8fafc; color: #0f172a; font-family: Georgia, 'Times New Roman', serif; }
     .document { max-width: 980px; margin: 32px auto; background: white; padding: 42px 46px; border-radius: 20px; box-shadow: 0 18px 60px rgba(15, 23, 42, 0.18); }
@@ -1934,7 +1942,7 @@ const buildPremiumScheduleHtml = (shifts, summary) => {
 </head>
 <body>
   <main class="document">
-    <h1>Hallstrom Premium CSC Shifts</h1>
+    <h1>CSC Shifts List</h1>
     <p class="subtitle">Structured shift schedule, generated ${escapeHtml(new Date().toISOString().slice(0, 10))}</p>
     <div class="rule"></div>
     <section class="company">
@@ -1954,7 +1962,22 @@ const buildPremiumScheduleHtml = (shifts, summary) => {
 </html>`;
 };
 
-const getMonthKey = (dateValue) => (dateValue ? dateValue.slice(0, 7) : 'No date');
+const getMonthKey = (dateValue) => {
+  if (dateValue instanceof Date) {
+    if (Number.isNaN(dateValue.getTime())) return 'No date';
+
+    return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  if (typeof dateValue === 'string') {
+    const normalizedDate = dateValue.trim();
+    const monthMatch = normalizedDate.match(/^(\d{4})-(\d{2})(?:-\d{2})?/);
+
+    if (monthMatch) return `${monthMatch[1]}-${monthMatch[2]}`;
+  }
+
+  return 'No date';
+};
 
 const getMonthLabel = (monthKey) => {
   if (monthKey === 'No date') return monthKey;
@@ -1974,6 +1997,61 @@ const getMonthKeyWithOffset = (offset = 0) => {
   date.setMonth(date.getMonth() + offset);
 
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const parseLocalDate = (dateValue) => {
+  if (!dateValue || !/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return null;
+
+  const [year, month, day] = dateValue.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+};
+
+const toLocalDateKey = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`;
+
+const getWeekRange = (dateValue) => {
+  const date = parseLocalDate(dateValue);
+  if (!date) return null;
+
+  const dayOffset = (date.getDay() + 6) % 7;
+  const startDate = new Date(date);
+  startDate.setDate(date.getDate() - dayOffset);
+
+  const endDate = new Date(startDate);
+  endDate.setDate(startDate.getDate() + 6);
+
+  return {
+    weekKey: toLocalDateKey(startDate),
+    startDate,
+    endDate,
+  };
+};
+
+const formatWeekRange = (startDate, endDate) => {
+  const start = startDate.toLocaleDateString('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+    year: '2-digit',
+  });
+  const end = endDate.toLocaleDateString('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+    year: '2-digit',
+  });
+
+  return `${start} - ${end}`;
 };
 
 const MONTH_RANGE_OPTIONS = [
@@ -2067,7 +2145,7 @@ const getPaychecksMatchingShift = (shift = {}, paychecks = []) => {
 const buildShiftCalendarEventPayload = (shift = {}) => {
   const description = [
     `CSC shift status: ${shift.shiftStatus || 'Scheduled'}`,
-    `Paid status: ${shift.paidStatus || 'Unpaid'}`,
+    `Paid status: ${getShiftPaymentStatusLabel(shift)}`,
     `Hours: ${getShiftHours(shift).toFixed(1)}`,
     `Hourly rate: ${formatCurrency(Number(shift.hourlyRate) || 0)}`,
     `Estimated pay: ${formatCurrency(getEstimatedPay(shift))}`,
@@ -2461,6 +2539,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const handleOpenShiftDetails = (shift) => {
     clearCscShiftReturnContext();
     setDetailReturnContext(null);
+    setShowArchiveDrawer(false);
     setSelectedDetailShiftId(shift.id);
   };
 
@@ -2628,7 +2707,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     });
   };
 
-  const renderActivePaidControls = (shift) => (
+  const renderActivePaidControls = (shift) => shift.shiftStatus === 'Cancelled' ? null : (
     <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
       <div className="flex flex-wrap items-center gap-2">
         <select
@@ -2672,7 +2751,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     </div>
   );
 
-  const renderArchivedPaidControls = (shift, compact = false) => (
+  const renderArchivedPaidControls = (shift, compact = false) => shift.shiftStatus === 'Cancelled' ? null : (
     <div className={compact ? 'mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3' : 'mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3'}>
       <div className="flex flex-wrap items-center gap-2">
         <select
@@ -2772,7 +2851,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
   const handleTogglePremiumView = () => {
     setShowPremiumOverlay(true);
-    setSaveMessage('Premium CSC shift view opened.');
+    setSaveMessage('CSC shifts list opened.');
     setTimeout(() => setSaveMessage(''), 2500);
   };
 
@@ -2954,6 +3033,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         archivedRecords: 0,
         cancelledRecords: 0,
         payableRecords: 0,
+        workedRecords: 0,
         hours: 0,
         workedHours: 0,
         projectedPay: 0,
@@ -2967,6 +3047,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       current.archivedRecords += isArchivedRecord ? 1 : 0;
       current.cancelledRecords += isCancelled ? 1 : 0;
       current.payableRecords += isCancelled ? 0 : 1;
+      current.workedRecords += isDone ? 1 : 0;
       current.hours += hours;
       current.workedHours += isDone ? hours : 0;
       current.projectedPay += estimatedPay;
@@ -2979,6 +3060,115 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
     return Array.from(grouped.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   }, [archivedShifts, shifts]);
+
+  const hoursAnalytics = useMemo(() => {
+    const combinedShifts = [
+      ...shifts.map((shift) => ({ ...shift, recordSource: 'active' })),
+      ...archivedShifts.map((shift) => ({ ...shift, recordSource: 'archived' })),
+    ];
+    const payableShifts = combinedShifts.filter(
+      (shift) => shift.shiftStatus !== 'Cancelled' && parseLocalDate(shift.startDate)
+    );
+    const weeklyGroups = new Map();
+    const annualGroups = new Map();
+
+    payableShifts.forEach((shift) => {
+      const hours = getShiftHours(shift);
+      const workedHours = shift.shiftStatus === 'Done' ? hours : 0;
+      const weekRange = getWeekRange(shift.startDate);
+      const yearKey = shift.startDate.slice(0, 4);
+
+      if (weekRange) {
+        const currentWeek = weeklyGroups.get(weekRange.weekKey) || {
+          weekKey: weekRange.weekKey,
+          startDate: weekRange.startDate,
+          endDate: weekRange.endDate,
+          shiftCount: 0,
+          workedShiftCount: 0,
+          scheduledHours: 0,
+          workedHours: 0,
+        };
+
+        currentWeek.shiftCount += 1;
+        currentWeek.workedShiftCount += shift.shiftStatus === 'Done' ? 1 : 0;
+        currentWeek.scheduledHours += hours;
+        currentWeek.workedHours += workedHours;
+        weeklyGroups.set(weekRange.weekKey, currentWeek);
+      }
+
+      const currentYear = annualGroups.get(yearKey) || {
+        yearKey,
+        shiftCount: 0,
+        workedShiftCount: 0,
+        scheduledHours: 0,
+        workedHours: 0,
+        scheduledMonths: new Set(),
+        workedMonths: new Set(),
+      };
+
+      currentYear.shiftCount += 1;
+      currentYear.workedShiftCount += shift.shiftStatus === 'Done' ? 1 : 0;
+      currentYear.scheduledHours += hours;
+      currentYear.workedHours += workedHours;
+      currentYear.scheduledMonths.add(getMonthKey(shift.startDate));
+      if (shift.shiftStatus === 'Done') {
+        currentYear.workedMonths.add(getMonthKey(shift.startDate));
+      }
+      annualGroups.set(yearKey, currentYear);
+    });
+
+    const weekly = Array.from(weeklyGroups.values())
+      .sort((a, b) => b.weekKey.localeCompare(a.weekKey));
+    const monthly = monthlySummary
+      .filter((month) => month.monthKey !== 'No date' && month.payableRecords > 0)
+      .slice()
+      .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+    const annual = Array.from(annualGroups.values())
+      .map((year) => ({
+        ...year,
+        scheduledMonthCount: year.scheduledMonths.size,
+        workedMonthCount: year.workedMonths.size,
+        averageScheduledMonth:
+          year.scheduledMonths.size > 0 ? year.scheduledHours / year.scheduledMonths.size : 0,
+        averageWorkedMonth:
+          year.workedMonths.size > 0 ? year.workedHours / year.workedMonths.size : 0,
+      }))
+      .sort((a, b) => b.yearKey.localeCompare(a.yearKey));
+
+    const today = new Date();
+    const todayKey = toLocalDateKey(today);
+    const currentWeekKey = getWeekRange(todayKey)?.weekKey;
+    const currentMonthKey = getMonthKey(todayKey);
+    const currentYearKey = String(today.getFullYear());
+    const currentWeek = weekly.find((week) => week.weekKey === currentWeekKey);
+    const currentMonth = monthlySummary.find((month) => month.monthKey === currentMonthKey);
+    const currentYear = annual.find((year) => year.yearKey === currentYearKey);
+    const workedMonths = monthlySummary.filter((month) => month.workedHours > 0);
+    const scheduledMonths = monthlySummary.filter((month) => month.hours > 0);
+
+    return {
+      weekly,
+      monthly,
+      annual,
+      currentWeekWorkedHours: currentWeek?.workedHours || 0,
+      currentWeekScheduledHours: currentWeek?.scheduledHours || 0,
+      currentMonthWorkedHours: currentMonth?.workedHours || 0,
+      currentMonthScheduledHours: currentMonth?.hours || 0,
+      currentYearWorkedHours: currentYear?.workedHours || 0,
+      currentYearScheduledHours: currentYear?.scheduledHours || 0,
+      allTimeWorkedHours: workedMonths.reduce((sum, month) => sum + month.workedHours, 0),
+      averageWorkedMonth:
+        workedMonths.length > 0
+          ? workedMonths.reduce((sum, month) => sum + month.workedHours, 0) / workedMonths.length
+          : 0,
+      averageScheduledMonth:
+        scheduledMonths.length > 0
+          ? scheduledMonths.reduce((sum, month) => sum + month.hours, 0) / scheduledMonths.length
+          : 0,
+      workedMonthCount: workedMonths.length,
+      scheduledMonthCount: scheduledMonths.length,
+    };
+  }, [archivedShifts, monthlySummary, shifts]);
 
   const visibleMonthlySummary = useMemo(() => {
     const previousMonthKey = getMonthKeyWithOffset(-1);
@@ -3210,14 +3400,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const link = document.createElement('a');
 
     link.href = url;
-    link.download = 'CSC_Shifts_David_Hallstrom_Premium_2026.html';
+    link.download = 'CSC_Shifts_List_2026.html';
 
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
-    setSaveMessage('Premium CSC shifts file downloaded.');
+    setSaveMessage('CSC shifts list downloaded.');
     setTimeout(() => setSaveMessage(''), 2500);
   };
 
@@ -3235,13 +3425,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const calendarBusy = calendarAddingShiftId === shift.id;
 
     return (
-    <div className="w-[154px] max-w-[154px]">
+    <div className="w-full sm:w-[154px] sm:max-w-[154px]">
       <div className="grid gap-2">
-        <div className="grid grid-cols-[110px_34px] gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_38px] gap-2 sm:grid-cols-[110px_34px]">
           <select
             value={shift.shiftStatus}
             onChange={(event) => updateShift(shift.id, { shiftStatus: event.target.value })}
-            className={`h-[30px] w-[110px] rounded px-2 py-1 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-yellow-300 ${getShiftStatusColorClass(shift.shiftStatus)}`}
+            className={`h-[30px] w-full rounded px-2 py-1 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-yellow-300 sm:w-[110px] ${getShiftStatusColorClass(shift.shiftStatus)}`}
             title="Update shift status"
             aria-label="Update shift status"
           >
@@ -3254,7 +3444,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <button
             type="button"
             onClick={() => handleArchiveShift(shift.id)}
-            className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-purple-600 text-white hover:bg-purple-700"
+            className="inline-flex h-[30px] w-full items-center justify-center rounded bg-purple-600 text-white hover:bg-purple-700 sm:w-[34px]"
             aria-label="Archive shift"
             title="Archive shift"
           >
@@ -3262,11 +3452,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </button>
         </div>
 
-        <div className="grid grid-cols-[34px_42px_34px] gap-2">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-[34px_42px_34px]">
           <button
             type="button"
             onClick={() => handleDeleteShift(shift.id)}
-            className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-red-600 text-white hover:bg-red-700"
+            className="inline-flex h-[30px] w-full items-center justify-center rounded bg-red-600 text-white hover:bg-red-700 sm:w-[34px]"
             aria-label="Delete shift"
             title="Delete shift"
           >
@@ -3275,7 +3465,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <button
             type="button"
             onClick={() => handleClearShiftNotes(shift.id)}
-            className="inline-flex h-[30px] w-[42px] items-center justify-center rounded bg-slate-400 text-xs font-semibold text-white hover:bg-slate-500"
+            className="inline-flex h-[30px] w-full items-center justify-center rounded bg-slate-400 text-xs font-semibold text-white hover:bg-slate-500 sm:w-[42px]"
             title="Clear shift notes"
             aria-label="Clear shift notes"
           >
@@ -3285,7 +3475,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             type="button"
             onClick={() => handleAddShiftToCalendar(shift)}
             disabled={calendarBusy}
-            className={`inline-flex h-[30px] w-[34px] items-center justify-center rounded text-white disabled:cursor-wait ${
+            className={`inline-flex h-[30px] w-full items-center justify-center rounded text-white disabled:cursor-wait sm:w-[34px] ${
               calendarAdded
                 ? 'bg-green-700 ring-2 ring-green-200 hover:bg-green-800'
                 : calendarBusy
@@ -3299,11 +3489,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </button>
         </div>
 
-        <div className="grid grid-cols-[58px_34px_34px] gap-2">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-[58px_34px_34px]">
           <button
             type="button"
             onClick={() => handleMoveShift(shift.id)}
-            className="inline-flex h-[30px] w-[58px] items-center justify-center rounded bg-amber-600 text-xs font-semibold text-white hover:bg-amber-700"
+            className="inline-flex h-[30px] w-full items-center justify-center rounded bg-amber-600 text-xs font-semibold text-white hover:bg-amber-700 sm:w-[58px]"
             title="Change shift venue"
             aria-label="Change shift venue"
           >
@@ -3312,7 +3502,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <button
             type="button"
             onClick={() => handleOpenShiftDetails(shift)}
-            className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-cyan-700 text-white hover:bg-cyan-800"
+            className="inline-flex h-[30px] w-full items-center justify-center rounded bg-cyan-700 text-white hover:bg-cyan-800 sm:w-[34px]"
             aria-label="Open shift detail drawer"
             title="Open shift detail drawer"
           >
@@ -3321,7 +3511,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <button
             type="button"
             onClick={() => handleOpenEditShift(shift)}
-            className="inline-flex h-[30px] w-[34px] items-center justify-center rounded bg-slate-700 text-white hover:bg-slate-800"
+            className="inline-flex h-[30px] w-full items-center justify-center rounded bg-slate-700 text-white hover:bg-slate-800 sm:w-[34px]"
             aria-label="Edit shift"
             title="Edit shift"
           >
@@ -3373,30 +3563,115 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     );
   };
 
+  const renderMobileShiftCard = (shift) => (
+    <article key={shift.id} className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
+      <div className="border-b border-amber-300 bg-amber-200 px-3 py-3">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="break-words text-base font-black text-slate-950">{shift.venue || 'CSC Shift'}</h3>
+            <p className="mt-0.5 break-words text-sm font-bold text-slate-700">{shift.event || shift.jobName || 'Event not entered'}</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-blue-100 px-2 py-1 text-[11px] font-black text-blue-900">
+            {shift.shiftStatus}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-3 p-3">
+        <section className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700">
+          <p className="font-black text-slate-950">Location</p>
+          <p className="mt-0.5 break-words">{shift.address || 'Address not shown'}</p>
+          <p className="break-words">{shift.city || 'City not entered'}</p>
+        </section>
+
+        <section className="space-y-1 text-sm text-slate-700">
+          {shift.jobName ? <p className="break-words"><span className="font-black text-slate-900">Job:</span> {shift.jobName}</p> : null}
+          {shift.shiftName ? <p className="break-words"><span className="font-black text-slate-900">Shift Name:</span> {shift.shiftName}</p> : null}
+          {shift.roleName ? <p className="break-words"><span className="font-black text-slate-900">Role Name:</span> {shift.roleName}</p> : null}
+        </section>
+
+        <section className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5">
+            <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">Start</p>
+            <p className="mt-1 text-sm font-black text-slate-950">{formatDate(shift.startDate)}</p>
+            <p className="text-sm font-bold text-blue-700">{formatTime(shift.startTime)}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+            <p className="text-[10px] font-black uppercase tracking-wide text-slate-600">Finish</p>
+            <p className="mt-1 text-sm font-black text-slate-950">{formatDate(shift.finishDate)}</p>
+            <p className="text-sm font-bold text-slate-700">{formatTime(shift.finishTime)}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
+            <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Hours / Rate</p>
+            <p className="mt-1 text-sm font-black text-slate-950">{getShiftHours(shift).toFixed(1)} hrs</p>
+            <p className="text-xs font-bold text-emerald-800">{formatCurrency(Number(shift.hourlyRate) || 0)} per hour</p>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+            <p className="text-[10px] font-black uppercase tracking-wide text-amber-700">Estimated Pay</p>
+            <p className="mt-1 text-base font-black text-amber-950">{formatCurrency(getEstimatedPay(shift))}</p>
+            <p className="text-xs font-bold text-amber-800">{getShiftPaymentStatusLabel(shift)}</p>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-700">
+          <p><span className="font-black text-slate-900">Calendar:</span> {shift.googleCalendarEventId || shift.googleCalendarEventLink ? 'Added' : 'Not added'}</p>
+          <p><span className="font-black text-slate-900">Pay Date:</span> {shift.paymentDate ? formatDate(shift.paymentDate) : 'Not set'}</p>
+          {shift.supervisor ? <p className="col-span-2 break-words"><span className="font-black text-slate-900">Supervisor:</span> {shift.supervisor}</p> : null}
+          {shift.parking ? <p className="col-span-2 break-words"><span className="font-black text-slate-900">Parking:</span> {shift.parking}</p> : null}
+        </section>
+
+        {shift.notes ? (
+          <section className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed text-slate-700">
+            <span className="font-black text-slate-900">Notes:</span>{' '}
+            <span className="break-words" style={{ overflowWrap: 'anywhere' }}>
+              {expandedNoteIds.has(shift.id) ? shift.notes : getCollapsedNotesText(shift.notes)}
+            </span>
+            {shouldShowMoreNotes(shift.notes) ? (
+              <button
+                type="button"
+                onClick={() => toggleShiftNotes(shift.id)}
+                className="ml-1 text-xs text-blue-700 underline underline-offset-2"
+              >
+                {expandedNoteIds.has(shift.id) ? 'less' : 'more'}
+              </button>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
+
+      <div className="border-t border-slate-200 bg-slate-50 p-3">
+        <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-500">Shift Actions</p>
+        {renderShiftActions(shift)}
+      </div>
+    </article>
+  );
+
   return (
     <PageContainer surfaceClassName="min-h-screen bg-amber-50">
-      <div className="flex flex-col gap-6 bg-amber-50 py-6">
+      <div className="flex flex-col gap-3 bg-amber-50 py-3 sm:gap-6 sm:py-6">
         <TabPageHeader
           icon={BriefcaseBusiness}
           title="CSC Shifts"
           subtitle="Manage confirmed work schedules, pay status, calendar details, rides, and paycheck links."
           theme="amber"
           message={saveMessage}
+          className="budget-mobile-header"
           actions={
-            <>
+            <div className="grid w-full grid-cols-4 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:gap-2">
               <button
                 type="button"
                 onClick={() => setShowScanDrawer(true)}
                 title="Scan CSC shift email"
-                className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm border border-white/30 bg-white/15 text-white hover:bg-white/25`}
               >
                 <StickyNote className="h-4 w-4" />
-                Scan Email
+                <span className="sm:hidden">Scan</span>
+                <span className="hidden sm:inline">Scan Email</span>
               </button>
 
               <label
                 title="Import CSC shifts from CSV"
-                className={`${TAB_HEADER_ACTION_CLASS} cursor-pointer bg-white text-amber-900 hover:bg-amber-50`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm cursor-pointer bg-white text-amber-900 hover:bg-amber-50`}
               >
                 <FileUp className="h-4 w-4" />
                 Import
@@ -3407,7 +3682,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 type="button"
                 onClick={handleExportCsv}
                 title="Export CSC shifts"
-                className={`${TAB_HEADER_ACTION_CLASS} bg-indigo-600 text-white hover:bg-indigo-500`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-indigo-600 text-white hover:bg-indigo-500`}
               >
                 <Download className="h-4 w-4" />
                 Export
@@ -3416,13 +3691,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <button
                 type="button"
                 onClick={handleTogglePremiumView}
-                title="View premium CSC shift schedule"
-                className={`${TAB_HEADER_ACTION_CLASS} bg-violet-600 text-white hover:bg-violet-500`}
+                title="Print CSC shifts list"
+                className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-violet-600 text-white hover:bg-violet-500`}
               >
                 <ListChecks className="h-4 w-4" />
-                Premium View
+                <span>Print List</span>
               </button>
-            </>
+            </div>
           }
         />
 
@@ -3500,9 +3775,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <>
 
           <div className="overflow-hidden rounded-lg border-2 border-black">
-            <div className="flex items-center justify-between gap-3 bg-black px-4 py-3 text-white">
-              <div className="flex min-w-0 items-center gap-3">
-                <GripVertical className="h-4 w-4 shrink-0 text-slate-400" />
+            <div className="flex flex-col gap-2 bg-black px-3 py-3 text-white sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+                <GripVertical className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" />
                 <button
                   type="button"
                   onClick={() => setIsShiftTableCollapsed((current) => !current)}
@@ -3512,11 +3787,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 >
                   {isShiftTableCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                 </button>
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-wrap">
                   <BriefcaseBusiness className="h-5 w-5 shrink-0 text-yellow-300" />
-                  <h3 className="truncate text-base font-semibold text-white sm:text-lg">CSC Shifts</h3>
+                  <h3 className="whitespace-nowrap text-base font-semibold text-white sm:text-lg">CSC Shifts</h3>
                   <span
-                    className="inline-flex items-center rounded-full bg-blue-600 px-3 py-1 text-xs font-black uppercase tracking-wide text-white shadow-sm"
+                    className="inline-flex shrink-0 items-center rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-black text-white shadow-sm sm:px-3 sm:py-1 sm:text-xs sm:uppercase sm:tracking-wide"
                     title={`${activeShiftCount} active CSC shifts`}
                   >
                     Active {activeShiftCount}
@@ -3525,30 +3800,31 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="grid grid-cols-2 gap-2 border-t border-slate-800 pt-2 sm:flex sm:shrink-0 sm:items-center sm:border-0 sm:pt-0">
                 <button
                   type="button"
                   onClick={handleOpenAddShift}
-                  className="flex items-center gap-1.5 rounded bg-blue-600 px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 sm:px-3 sm:text-sm"
+                  className="flex h-9 items-center justify-center gap-1.5 rounded bg-blue-600 px-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 sm:h-auto sm:py-1.5 sm:px-3 sm:text-sm"
                   title="Add CSC shift"
                   aria-label="Add CSC shift"
                 >
                   <Plus className="h-4 w-4" />
-                  <span className="hidden sm:inline">Add Task</span>
+                  <span>Add Shift</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleExportCsv}
-                  className="rounded p-1.5 text-white transition-colors hover:bg-slate-800"
+                  className="flex h-9 items-center justify-center gap-1.5 rounded bg-slate-800 px-2 text-white transition-colors hover:bg-slate-700 sm:h-auto sm:bg-transparent sm:p-1.5 sm:hover:bg-slate-800"
                   aria-label="Download CSC shifts"
                   title="Download CSC shifts"
                 >
                   <Download className="h-4 w-4" />
+                  <span className="text-xs font-medium sm:hidden">Download</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleOpenAddShift}
-                  className="rounded p-1.5 text-white transition-colors hover:bg-slate-800"
+                  className="hidden rounded p-1.5 text-white transition-colors hover:bg-slate-800 sm:block"
                   aria-label="Edit CSC shifts"
                   title="Edit CSC shifts"
                 >
@@ -3617,23 +3893,31 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       onChange={(event) => updateShift(shift.id, { hourlyRate: event.target.value })}
                       className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
                     />
-                    <select
-                      value={shift.paidStatus}
-                      onChange={(event) => updateShift(shift.id, { paidStatus: event.target.value })}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-                    >
-                      {PAID_STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="date"
-                      value={shift.paymentDate}
-                      onChange={(event) => updateShift(shift.id, { paymentDate: event.target.value })}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
-                    />
+                    {shift.shiftStatus !== 'Cancelled' ? (
+                      <>
+                        <select
+                          value={shift.paidStatus}
+                          onChange={(event) => updateShift(shift.id, { paidStatus: event.target.value })}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                        >
+                          {PAID_STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="date"
+                          value={shift.paymentDate}
+                          onChange={(event) => updateShift(shift.id, { paymentDate: event.target.value })}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                        />
+                      </>
+                    ) : (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-800 md:col-span-2">
+                        Cancelled, no payment due
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -3654,7 +3938,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               ))}
             </div>
           ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <>
+          <div className="grid gap-3 p-2 sm:hidden">
+            {filteredShifts.map((shift) => renderMobileShiftCard(shift))}
+          </div>
+          <div className="hidden overflow-x-auto rounded-xl border border-slate-200 sm:block">
             <table className="min-w-[1000px] table-fixed divide-y divide-slate-200 text-left text-sm">
               <colgroup>
                 <col className="w-[235px]" />
@@ -3706,7 +3994,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Rate:</span> {formatCurrency(Number(shift.hourlyRate) || 0)}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Est. Pay:</span> {formatCurrency(getEstimatedPay(shift))}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Status:</span> {shift.shiftStatus}</div>
-                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Paid:</span> {shift.paidStatus}</div>
+                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Paid:</span> {getShiftPaymentStatusLabel(shift)}</div>
                         {shift.googleCalendarEventId || shift.googleCalendarEventLink ? (
                           <div className="min-w-0 break-words text-green-700">
                             <span className="font-bold">Calendar:</span> Added
@@ -3750,6 +4038,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </tbody>
             </table>
           </div>
+          </>
           )}
               </>
             ) : (
@@ -3808,6 +4097,138 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 <p className="mt-1 text-xs font-bold text-red-800">Done and unpaid only</p>
               </div>
               <CheckCircle2 className="h-8 w-8 opacity-80" />
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-4 text-black shadow-sm">
+          <div className="mb-3">
+            <h2 className="text-lg font-extrabold text-black">Hours Worked Summary</h2>
+            <p className="text-xs text-black">
+              Worked hours include shifts marked Done. Weeks run Monday through Sunday. Scheduled hours exclude cancelled shifts.
+            </p>
+          </div>
+
+          <div className="grid gap-3 text-black sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-black">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Week</p>
+              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.currentWeekWorkedHours.toFixed(1)} hrs</p>
+              <p className="mt-1 text-xs font-bold text-black">
+                Scheduled: {hoursAnalytics.currentWeekScheduledHours.toFixed(1)}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-black">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Month</p>
+              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.currentMonthWorkedHours.toFixed(1)} hrs</p>
+              <p className="mt-1 text-xs font-bold text-black">
+                Scheduled: {hoursAnalytics.currentMonthScheduledHours.toFixed(1)}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-black">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Year</p>
+              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.currentYearWorkedHours.toFixed(1)} hrs</p>
+              <p className="mt-1 text-xs font-bold text-black">
+                Scheduled: {hoursAnalytics.currentYearScheduledHours.toFixed(1)}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-black">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">Average Month</p>
+              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.averageWorkedMonth.toFixed(1)} hrs</p>
+              <p className="mt-1 text-xs font-bold text-black">
+                {hoursAnalytics.workedMonthCount} worked {hoursAnalytics.workedMonthCount === 1 ? 'month' : 'months'}
+              </p>
+              <p className="mt-0.5 text-[11px] font-semibold text-black">
+                Scheduled avg: {hoursAnalytics.averageScheduledMonth.toFixed(1)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 text-black lg:grid-cols-2">
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between bg-slate-100 px-3 py-2 text-black">
+                <h3 className="text-sm font-extrabold">Weekly Hours</h3>
+                <span className="text-[11px] font-bold text-black">{hoursAnalytics.weekly.length} weeks</span>
+              </div>
+              <div className="max-h-[198px] overflow-x-hidden overflow-y-auto">
+                <table className="w-full table-fixed text-left text-xs text-black">
+                  <thead className="sticky top-0 bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-black">
+                    <tr>
+                      <th className="w-[43%] px-2 py-2">Week</th>
+                      <th className="w-[19%] border-l border-slate-200 px-2 py-2 text-right">Scheduled</th>
+                      <th className="w-[17%] px-2 py-2 text-right">Worked</th>
+                      <th className="w-[21%] px-2 py-2 text-right">Done Shifts</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {hoursAnalytics.weekly.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="px-3 py-5 text-center font-semibold text-black">
+                          No dated shifts are available.
+                        </td>
+                      </tr>
+                    ) : hoursAnalytics.weekly.map((week) => (
+                      <tr key={week.weekKey} className="bg-white">
+                        <td className="px-2 py-2 font-bold text-black">
+                          {formatWeekRange(week.startDate, week.endDate)}
+                        </td>
+                        <td className="border-l border-slate-100 px-2 py-2 text-right font-bold text-black">
+                          {week.scheduledHours.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-extrabold text-black">
+                          {week.workedHours.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-bold text-black">
+                          {week.workedShiftCount} / {week.shiftCount}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between bg-slate-100 px-3 py-2 text-black">
+                <h3 className="text-sm font-extrabold">Monthly Hours</h3>
+                <span className="text-[11px] font-bold text-black">{hoursAnalytics.monthly.length} months</span>
+              </div>
+              <div className="max-h-[198px] overflow-x-hidden overflow-y-auto">
+                <table className="w-full table-fixed text-left text-xs text-black">
+                  <thead className="sticky top-0 bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-black">
+                    <tr>
+                      <th className="w-[43%] px-2 py-2">Month</th>
+                      <th className="w-[19%] border-l border-slate-200 px-2 py-2 text-right">Scheduled</th>
+                      <th className="w-[17%] px-2 py-2 text-right">Worked</th>
+                      <th className="w-[21%] px-2 py-2 text-right">Done Shifts</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {hoursAnalytics.monthly.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="px-3 py-5 text-center font-semibold text-black">
+                          No dated shifts are available.
+                        </td>
+                      </tr>
+                    ) : hoursAnalytics.monthly.map((month) => (
+                      <tr key={month.monthKey} className="bg-white">
+                        <td className="px-2 py-2 font-bold text-black">{month.label}</td>
+                        <td className="border-l border-slate-100 px-2 py-2 text-right font-bold text-black">
+                          {month.hours.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-extrabold text-black">
+                          {month.workedHours.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-bold text-black">
+                          {month.workedRecords} / {month.payableRecords}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -3976,15 +4397,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     Are you sure you want to delete <span className="font-bold text-slate-900">{deleteConfirm.label}</span>?
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={cancelDeleteShift}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  aria-label="Close delete confirmation"
-                  title="Close"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+                <CloseScreenButton onClick={cancelDeleteShift} />
               </div>
 
               <p className="mt-4 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800">
@@ -4028,13 +4441,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               }
             `}</style>
             <div className="csc-premium-actions mx-auto mb-5 flex w-full max-w-6xl items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setShowPremiumOverlay(false)}
-                className="rounded-2xl bg-white px-6 py-3 text-sm font-extrabold text-slate-950 shadow-lg hover:bg-slate-100"
-              >
-                Close
-              </button>
+              <CloseScreenButton onClick={() => setShowPremiumOverlay(false)} />
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -4057,7 +4464,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
             <div className="csc-premium-print mx-auto max-w-6xl rounded-3xl bg-white px-10 py-12 font-serif text-slate-950 shadow-2xl">
               <header className="text-center">
-                <h1 className="text-4xl font-extrabold tracking-tight text-slate-950">Hallstrom Premium CSC Shifts</h1>
+                <h1 className="text-4xl font-extrabold tracking-tight text-slate-950">CSC Shifts List</h1>
                 <p className="mt-3 text-base font-semibold text-slate-600">
                   Structured shift schedule, generated {new Date().toISOString().slice(0, 10)}
                 </p>
@@ -4150,7 +4557,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         </div>
                         <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
                           <div className="font-extrabold text-slate-700">Paid Status</div>
-                          <div>{shift.paidStatus}{shift.paymentDate ? `, ${formatShortDate(shift.paymentDate)}` : ''}</div>
+                          <div>
+                            {getShiftPaymentStatusLabel(shift)}
+                            {shift.shiftStatus !== 'Cancelled' && shift.paymentDate ? `, ${formatShortDate(shift.paymentDate)}` : ''}
+                          </div>
                         </div>
                         {shift.parking && (
                           <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
@@ -4189,15 +4599,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     {selectedPaidMonth.paidShifts.length} shifts, {selectedPaidMonth.paidCount} paid, {selectedPaidMonth.owedCount} still owed, {selectedPaidMonth.activeCount} active, {selectedPaidMonth.archivedCount} archived.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPaidMonthKey('')}
-                  className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-700 hover:bg-slate-50"
-                  aria-label="Close month CSC shifts drawer"
-                  title="Close"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <CloseScreenButton onClick={() => setSelectedPaidMonthKey('')} />
               </div>
 
               <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -4249,7 +4651,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                   : 'border-red-200 bg-red-50 text-red-800'
                               }`}
                             >
-                              {shift.paidStatus === 'Paid' ? 'Paid' : 'Unpaid'}
+                              {getShiftPaymentStatusLabel(shift)}
                             </span>
                             {shift.shiftStatus === 'Done' && shift.paidStatus !== 'Paid' ? (
                               <span className="w-fit rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-extrabold text-red-800">
@@ -4299,11 +4701,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           </div>
                           <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
                             <span className="font-extrabold text-slate-950">Payment Date</span>
-                            <span>{shift.paymentDate ? formatShortDate(shift.paymentDate) : 'No payment date entered'}</span>
+                            <span>{shift.shiftStatus === 'Cancelled' ? 'Not applicable' : shift.paymentDate ? formatShortDate(shift.paymentDate) : 'No payment date entered'}</span>
                           </div>
                           <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
                             <span className="font-extrabold text-slate-950">Paid Status</span>
-                            <span>{shift.paidStatus || 'Unpaid'}</span>
+                            <span>{getShiftPaymentStatusLabel(shift)}</span>
                           </div>
                           <div className="grid grid-cols-[94px_1fr] gap-2 border-t border-slate-100 pt-1.5">
                             <span className="font-extrabold text-slate-950">Status</span>
@@ -4360,9 +4762,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   <h2 className="text-xl font-extrabold text-slate-950">CSC Shift Details</h2>
                   <p className="text-sm text-slate-600">Full shift record with restore, edit, archive, and delete actions.</p>
                 </div>
-                <button type="button" onClick={handleCloseShiftDetails} className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-50">
-                  <X className="h-5 w-5" />
-                </button>
+                <CloseScreenButton onClick={handleCloseShiftDetails} />
               </div>
 
               <div className="flex-1 overflow-y-auto p-5">
@@ -4408,9 +4808,17 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <p className="text-xs font-extrabold uppercase text-slate-500">Paid Status</p>
-                    <p className="mt-1 font-bold text-slate-950">{selectedDetailShift.paidStatus}</p>
-                    <p className="text-sm text-slate-600">{selectedDetailShift.paymentDate ? formatShortDate(selectedDetailShift.paymentDate) : 'No payment date entered'}</p>
-                    {selectedDetailShiftIsArchived ? renderArchivedPaidControls(selectedDetailShift, true) : null}
+                    <p className="mt-1 font-bold text-slate-950">{getShiftPaymentStatusLabel(selectedDetailShift)}</p>
+                    <p className="text-sm text-slate-600">
+                      {selectedDetailShift.shiftStatus === 'Cancelled'
+                        ? 'No payment due'
+                        : selectedDetailShift.paymentDate
+                          ? formatShortDate(selectedDetailShift.paymentDate)
+                          : 'No payment date entered'}
+                    </p>
+                    {selectedDetailShiftIsArchived && selectedDetailShift.shiftStatus !== 'Cancelled'
+                      ? renderArchivedPaidControls(selectedDetailShift, true)
+                      : null}
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <p className="text-xs font-extrabold uppercase text-slate-500">Supervisor / Parking</p>
@@ -4427,7 +4835,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <div className="border-t border-slate-200 bg-slate-50 p-4">
                 {selectedDetailShiftIsArchived ? (
                   <div className="grid gap-3">
-                    {renderArchivedPaidControls(selectedDetailShift)}
+                    {selectedDetailShift.shiftStatus !== 'Cancelled'
+                      ? renderArchivedPaidControls(selectedDetailShift)
+                      : null}
                     <div className="flex flex-wrap items-center justify-end gap-2">
                     <button
                       type="button"
@@ -4467,14 +4877,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   <h2 className="text-xl font-extrabold text-slate-950">CSC Shift Archive</h2>
                   <p className="text-sm text-slate-600">Restore archived shifts or permanently delete old records.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowArchiveDrawer(false)}
-                  className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-50"
-                  aria-label="Close CSC shift archive drawer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+                <CloseScreenButton onClick={() => setShowArchiveDrawer(false)} />
               </div>
 
               <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
@@ -4550,12 +4953,17 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           </div>
                           <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
                             <span className="font-extrabold text-slate-950">Pay</span>
-                            <span>{formatCurrency(getEstimatedPay(shift))} - {shift.paidStatus}{shift.paymentDate ? `, ${formatShortDate(shift.paymentDate)}` : ''}</span>
+                            <span>
+                              {formatCurrency(getEstimatedPay(shift))} - {getShiftPaymentStatusLabel(shift)}
+                              {shift.shiftStatus !== 'Cancelled' && shift.paymentDate ? `, ${formatShortDate(shift.paymentDate)}` : ''}
+                            </span>
                           </div>
-                          <div className="border-t border-slate-100 pt-2">
-                            <span className="block font-extrabold text-slate-950">Paid Controls</span>
-                            {renderArchivedPaidControls(shift, true)}
-                          </div>
+                          {shift.shiftStatus !== 'Cancelled' ? (
+                            <div className="border-t border-slate-100 pt-2">
+                              <span className="block font-extrabold text-slate-950">Paid Controls</span>
+                              {renderArchivedPaidControls(shift, true)}
+                            </div>
+                          ) : null}
                           <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
                             <span className="font-extrabold text-slate-950">Archived</span>
                             <span>{shift.archivedAt ? new Date(shift.archivedAt).toLocaleString() : 'Date not saved'}</span>
@@ -4607,14 +5015,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   <h2 className="text-xl font-extrabold text-slate-950">Scan CSC Email</h2>
                   <p className="text-sm text-slate-600">Paste a CSC schedule update, acceptance, courtesy reminder, or Kia Forum schedule email. The scanner fills known fields and saves extra details to notes.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowScanDrawer(false)}
-                  className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-50"
-                  aria-label="Close scan email drawer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+                <CloseScreenButton onClick={() => setShowScanDrawer(false)} />
               </div>
 
               <div className="flex-1 overflow-y-auto p-5">
@@ -4735,14 +5136,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       Scan Email
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => { setShowAddDrawer(false); setEditingShiftId(null); setNewShift(createBlankShift()); }}
-                    className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
-                    aria-label="Close add shift drawer"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+                  <CloseScreenButton onClick={() => { setShowAddDrawer(false); setEditingShiftId(null); setNewShift(createBlankShift()); }} />
                 </div>
               </div>
 

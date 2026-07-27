@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 
 const api = {
   list: () => window.listBackups?.(),
@@ -88,7 +89,7 @@ export default function BackupsModal({ open, onClose }) {
       <div className="mt-10 w-full max-w-3xl rounded-2xl bg-white p-4 shadow-xl">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Backups</h2>
-          <button onClick={onClose} className="rounded-xl border px-3 py-1 text-sm hover:bg-gray-50">Close</button>
+          <CloseScreenButton onClick={onClose} />
         </div>
 
         <form onSubmit={doCreate} className="mt-4 flex gap-2">

@@ -155,10 +155,10 @@ function MobileSessionBar({ localMode, email, onLogout }) {
   useEffect(() => subscribeCloudSyncStatus(setStatus), []);
 
   return (
-    <div className="sticky top-0 z-[100] border-b border-slate-700 bg-slate-950 px-3 py-2 text-white shadow-lg">
+    <div className="sticky top-0 z-[100] border-b border-slate-700 bg-slate-950 px-3 py-2 text-white shadow-lg sm:py-1">
       <div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-xs font-bold sm:text-sm">
-          <Cloud className={`h-4 w-4 shrink-0 ${status.state === "error" ? "text-red-400" : "text-cyan-400"}`} />
+          <Cloud className={`h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5 ${status.state === "error" ? "text-red-400" : "text-cyan-400"}`} />
           <span className="truncate">{localMode ? "Local app, export data before first mobile setup" : status.message}</span>
           {!localMode && email ? <span className="hidden text-slate-400 sm:inline">{email}</span> : null}
         </div>
@@ -166,7 +166,7 @@ function MobileSessionBar({ localMode, email, onLogout }) {
           <button
             type="button"
             onClick={exportMobileMigrationFile}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-700 px-2.5 text-xs font-black hover:bg-slate-600"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-700 px-2.5 text-xs font-black hover:bg-slate-600 sm:hidden"
           >
             <Download className="h-4 w-4" />
             Export Mobile Data
@@ -175,9 +175,9 @@ function MobileSessionBar({ localMode, email, onLogout }) {
             <button
               type="button"
               onClick={onLogout}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-700 px-2.5 text-xs font-black hover:bg-red-800"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-700 px-2.5 text-xs font-black hover:bg-red-800 sm:h-7"
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               Sign Out
             </button>
           ) : null}
@@ -264,9 +264,13 @@ export default function MobileAccessGate({ children }) {
     return <AccessScreen mode={mode} error={error} onSubmit={submitAccess} onRetry={checkStatus} />;
   }
 
+  if (localMode) {
+    return children;
+  }
+
   return (
     <>
-      <MobileSessionBar localMode={localMode} email={email} onLogout={logout} />
+      <MobileSessionBar localMode={false} email={email} onLogout={logout} />
       {children}
     </>
   );

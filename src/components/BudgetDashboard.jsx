@@ -16,6 +16,8 @@ import StickyToolbar from './common/StickyToolbar.jsx';
 import TabPageHeader from './common/TabPageHeader.jsx';
 import StatementScanner from './statements/StatementScanner';
 import NotificationPanel from './modern/NotificationPanel';
+import CloseScreenButton from './common/CloseScreenButton.jsx';
+import { formatPhoneNumber } from '../utils/phone';
 import {
   Search,
   X,
@@ -30,6 +32,7 @@ import {
   Car,
   CircleDollarSign,
   ListTodo,
+  Menu,
   Monitor,
 } from 'lucide-react';
 
@@ -231,8 +234,8 @@ const normalizeScannerContact = (contact = {}) => {
     id: contact.id || createTodoId('contact'),
     name: name || 'Scanned Card',
     category: contact.category || 'General',
-    phone: contact.phone || '',
-    directPhone: contact.directPhone || '',
+    phone: formatPhoneNumber(contact.phone || ''),
+    directPhone: formatPhoneNumber(contact.directPhone || ''),
     website: contact.website || '',
     address: contact.address || '',
     organization: contact.organization || '',
@@ -496,6 +499,7 @@ const BudgetDashboard = () => {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportFilename, setExportFilename] = useState('budget-data');
   const [todoEditTaskId, setTodoEditTaskId] = useState('');
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [, setToolbarRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -590,55 +594,71 @@ const BudgetDashboard = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isMobileNavOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsMobileNavOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMobileNavOpen]);
+
   const tabs = useMemo(
     () => [
       {
         id: 'todo',
         label: 'To-Do',
         icon: ListTodo,
-        bgColor: 'bg-green-50',
-        activeClass: 'bg-gradient-to-r from-emerald-600 to-green-500 text-white border-emerald-700 shadow-md shadow-emerald-200',
-        inactiveClass: 'bg-green-100 text-green-950 border-green-200 hover:bg-green-200 hover:border-green-300 hover:shadow-sm',
+        bgColor: 'bg-lime-100',
+        activeClass: 'bg-gradient-to-r from-emerald-900 via-emerald-700 to-teal-700 text-white border-emerald-500 shadow-md shadow-emerald-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
       },
       {
         id: 'rides',
         label: 'Rides',
         icon: Car,
         bgColor: 'bg-sky-50',
-        activeClass: 'bg-gradient-to-r from-sky-700 to-blue-600 text-white border-sky-800 shadow-md shadow-sky-200',
-        inactiveClass: 'bg-sky-100 text-sky-950 border-sky-200 hover:bg-sky-200 hover:border-sky-300 hover:shadow-sm',
+        activeClass: 'bg-gradient-to-r from-sky-900 via-sky-700 to-cyan-700 text-white border-sky-500 shadow-md shadow-sky-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
       },
       {
         id: 'cscShifts',
         label: 'CSC Shifts',
         icon: BriefcaseBusiness,
         bgColor: 'bg-yellow-100',
-        activeClass: 'bg-gradient-to-r from-amber-600 to-yellow-500 text-white border-amber-700 shadow-md shadow-amber-200',
-        inactiveClass: 'bg-yellow-100 text-amber-950 border-yellow-300 hover:bg-yellow-200 hover:border-yellow-400 hover:shadow-sm',
+        activeClass: 'bg-gradient-to-r from-amber-900 via-amber-700 to-orange-700 text-white border-amber-500 shadow-md shadow-amber-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
       },
       {
         id: 'cscOpportunities',
         label: 'CSC Opps',
         icon: CalendarDays,
         bgColor: 'bg-indigo-50',
-        activeClass: 'bg-gradient-to-r from-indigo-700 to-violet-600 text-white border-indigo-800 shadow-md shadow-indigo-200',
-        inactiveClass: 'bg-indigo-100 text-indigo-950 border-indigo-200 hover:bg-indigo-200 hover:border-indigo-300 hover:shadow-sm',
+        activeClass: 'bg-gradient-to-r from-violet-900 via-purple-700 to-fuchsia-700 text-white border-violet-500 shadow-md shadow-violet-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
       },
       {
         id: 'paychecks',
         label: 'Paychecks',
         icon: CircleDollarSign,
         bgColor: 'bg-slate-50',
-        activeClass: 'bg-gradient-to-r from-slate-800 to-slate-600 text-white border-slate-900 shadow-md shadow-slate-200',
-        inactiveClass: 'bg-slate-100 text-slate-950 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
+        activeClass: 'bg-gradient-to-r from-teal-900 via-teal-700 to-emerald-700 text-white border-teal-500 shadow-md shadow-teal-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
       },
       {
         id: 'budget',
         label: 'Budget',
         icon: WalletCards,
         bgColor: 'bg-blue-100',
-        activeClass: 'bg-gradient-to-r from-blue-800 to-indigo-600 text-white border-blue-900 shadow-md shadow-blue-200',
-        inactiveClass: 'bg-blue-100 text-blue-950 border-blue-200 hover:bg-blue-200 hover:border-blue-300 hover:shadow-sm',
+        activeClass: 'bg-gradient-to-r from-blue-900 via-blue-700 to-indigo-700 text-white border-blue-500 shadow-md shadow-blue-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
       },
     ],
     []
@@ -659,8 +679,28 @@ const BudgetDashboard = () => {
     [tabs, activeTab]
   );
 
+  const activeContentBackgroundClass =
+    activeTab === 'budget'
+      ? activeBudgetTab === 'overview'
+        ? 'bg-blue-50'
+        : activeBudgetTab === 'analysis'
+          ? 'bg-cyan-50'
+          : activeBudgetTab === 'calculator'
+            ? 'bg-amber-50'
+            : 'bg-blue-100'
+      : activeTabConfig?.bgColor || 'bg-white';
+
+  const activeBudgetTabClass =
+    activeBudgetTab === 'editor'
+      ? 'bg-gradient-to-r from-indigo-900 via-indigo-700 to-violet-700 text-white border-indigo-500 shadow-md shadow-indigo-300/40'
+      : activeBudgetTab === 'analysis'
+        ? 'bg-gradient-to-r from-cyan-900 via-cyan-700 to-blue-700 text-white border-cyan-500 shadow-md shadow-cyan-300/40'
+        : activeBudgetTab === 'calculator'
+          ? 'bg-gradient-to-r from-amber-900 via-amber-700 to-orange-700 text-white border-amber-500 shadow-md shadow-amber-300/40'
+          : 'bg-gradient-to-r from-blue-900 via-blue-700 to-indigo-700 text-white border-blue-500 shadow-md shadow-blue-300/40';
+
   const renderBudgetSubnav = () => (
-    <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-white/80 p-2 shadow-sm">
+    <div className="budget-mobile-subnav inline-flex max-w-full flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-white/80 p-2 shadow-sm">
       {budgetTabs.map((tab) => (
         <button
           key={tab.id}
@@ -668,7 +708,7 @@ const BudgetDashboard = () => {
           onClick={() => setActiveBudgetTab(tab.id)}
           title={`Open Budget ${tab.label}`}
           aria-label={`Open Budget ${tab.label}`}
-          className={`rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+          className={`budget-mobile-subnav-button rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
             activeBudgetTab === tab.id
               ? 'bg-blue-700 text-white shadow-sm'
               : tab.inactiveClass
@@ -682,13 +722,14 @@ const BudgetDashboard = () => {
   );
 
   const renderBudgetToolHeader = (title, description, theme, Icon) => (
-    <PageContainer className="py-6">
+    <PageContainer className="budget-tool-header-shell py-6">
       <TabPageHeader
         icon={Icon}
         title={title}
         subtitle={description}
         theme={theme}
         actions={renderBudgetSubnav()}
+        className="budget-mobile-header"
       />
     </PageContainer>
   );
@@ -750,7 +791,7 @@ const BudgetDashboard = () => {
       type: taskType,
       typeOverride: taskType,
       date: taskData.date || now.slice(0, 10),
-      phone: taskData.phone || '',
+      phone: formatPhoneNumber(taskData.phone || ''),
       address: taskData.address || '',
       deadline: taskData.deadline || '',
       blockedBy: taskData.blockedBy || '',
@@ -1211,7 +1252,91 @@ const BudgetDashboard = () => {
   if (isLoading) return <LoadingGate />;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen ${activeContentBackgroundClass}`}>
+      <style>{`
+        @media (max-width: 639px) {
+          ${activeTab === 'todo' ? `
+            html,
+            body,
+            #root {
+              background-color: #ecfccb !important;
+            }
+          ` : ''}
+
+          .budget-tool-header-shell,
+          .budget-overview-page {
+            padding-top: 0.75rem;
+            padding-bottom: 0.75rem;
+          }
+
+          .budget-mobile-header {
+            min-height: 0;
+            padding: 0.75rem;
+            border-radius: 1rem;
+          }
+
+          .budget-mobile-header > div {
+            min-height: 0;
+            gap: 0.625rem;
+          }
+
+          .budget-mobile-header > div > div:first-child > div:first-child {
+            gap: 0.625rem;
+          }
+
+          .budget-mobile-header > div > div:first-child > div:first-child > span {
+            width: 2.25rem;
+            height: 2.25rem;
+            border-radius: 0.625rem;
+          }
+
+          .budget-mobile-header > div > div:first-child > div:first-child > span svg {
+            width: 1.25rem;
+            height: 1.25rem;
+          }
+
+          .budget-mobile-header > div > div:first-child > div:first-child > h1 {
+            font-size: 1.375rem;
+            line-height: 1.5rem;
+          }
+
+          .budget-mobile-header > div > div:first-child > p {
+            margin-top: 0.375rem;
+            font-size: 0.8125rem;
+            line-height: 1.125rem;
+          }
+
+          .budget-mobile-header > div > div:first-child > div:last-child {
+            display: none;
+          }
+
+          .budget-mobile-header > div > div:last-child {
+            width: 100%;
+            min-height: 0;
+            gap: 0;
+          }
+
+          .budget-mobile-subnav {
+            display: grid;
+            width: 100%;
+            max-width: none;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.375rem;
+            padding: 0.375rem;
+            border-radius: 0.75rem;
+          }
+
+          .budget-mobile-subnav-button {
+            min-width: 0;
+            height: 2.25rem;
+            padding: 0 0.25rem;
+            font-size: 0.6875rem;
+            line-height: 1;
+            white-space: nowrap;
+          }
+        }
+      `}</style>
+
       {saveStatus && (
         <div
           className="fixed inset-0 pointer-events-none z-[9999]"
@@ -1229,39 +1354,126 @@ const BudgetDashboard = () => {
         </div>
       )}
 
-      <StickyToolbar bgTint="bg-slate-950" contentClassName="w-full px-3 sm:px-4 lg:px-6">
-        <div className="flex flex-col gap-2 py-2 xl:min-h-14 xl:flex-row xl:items-center xl:justify-between">
-          <div className="grid w-full min-w-0 grid-cols-3 gap-2 xl:flex xl:w-auto xl:flex-1 xl:flex-nowrap xl:items-center xl:gap-1.5">
-            {tabs.map((tab) => {
-              const TabIcon = tab.icon;
-              const isActive = activeTab === tab.id;
+      <StickyToolbar bgTint={activeContentBackgroundClass} contentClassName="w-full px-3 sm:px-4 lg:px-6">
+        <div className="flex flex-col gap-0 py-2 xl:min-h-14 xl:flex-row xl:items-center xl:justify-between xl:gap-2">
+          <div className="relative w-full min-w-0 xl:w-auto xl:flex-1">
+            <div className="xl:hidden">
+              <button
+                type="button"
+                onClick={() => setIsMobileNavOpen((current) => !current)}
+                className={`flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border-2 !border-black px-3 py-2 text-white transition-all active:scale-[0.99] ${
+                  activeTab === 'budget'
+                    ? activeBudgetTabClass
+                    : activeTabConfig?.activeClass || tabs[0].activeClass
+                }`}
+                aria-expanded={isMobileNavOpen}
+                aria-controls="mobile-main-navigation"
+                aria-label={`${isMobileNavOpen ? 'Close' : 'Open'} main navigation. Current page: ${activeTabConfig?.label || 'To-Do'}`}
+              >
+                <span className="inline-flex min-w-0 items-center gap-2 text-sm font-black">
+                  {activeTabConfig?.icon
+                    ? React.createElement(activeTabConfig.icon, { className: 'h-5 w-5 shrink-0', 'aria-hidden': true })
+                    : null}
+                  <span className="truncate">{activeTabConfig?.label || 'To-Do'}</span>
+                </span>
 
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                    if (tab.id === 'budget') {
-                      setActiveBudgetTab((current) => current || 'overview');
-                    }
-                  }}
-                  title={`Open ${tab.label} tab`}
-                  aria-label={`Open ${tab.label} tab`}
-                  className={`inline-flex min-h-12 min-w-0 items-center justify-center gap-1 rounded-xl border px-1.5 py-1.5 text-center text-[10px] font-black leading-tight whitespace-normal transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 sm:text-xs xl:min-h-10 xl:w-auto xl:shrink-0 xl:gap-1.5 xl:px-3 xl:text-sm xl:whitespace-nowrap ${
-                    isActive
-                      ? tab.activeClass
-                      : tab.inactiveClass
-                  }`}
-                  aria-pressed={isActive}
-                >
-                  <TabIcon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                  <span className="min-w-0">{tab.label}</span>
-                </button>
-              );
-            })}
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/30 bg-white/15">
+                  {isMobileNavOpen ? (
+                    <X className="h-5 w-5" aria-hidden="true" />
+                  ) : (
+                    <Menu className="h-5 w-5" aria-hidden="true" />
+                  )}
+                </span>
+              </button>
+
+              {isMobileNavOpen && (
+                <>
+                  <button
+                    type="button"
+                    className="fixed inset-0 z-0 cursor-default"
+                    onClick={() => setIsMobileNavOpen(false)}
+                    aria-label="Close main navigation"
+                    tabIndex={-1}
+                  />
+
+                  <div
+                    id="mobile-main-navigation"
+                    className="absolute inset-x-0 top-full z-10 mt-0 grid grid-cols-3 gap-2 rounded-xl border border-slate-700 bg-slate-950 p-2 shadow-2xl"
+                    role="menu"
+                    aria-label="Main pages"
+                  >
+                    {tabs.map((tab) => {
+                      const TabIcon = tab.icon;
+                      const isActive = activeTab === tab.id;
+
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab(tab.id);
+                            setIsMobileNavOpen(false);
+                            if (tab.id === 'budget') {
+                              setActiveBudgetTab((current) => current || 'overview');
+                            }
+                          }}
+                          className={`inline-flex min-h-12 min-w-0 items-center justify-center gap-1 rounded-xl border-2 !border-black px-1.5 py-1.5 text-center text-[10px] font-black leading-tight transition-all active:scale-95 sm:text-xs ${
+                            isActive
+                              ? tab.id === 'budget'
+                                ? activeBudgetTabClass
+                                : tab.activeClass
+                              : tab.inactiveClass
+                          }`}
+                          role="menuitem"
+                          aria-current={isActive ? 'page' : undefined}
+                        >
+                          <TabIcon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
+                          <span className="min-w-0 whitespace-nowrap">{tab.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="hidden w-full min-w-0 flex-nowrap items-center gap-1.5 xl:flex">
+              {tabs.map((tab) => {
+                const TabIcon = tab.icon;
+                const isActive = activeTab === tab.id;
+
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      if (tab.id === 'budget') {
+                        setActiveBudgetTab((current) => current || 'overview');
+                      }
+                    }}
+                    title={`Open ${tab.label} tab`}
+                    aria-label={`Open ${tab.label} tab`}
+                    className={`inline-flex min-h-10 w-auto shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border-2 !border-black px-3 py-1.5 text-center text-sm font-black leading-tight transition-all duration-200 active:scale-95 ${
+                      isActive
+                        ? tab.id === 'budget'
+                          ? activeBudgetTabClass
+                          : tab.activeClass
+                        : tab.inactiveClass
+                    }`}
+                    aria-pressed={isActive}
+                  >
+                    <TabIcon className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0">{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="mobile-horizontal-scroll flex w-full flex-shrink-0 flex-nowrap items-center gap-1 overflow-y-hidden pb-1 sm:gap-2 xl:w-auto xl:pb-0">
+          <div
+            className={`mobile-horizontal-scroll ${activeContentBackgroundClass} flex w-full flex-shrink-0 flex-nowrap items-center gap-1 overflow-y-hidden rounded-xl px-2 py-1.5 transition-colors sm:gap-2 xl:w-auto xl:rounded-none xl:bg-transparent xl:p-0`}
+          >
             {activeTab === 'budget' &&
             (activeBudgetTab === 'overview' || activeBudgetTab === 'editor') ? (
               <NotificationPanel
@@ -1297,7 +1509,7 @@ const BudgetDashboard = () => {
         </div>
       </StickyToolbar>
 
-      <div className={`${activeTabConfig?.bgColor || 'bg-white'} min-h-screen`}>
+      <div className={`${activeContentBackgroundClass} min-h-screen`}>
         {activeTab === 'cscShifts' && (
           <CscShiftsTab searchQuery={searchQuery} />
         )}
@@ -1323,7 +1535,7 @@ const BudgetDashboard = () => {
         )}
 
         {activeTab === 'budget' && (
-          <div className="min-h-screen">
+          <div className={`${activeContentBackgroundClass} min-h-screen`}>
             {activeBudgetTab === 'overview' && (
               <DashboardTab
                 state={state}
@@ -1331,6 +1543,7 @@ const BudgetDashboard = () => {
                 saveBudget={saveBudget}
                 searchQuery={searchQuery}
                 budgetSubnav={renderBudgetSubnav()}
+                onOpenEditor={() => setActiveBudgetTab('editor')}
               />
             )}
 
@@ -1347,7 +1560,7 @@ const BudgetDashboard = () => {
             )}
 
             {activeBudgetTab === 'analysis' && (
-              <div>
+              <div className="bg-cyan-50">
                 {renderBudgetToolHeader('Budget Analysis', 'Review budget trends, spending patterns, category totals, and variance insights.', 'cyan', BarChart3)}
                 <AnalysisTab
                   state={state}
@@ -1359,7 +1572,7 @@ const BudgetDashboard = () => {
             )}
 
             {activeBudgetTab === 'calculator' && (
-              <div>
+              <div className="bg-amber-50">
                 {renderBudgetToolHeader('Budget Calculator', 'Calculate payment scenarios, totals, savings targets, and budget adjustments.', 'amber', CircleDollarSign)}
                 <CalculatorTab
                   state={state}
@@ -1394,7 +1607,10 @@ const BudgetDashboard = () => {
       {showExportDialog && (
         <div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 px-3 py-4 sm:px-4 sm:py-6">
           <div className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:max-h-[calc(100vh-3rem)] sm:p-6">
-            <h3 className="text-lg font-bold mb-4">Export Budget</h3>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-bold">Export Budget</h3>
+              <CloseScreenButton onClick={() => setShowExportDialog(false)} />
+            </div>
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">

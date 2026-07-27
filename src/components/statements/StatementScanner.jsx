@@ -4,6 +4,8 @@ import { Upload, FileText, Camera, Image as ImageIcon, X, Check, ClipboardList, 
 import { extractTextFromFile, providerLabel } from '../../utils/ocr/index.js';
 import { parseStatementText, transactionsToBudgetItems } from '../../utils/statements/statementParser';
 import CameraCapture from '../receipts/CameraCapture';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
+import { formatPhoneInput, formatPhoneNumber } from '../../utils/phone';
 
 function canvasToFile(canvas, filename = 'camera-scan.png') {
   return new Promise((resolve, reject) => {
@@ -81,7 +83,7 @@ function firstMatch(text = '', regex) {
 }
 
 function extractPhone(text = '') {
-  return firstMatch(text, /(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/);
+  return formatPhoneNumber(firstMatch(text, /(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/));
 }
 
 function extractWebsite(text = '') {
@@ -436,9 +438,7 @@ export default function StatementScanner({ isOpen, onClose, onImport, onCreateTo
                 <p className="text-xs text-gray-500 mt-1">Source: {parsedData.sourceLabel}</p>
               )}
             </div>
-            <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded" aria-label="Close scanner">
-              <X className="w-5 h-5" />
-            </button>
+            <CloseScreenButton onClick={handleClose} />
           </div>
 
           <div className="flex-1 overflow-y-auto p-6">
@@ -550,8 +550,10 @@ export default function StatementScanner({ isOpen, onClose, onImport, onCreateTo
                     <label className="text-sm font-semibold text-gray-700">
                       Phone
                       <input
+                        type="tel"
+                        inputMode="tel"
                         value={contactDraft.phone}
-                        onChange={(e) => updateContactDraft('phone', e.target.value)}
+                        onChange={(e) => updateContactDraft('phone', formatPhoneInput(e.target.value))}
                         className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                         placeholder="Phone number"
                       />
@@ -707,9 +709,7 @@ export default function StatementScanner({ isOpen, onClose, onImport, onCreateTo
             <h2 className="text-xl font-bold text-gray-900">Scanner</h2>
             <p className="text-xs text-gray-500 mt-1">OCR provider: {providerLabel}</p>
           </div>
-          <button onClick={handleClose} className="p-2 hover:bg-gray-100 rounded" aria-label="Close scanner">
-            <X className="w-5 h-5" />
-          </button>
+          <CloseScreenButton onClick={handleClose} />
         </div>
 
         <div className="px-6 pt-4">

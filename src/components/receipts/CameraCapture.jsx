@@ -1,5 +1,6 @@
 // C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\components\receipts\CameraCapture.jsx
 import React, { useEffect, useRef, useState } from "react";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 
 export default function CameraCapture({ onClose, onCapture }) {
   const videoRef = useRef(null);
@@ -113,7 +114,7 @@ export default function CameraCapture({ onClose, onCapture }) {
             >
               Flip Camera
             </button>
-            <button style={btn} onClick={onClose}>Close</button>
+            <CloseScreenButton onClick={onClose} />
           </div>
         </div>
 

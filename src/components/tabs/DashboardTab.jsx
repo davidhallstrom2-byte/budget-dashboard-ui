@@ -1,13 +1,14 @@
 // src/components/tabs/DashboardTab.jsx
 import React, { useState, useMemo, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Printer, AlertCircle, Clock, Download, Plus, Minus, Archive, CheckCircle2, Ban, Landmark, PauseCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Printer, AlertCircle, Clock, Download, Plus, Minus, CheckCircle2, Ban, Landmark, PauseCircle } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
-  CreditCard, Repeat, Package, WalletCards
+  CreditCard, Repeat, Package, WalletCards, PiggyBank
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader from '../common/TabPageHeader.jsx';
 import EmergencyFundWidget from '../modern/EmergencyFundWidget';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -35,18 +36,28 @@ const DEFAULT_TITLES = {
 };
 
 const CSC_STORAGE_KEY = 'cscShifts.v1';
+const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
 const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
 const PAYCHECK_STORAGE_KEY = 'paychecksTab.paychecks.v1';
 const PAYCHECK_UPDATE_EVENT = 'paychecksChanged';
 const RIDES_STORAGE_KEY = 'modivcareRides.v1';
 const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
 const RIDES_UPDATE_EVENT = 'modivcareRides:updated';
-const GUARD_CARD_PROOF_SUBMITTED_DATE = '2026-06-22';
-const FUTURE_EXPECTED_CSC_RATE = 19.5;
+const CASH_FLOW_STORAGE_KEY = 'dashboard.cashFlow.v1';
+const CASH_FLOW_UPDATE_EVENT = 'dashboard:cashFlowUpdated';
 const OVERTIME_HOUR_THRESHOLD = 8;
 const DOUBLE_TIME_HOUR_THRESHOLD = 12;
 const OVERTIME_RATE_MULTIPLIER = 1.5;
 const DOUBLE_TIME_RATE_MULTIPLIER = 2;
+const HOMELIGHT_SAVINGS_PROGRAM_ID = 'homelight-savings-2026';
+const HOMELIGHT_SAVINGS_MONTHS = [
+  { key: '2026-07', label: 'July', shortLabel: 'Jul', dueDate: '2026-07-31', required: 500 },
+  { key: '2026-08', label: 'August', shortLabel: 'Aug', dueDate: '2026-08-31', required: 500 },
+  { key: '2026-09', label: 'September', shortLabel: 'Sep', dueDate: '2026-09-30', required: 1000 },
+  { key: '2026-10', label: 'October', shortLabel: 'Oct', dueDate: '2026-10-31', required: 1000 },
+  { key: '2026-11', label: 'November', shortLabel: 'Nov', dueDate: '2026-11-30', required: 1000 },
+  { key: '2026-12', label: 'December', shortLabel: 'Dec', dueDate: '2026-12-31', required: 1000 },
+];
 
 const loadCscBudgetShifts = () => {
   try {
@@ -55,6 +66,17 @@ const loadCscBudgetShifts = () => {
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     console.error('Failed to load CSC shifts for budget dashboard:', error);
+    return [];
+  }
+};
+
+const loadArchivedCscBudgetShifts = () => {
+  try {
+    const saved = localStorage.getItem(CSC_ARCHIVE_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Failed to load archived CSC shifts for budget dashboard:', error);
     return [];
   }
 };
@@ -84,6 +106,22 @@ const loadRideBudgetItems = () => {
   } catch (error) {
     console.error('Failed to load rides for budget dashboard:', error);
     return [];
+  }
+};
+
+const loadDashboardCashFlow = () => {
+  const emptyCashFlow = {
+    availableNow: '',
+    updatedAt: '',
+  };
+
+  try {
+    const saved = localStorage.getItem(CASH_FLOW_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : {};
+    return { ...emptyCashFlow, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+  } catch (error) {
+    console.error('Failed to load dashboard cash-flow snapshot:', error);
+    return emptyCashFlow;
   }
 };
 
@@ -192,6 +230,80 @@ const formatDashboardDate = (value = '') => {
   return `${month}/${day}/${year}`;
 };
 
+const formatDashboardUpdatedAt = (value = '') => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
+const getDashboardItemAmount = (item = {}) => {
+  const actual = getDashboardNumber(item.actualCost || item.actualSpent);
+  const estimated = getDashboardNumber(item.estBudget || item.estimatedBudget || item.estimatedCost);
+  return actual > 0 ? actual : estimated;
+};
+
+const getDashboardDateAtNoon = (value = '') => {
+  const normalized = normalizeDashboardDate(value);
+  if (!normalized) return null;
+
+  const parsed = new Date(`${normalized}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getDashboardIsoDate = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+
+  return [
+    String(date.getFullYear()).padStart(4, '0'),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+};
+
+const addDashboardDays = (value, days) => {
+  const date = value instanceof Date ? new Date(value) : getDashboardDateAtNoon(value);
+  if (!date || Number.isNaN(date.getTime())) return null;
+
+  date.setDate(date.getDate() + days);
+  date.setHours(12, 0, 0, 0);
+  return date;
+};
+
+const getNextCscFridayPayday = (value = new Date()) => {
+  const payday = new Date(value);
+  payday.setHours(12, 0, 0, 0);
+  payday.setDate(payday.getDate() + ((5 - payday.getDay() + 7) % 7));
+  return payday;
+};
+
+const getCscPayPeriodForPayday = (payday) => {
+  return {
+    start: addDashboardDays(payday, -13),
+    end: addDashboardDays(payday, -7),
+    source: 'csc-saturday-friday-cycle',
+  };
+};
+
+const getHomelightSavingsMonthKey = (item = {}) => {
+  if (item.homelightSavingsProgramId === HOMELIGHT_SAVINGS_PROGRAM_ID && item.homelightSavingsMonth) {
+    return item.homelightSavingsMonth;
+  }
+
+  const itemName = String(item.category || '').trim().toLowerCase();
+  const dueDate = normalizeDashboardDate(item.dueDate);
+  const matchingMonth = HOMELIGHT_SAVINGS_MONTHS.find((month) => month.dueDate === dueDate);
+
+  return itemName.includes('homelight') && itemName.includes('sav') && matchingMonth
+    ? matchingMonth.key
+    : '';
+};
+
 const getDebtDaysDelinquent = (item = {}) => {
   const sourceDate = normalizeDashboardDate(item.delinquentSince);
   if (!sourceDate) return 0;
@@ -243,6 +355,7 @@ const DashboardTab = ({
   saveBudget,
   searchQuery,
   budgetSubnav = null,
+  onOpenEditor = () => {},
   showUrgentAlert = false,
   onCloseUrgentAlert = () => {},
 }) => {
@@ -252,10 +365,15 @@ const DashboardTab = ({
   const [showAllOverdue, setShowAllOverdue] = useState(false);
   const [showBudgetOverview, setShowBudgetOverview] = useState(false);
   const [showPaymentAlerts, setShowPaymentAlerts] = useState(false);
-  const [showDebtReconciliation, setShowDebtReconciliation] = useState(true);
+  const [showDebtReconciliation, setShowDebtReconciliation] = useState(false);
+  const [showHomelightSavings, setShowHomelightSavings] = useState(false);
   const [cscShifts, setCscShifts] = useState(() => loadCscBudgetShifts());
+  const [archivedCscShifts, setArchivedCscShifts] = useState(() => loadArchivedCscBudgetShifts());
   const [paychecks, setPaychecks] = useState(() => loadPaycheckBudgetItems());
   const [rides, setRides] = useState(() => loadRideBudgetItems());
+  const [cashFlow, setCashFlow] = useState(() => loadDashboardCashFlow());
+  const [cashFlowDraft, setCashFlowDraft] = useState(() => loadDashboardCashFlow());
+  const [isEditingCashFlow, setIsEditingCashFlow] = useState(false);
 
   const categoryNames = state?.meta?.categoryNames || {};
   const categoryOrder =
@@ -264,14 +382,26 @@ const DashboardTab = ({
       : Object.keys(state?.buckets || {});
 
   useEffect(() => {
-    const refreshCscShifts = () => setCscShifts(loadCscBudgetShifts());
+    let refreshTimeoutId = null;
+
+    const refreshCscShifts = () => {
+      setCscShifts(loadCscBudgetShifts());
+      setArchivedCscShifts(loadArchivedCscBudgetShifts());
+    };
+
+    const refreshAfterCscUpdate = () => {
+      refreshCscShifts();
+      window.clearTimeout(refreshTimeoutId);
+      refreshTimeoutId = window.setTimeout(refreshCscShifts, 0);
+    };
 
     window.addEventListener('storage', refreshCscShifts);
-    window.addEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShifts);
+    window.addEventListener(CSC_SHIFT_UPDATE_EVENT, refreshAfterCscUpdate);
 
     return () => {
+      window.clearTimeout(refreshTimeoutId);
       window.removeEventListener('storage', refreshCscShifts);
-      window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShifts);
+      window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshAfterCscUpdate);
     };
   }, []);
 
@@ -298,6 +428,41 @@ const DashboardTab = ({
       window.removeEventListener(RIDES_UPDATE_EVENT, refreshRides);
     };
   }, []);
+
+  useEffect(() => {
+    const refreshCashFlow = () => {
+      const nextCashFlow = loadDashboardCashFlow();
+      setCashFlow(nextCashFlow);
+      if (!isEditingCashFlow) setCashFlowDraft(nextCashFlow);
+    };
+
+    window.addEventListener('storage', refreshCashFlow);
+    window.addEventListener(CASH_FLOW_UPDATE_EVENT, refreshCashFlow);
+
+    return () => {
+      window.removeEventListener('storage', refreshCashFlow);
+      window.removeEventListener(CASH_FLOW_UPDATE_EVENT, refreshCashFlow);
+    };
+  }, [isEditingCashFlow]);
+
+  const handleSaveCashFlow = (event) => {
+    event.preventDefault();
+
+    const nextCashFlow = {
+      availableNow: cashFlowDraft.availableNow,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      localStorage.setItem(CASH_FLOW_STORAGE_KEY, JSON.stringify(nextCashFlow));
+      setCashFlow(nextCashFlow);
+      setCashFlowDraft(nextCashFlow);
+      setIsEditingCashFlow(false);
+      window.dispatchEvent(new Event(CASH_FLOW_UPDATE_EVENT));
+    } catch (error) {
+      console.error('Failed to save dashboard cash-flow snapshot:', error);
+    }
+  };
 
   const toggleCategory = (category) => {
     setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
@@ -368,14 +533,20 @@ const DashboardTab = ({
   };
 
   const cscIncome = useMemo(() => {
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const activeShifts = cscShifts.filter((shift) => shift?.shiftStatus !== 'Cancelled');
     const paidShifts = activeShifts.filter((shift) => shift?.paidStatus === 'Paid');
     const unpaidShifts = activeShifts.filter((shift) => shift?.paidStatus !== 'Paid');
     const doneShifts = activeShifts.filter((shift) => shift?.shiftStatus === 'Done');
+    const currentMonthUnpaidShifts = unpaidShifts.filter((shift) =>
+      normalizeDashboardDate(shift?.startDate).startsWith(currentMonth)
+    );
 
     const estimatedPay = activeShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
     const paidPay = paidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
     const unpaidPay = unpaidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const currentMonthUnpaidPay = currentMonthUnpaidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
     const estimatedHours = activeShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0);
     const workedHours = doneShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0);
 
@@ -383,9 +554,11 @@ const DashboardTab = ({
       activeShiftCount: activeShifts.length,
       paidShiftCount: paidShifts.length,
       unpaidShiftCount: unpaidShifts.length,
+      currentMonthUnpaidShiftCount: currentMonthUnpaidShifts.length,
       estimatedPay,
       paidPay,
       unpaidPay,
+      currentMonthUnpaidPay,
       estimatedHours,
       workedHours,
     };
@@ -414,8 +587,6 @@ const DashboardTab = ({
         const grossPay = getDashboardNumber(paycheck?.grossPay);
         const taxes = getDashboardNumber(paycheck?.taxes);
         const netPay = getDashboardNumber(paycheck?.netPay || paycheck?.checkAmount);
-        const underExpectedRate = Boolean(checkDate && checkDate >= GUARD_CARD_PROOF_SUBMITTED_DATE && rate > 0 && rate < FUTURE_EXPECTED_CSC_RATE);
-
         return {
           ...paycheck,
           checkDate,
@@ -424,7 +595,6 @@ const DashboardTab = ({
           grossPay,
           taxes,
           netPay,
-          underExpectedRate,
         };
       })
       .filter((paycheck) => paycheck.checkDate || paycheck.netPay || paycheck.grossPay);
@@ -437,7 +607,6 @@ const DashboardTab = ({
     const currentMonthNetPay = currentMonthPaychecks.reduce((sum, paycheck) => sum + paycheck.netPay, 0);
     const currentMonthGrossPay = currentMonthPaychecks.reduce((sum, paycheck) => sum + paycheck.grossPay, 0);
     const currentMonthHours = currentMonthPaychecks.reduce((sum, paycheck) => sum + paycheck.hours, 0);
-    const rateWarnings = normalized.filter((paycheck) => paycheck.underExpectedRate);
     const latestPaycheck = [...normalized].sort((a, b) => String(b.checkDate).localeCompare(String(a.checkDate)))[0] || null;
 
     return {
@@ -452,10 +621,60 @@ const DashboardTab = ({
       currentMonthNetPay,
       currentMonthGrossPay,
       currentMonthHours,
-      rateWarnings,
       latestPaycheck,
     };
   }, [paychecks]);
+
+  const cscWeeklyPay = useMemo(() => {
+    const payday = getNextCscFridayPayday();
+    const payPeriod = getCscPayPeriodForPayday(payday);
+    const paydayDate = getDashboardIsoDate(payday);
+    const payPeriodStart = getDashboardIsoDate(payPeriod.start);
+    const payPeriodEnd = getDashboardIsoDate(payPeriod.end);
+
+    const shiftRecordsById = new Map();
+    [...archivedCscShifts, ...cscShifts].forEach((shift, index) => {
+      const recordKey = String(shift?.id || '').trim() || [
+        normalizeDashboardDate(shift?.startDate),
+        shift?.startTime || '',
+        normalizeDashboardDate(shift?.finishDate),
+        shift?.finishTime || '',
+        shift?.venue || '',
+        shift?.event || '',
+        shift?.jobName || '',
+      ].join('|') || `csc-shift-${index}`;
+      const recordSource = cscShifts.includes(shift) ? 'active' : 'archived';
+      shiftRecordsById.set(recordKey, { shift, recordSource });
+    });
+
+    const shiftsForPaycheck = Array.from(shiftRecordsById.values()).filter(({ shift }) => {
+      if (shift?.shiftStatus === 'Cancelled') return false;
+
+      const shiftDate = normalizeDashboardDate(shift?.startDate);
+      return Boolean(shiftDate && shiftDate >= payPeriodStart && shiftDate <= payPeriodEnd);
+    });
+    const expectedGross = shiftsForPaycheck.reduce(
+      (sum, record) => sum + getCscEstimatedPay(record.shift),
+      0
+    );
+    const expectedHours = shiftsForPaycheck.reduce(
+      (sum, record) => sum + getCscShiftHours(record.shift),
+      0
+    );
+    const archivedShiftCount = shiftsForPaycheck.filter(
+      (record) => record.recordSource === 'archived'
+    ).length;
+
+    return {
+      paydayDate,
+      payPeriodStart,
+      payPeriodEnd,
+      shiftCount: shiftsForPaycheck.length,
+      archivedShiftCount,
+      expectedGross: Math.round(expectedGross * 100) / 100,
+      expectedHours: Math.round(expectedHours * 100) / 100,
+    };
+  }, [archivedCscShifts, cscShifts]);
 
   const paycheckIncomeItem = useMemo(() => ({
     id: 'system-csc-paycheck-income',
@@ -464,7 +683,7 @@ const DashboardTab = ({
     actualCost: paycheckIncome.totalNetPay,
     dueDate: '',
     status: 'paid',
-    note: `${paycheckIncome.paycheckCount} scanned paycheck${paycheckIncome.paycheckCount === 1 ? '' : 's'} · ${paycheckIncome.totalHours.toFixed(1)} hrs · taxes ${formatDashboardCurrency(paycheckIncome.totalTaxes)}${paycheckIncome.rateWarnings.length ? ` · ${paycheckIncome.rateWarnings.length} rate warning${paycheckIncome.rateWarnings.length === 1 ? '' : 's'}` : ''}`,
+    note: `${paycheckIncome.paycheckCount} scanned paycheck${paycheckIncome.paycheckCount === 1 ? '' : 's'} · ${paycheckIncome.totalHours.toFixed(1)} hrs · taxes ${formatDashboardCurrency(paycheckIncome.totalTaxes)}`,
     isSystemItem: true,
   }), [paycheckIncome]);
 
@@ -603,6 +822,105 @@ const DashboardTab = ({
     };
   }, [state?.buckets, categoryNames]);
 
+  const homelightSavings = useMemo(() => {
+    const linkedItems = new Map();
+
+    Object.entries(state?.buckets || {}).forEach(([bucketName, items]) => {
+      (items || []).forEach((item) => {
+        const monthKey = getHomelightSavingsMonthKey(item);
+        if (!monthKey || linkedItems.has(monthKey)) return;
+        linkedItems.set(monthKey, { ...item, bucketName });
+      });
+    });
+
+    const now = new Date();
+    const todayKey = [
+      String(now.getFullYear()).padStart(4, '0'),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+
+    const months = HOMELIGHT_SAVINGS_MONTHS.map((month) => {
+      const item = linkedItems.get(month.key) || null;
+      const saved = getDashboardNumber(item?.actualCost);
+      const variance = saved - month.required;
+      let status = 'upcoming';
+
+      if (!item) status = 'notLinked';
+      else if (saved >= month.required) status = 'met';
+      else if (month.dueDate < todayKey) status = 'short';
+      else if (saved > 0) status = 'inProgress';
+
+      return { ...month, item, saved, variance, status };
+    });
+
+    const totalRequired = months.reduce((sum, month) => sum + month.required, 0);
+    const totalSaved = months.reduce((sum, month) => sum + month.saved, 0);
+    const requiredToDate = months
+      .filter((month) => month.dueDate <= todayKey)
+      .reduce((sum, month) => sum + month.required, 0);
+    const overallVariance = totalSaved - requiredToDate;
+    const nextMonth = months.find((month) => month.dueDate >= todayKey && month.saved < month.required) || null;
+
+    return {
+      months,
+      totalRequired,
+      totalSaved,
+      requiredToDate,
+      overallVariance,
+      remaining: Math.max(totalRequired - totalSaved, 0),
+      linkedCount: linkedItems.size,
+      missingCount: Math.max(HOMELIGHT_SAVINGS_MONTHS.length - linkedItems.size, 0),
+      nextMonth,
+    };
+  }, [state?.buckets]);
+
+  const setupHomelightSavingsPlan = () => {
+    const linkedMonths = new Set();
+    const updatedBuckets = {};
+
+    Object.entries(state?.buckets || {}).forEach(([bucketName, items]) => {
+      updatedBuckets[bucketName] = (items || []).map((item) => {
+        const monthKey = getHomelightSavingsMonthKey(item);
+        if (!monthKey || linkedMonths.has(monthKey)) return item;
+
+        linkedMonths.add(monthKey);
+        return {
+          ...item,
+          homelightSavingsProgramId: HOMELIGHT_SAVINGS_PROGRAM_ID,
+          homelightSavingsMonth: monthKey,
+          recurrence: 'none',
+        };
+      });
+    });
+
+    const missingItems = HOMELIGHT_SAVINGS_MONTHS
+      .filter((month) => !linkedMonths.has(month.key))
+      .map((month) => ({
+        id: `homelight-savings-${month.key}`,
+        category: `Homelight Savings - ${month.label}`,
+        estBudget: month.required,
+        actualCost: 0,
+        dueDate: month.dueDate,
+        status: 'pending',
+        recurrence: 'none',
+        note: `Homelight contracted savings requirement for ${month.label} 2026. Enter the amount saved in Actual Cost.`,
+        homelightSavingsProgramId: HOMELIGHT_SAVINGS_PROGRAM_ID,
+        homelightSavingsMonth: month.key,
+      }));
+
+    updatedBuckets.housing = [...(updatedBuckets.housing || []), ...missingItems];
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    saveBudget(
+      updatedState,
+      missingItems.length
+        ? `Homelight savings plan linked and ${missingItems.length} missing month${missingItems.length === 1 ? '' : 's'} added.`
+        : 'Homelight savings plan linked to the Budget Editor.'
+    );
+  };
+
   const getBudgetItemsForBucket = (bucketName) => {
     const items = state?.buckets?.[bucketName] || [];
 
@@ -625,26 +943,28 @@ const DashboardTab = ({
   const summary = useMemo(() => {
     const allItems = Object.values(state?.buckets || {}).flat();
 
+    const expenseItems = Object.entries(state?.buckets || {})
+      .filter(([bucketName]) => bucketName !== 'income')
+      .flatMap(([, items]) => items || [])
+      .filter(isBudgetItemActive);
+
     const manualIncome = (state?.buckets?.income || []).reduce((sum, item) =>
       sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0
     );
 
-    const income = manualIncome + paycheckIncome.totalNetPay + cscIncome.unpaidPay;
+    const manualIncomeReceived = (state?.buckets?.income || []).reduce(
+      (sum, item) => sum + getDashboardNumber(item.actualCost || item.actualSpent),
+      0
+    );
 
-    const expenses =
-      allItems
-        .filter(item => {
-          const bucketKeys = Object.keys(state?.buckets || {});
-          for (const key of bucketKeys) {
-            if (key !== 'income' && state.buckets[key].includes(item)) {
-              return true;
-            }
-          }
-          return false;
-        })
-        .filter(isBudgetItemActive)
-        .reduce((sum, item) => sum + (Number(item.actualCost) || Number(item.estBudget) || 0), 0) +
+    const income = manualIncome + paycheckIncome.currentMonthNetPay + cscIncome.currentMonthUnpaidPay;
+    const expenses = expenseItems.reduce((sum, item) => sum + getDashboardItemAmount(item), 0) +
       rideExpenses.currentMonth.total;
+    const actualIncomeReceived = manualIncomeReceived + paycheckIncome.currentMonthNetPay;
+    const actualExpensesPaid = expenseItems.reduce(
+      (sum, item) => sum + getDashboardNumber(item.actualCost || item.actualSpent),
+      0
+    ) + rideExpenses.currentMonth.total;
 
     const activeBudgetItems = allItems.filter(isBudgetItemActive);
     const totalBudgeted = activeBudgetItems.reduce((sum, item) => sum + (Number(item.estBudget) || 0), 0);
@@ -659,21 +979,30 @@ const DashboardTab = ({
       paycheckIncome,
       expenses,
       netIncome: income - expenses,
+      actualIncomeReceived,
+      actualExpensesPaid,
+      actualMonthToDateNet: actualIncomeReceived - actualExpensesPaid,
       budgetVariance: totalActual - totalBudgeted
     };
   }, [state?.buckets, cscIncome, paycheckIncome, rideExpenses]);
 
 
   const budgetOverview = useMemo(() => {
-    const allItems = categoryOrder.flatMap((bucketName) => getBudgetItemsForBucket(bucketName));
+    const allItems = categoryOrder
+      .filter((bucketName) => bucketName !== 'income')
+      .flatMap((bucketName) => getBudgetItemsForBucket(bucketName));
     const totalItems = allItems.length;
     const activeItems = allItems.filter(isBudgetItemActive);
-    const paidItems = activeItems.filter((item) => item.status === 'paid').length;
-    const pendingItems = activeItems.filter((item) => !['paid', 'notPaying'].includes(item.status)).length;
+    const overdueStatusItems = activeItems.filter((item) => getItemStatus(item) === 'overdue');
+    const dueSoonStatusItems = activeItems.filter((item) => getItemStatus(item) === 'dueSoon');
+    const pendingStatusItems = activeItems.filter((item) => getItemStatus(item) === 'pending');
+    const paidStatusItems = activeItems.filter((item) => getItemStatus(item) === 'paid');
+    const paidItems = paidStatusItems.length;
+    const pendingItems = pendingStatusItems.length;
     const pausedItems = allItems.filter(isBudgetItemPaused).length;
     const notPayingItems = allItems.filter((item) => item.status === 'notPaying').length;
-    const overdueItems = activeItems.filter((item) => getItemStatus(item) === 'overdue').length;
-    const dueSoonItems = activeItems.filter((item) => getItemStatus(item) === 'dueSoon').length;
+    const overdueItems = overdueStatusItems.length;
+    const dueSoonItems = dueSoonStatusItems.length;
     const totalEstimated = activeItems.reduce(
       (sum, item) => sum + Number(item.estBudget || item.estimatedBudget || item.estimatedCost || 0),
       0
@@ -682,6 +1011,11 @@ const DashboardTab = ({
       (sum, item) => sum + Number(item.actualCost || item.actualSpent || 0),
       0
     );
+    const statusAmount = (items) => items.reduce((sum, item) => sum + getDashboardItemAmount(item), 0);
+    const closestDueSoonDate = dueSoonStatusItems
+      .map((item) => normalizeDashboardDate(item.dueDate))
+      .filter(Boolean)
+      .sort()[0] || '';
 
     return {
       totalItems,
@@ -691,11 +1025,77 @@ const DashboardTab = ({
       notPayingItems,
       overdueItems,
       dueSoonItems,
+      overdueAmount: statusAmount(overdueStatusItems),
+      dueSoonAmount: statusAmount(dueSoonStatusItems),
+      pendingAmount: statusAmount(pendingStatusItems),
+      paidAmount: statusAmount(paidStatusItems),
+      closestDueSoonDate,
       totalEstimated,
       totalActual,
       archivedItems: state?.archived?.length || 0,
     };
   }, [state?.buckets, state?.archived, categoryOrder, cscIncome, paycheckIncome, rideExpenses]);
+
+  const cashFlowOverview = useMemo(() => {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const fourteenDaysFromNow = new Date(today);
+    fourteenDaysFromNow.setDate(fourteenDaysFromNow.getDate() + 14);
+
+    const hasAvailableNow = String(cashFlow.availableNow ?? '').trim() !== '';
+    const availableNow = getDashboardNumber(cashFlow.availableNow);
+    const nextIncomeAmount = cscWeeklyPay.expectedGross;
+    const nextIncomeDate = getDashboardDateAtNoon(cscWeeklyPay.paydayDate);
+
+    const unpaidExpenseItems = categoryOrder
+      .filter((bucketName) => bucketName !== 'income')
+      .flatMap((bucketName) => getBudgetItemsForBucket(bucketName))
+      .filter(isBudgetItemActive)
+      .filter((item) => getItemStatus(item) !== 'paid');
+
+    const dueBeforeNextIncomeItems = nextIncomeDate
+      ? unpaidExpenseItems.filter((item) => {
+          const dueDate = getDashboardDateAtNoon(item.dueDate);
+          return dueDate && dueDate <= nextIncomeDate;
+        })
+      : [];
+
+    const nextFourteenDayItems = unpaidExpenseItems.filter((item) => {
+      const dueDate = getDashboardDateAtNoon(item.dueDate);
+      return dueDate && dueDate >= today && dueDate <= fourteenDaysFromNow;
+    });
+
+    const dueBeforeNextIncome = dueBeforeNextIncomeItems.reduce(
+      (sum, item) => sum + getDashboardItemAmount(item),
+      0
+    );
+    const dueNextFourteenDays = nextFourteenDayItems.reduce(
+      (sum, item) => sum + getDashboardItemAmount(item),
+      0
+    );
+    const nextIncomeWithinFourteenDays = Boolean(
+      nextIncomeDate && nextIncomeDate >= today && nextIncomeDate <= fourteenDaysFromNow
+    );
+    const incomingNextFourteenDays = nextIncomeWithinFourteenDays ? nextIncomeAmount : 0;
+    const lowestBalance = availableNow - dueBeforeNextIncome;
+
+    return {
+      hasAvailableNow,
+      availableNow,
+      nextIncomeAmount,
+      nextIncomeDate: cscWeeklyPay.paydayDate,
+      hasNextIncomeDate: Boolean(nextIncomeDate),
+      dueBeforeNextIncome,
+      dueBeforeNextIncomeCount: dueBeforeNextIncomeItems.length,
+      lowestBalance,
+      safeToSpend: Math.max(0, lowestBalance),
+      afterNextIncome: lowestBalance + nextIncomeAmount,
+      dueNextFourteenDays,
+      dueNextFourteenDaysCount: nextFourteenDayItems.length,
+      incomingNextFourteenDays,
+      nextFourteenDayNet: incomingNextFourteenDays - dueNextFourteenDays,
+    };
+  }, [cashFlow, cscWeeklyPay, state?.buckets, categoryOrder, rideExpenses]);
 
   const alerts = useMemo(() => {
     const allItems = [];
@@ -984,7 +1384,7 @@ const DashboardTab = ({
   };
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-blue-50" className="bg-blue-50 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-blue-50" className="budget-overview-page bg-blue-50 py-6">
       {/* Urgent Payment Alert Modal */}
       {(() => {
         const urgentItems = [];
@@ -1016,13 +1416,7 @@ const DashboardTab = ({
             <AlertCircle className="w-6 h-6 flex-shrink-0" />
             <h3 className="text-lg font-bold">URGENT PAYMENT ALERT</h3>
           </div>
-          <button
-            onClick={onCloseUrgentAlert}
-            title="Close payment alert"
-            className="px-2 py-1 bg-white text-red-600 rounded text-sm font-bold"
-          >
-            X
-          </button>
+          <CloseScreenButton onClick={onCloseUrgentAlert} />
         </div>
       </div>
 
@@ -1074,224 +1468,467 @@ const DashboardTab = ({
         subtitle="Review budget status, due dates, saved items, spending totals, CSC income, and paycheck activity."
         theme="blue"
         actions={budgetSubnav}
+        className="budget-mobile-header"
       />
 
-      <section className="mx-auto mb-6 mt-6 max-w-6xl overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
+      <section className="mx-auto mb-3 mt-3 max-w-6xl overflow-hidden rounded-xl border border-blue-200 bg-white shadow-sm sm:mb-5 sm:mt-5 sm:rounded-2xl">
         <button
           type="button"
           onClick={() => setShowBudgetOverview((prev) => !prev)}
-          className="flex w-full items-center gap-2 border-b border-blue-100 bg-blue-100/60 px-6 py-3 text-left text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100"
+          className="flex w-full items-center gap-1.5 border-b border-blue-100 bg-blue-100/60 px-4 py-2 text-left text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100 sm:gap-2 sm:px-5 sm:py-2.5"
         >
           {showBudgetOverview ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           {showBudgetOverview ? 'Hide Stats' : 'Show Stats'}
         </button>
 
         {showBudgetOverview && (
-          <div className="space-y-4 border-t border-blue-100 p-5">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-green-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold text-green-700">Income</p>
-                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(summary.income)}</p>
-                    <p className="mt-1 text-xs font-semibold text-green-800">
-                      Budget: {formatDashboardCurrency(summary.manualIncome)} · Paychecks: {formatDashboardCurrency(paycheckIncome.totalNetPay)} · Unpaid shifts: {formatDashboardCurrency(cscIncome.unpaidPay)}
-                    </p>
+          <div className="space-y-3 border-t border-blue-100 bg-slate-50/70 p-3 sm:space-y-4 sm:p-4">
+            <section aria-labelledby="financial-snapshot-title">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <h2 id="financial-snapshot-title" className="text-sm font-extrabold text-slate-900 sm:text-base">Financial Overview</h2>
+                  <p className="mt-0.5 text-[11px] leading-tight text-slate-500 sm:text-xs">Actual cash position, month-to-date results, and month-end forecast.</p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold uppercase leading-none tracking-wide text-slate-500 sm:text-[11px]">
+                  Current month
+                </span>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
+                <div className="relative overflow-hidden rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3.5 text-emerald-950 shadow-sm sm:rounded-2xl sm:p-4">
+                  <DollarSign className="absolute right-3 top-3 h-8 w-8 text-emerald-200 sm:h-9 sm:w-9" />
+                  <p className="relative text-[11px] font-extrabold uppercase leading-tight tracking-wide text-emerald-700 sm:text-xs">Income Forecast</p>
+                  <p className="relative mt-1.5 text-2xl font-black leading-none sm:text-[28px]">{formatDashboardCurrency(summary.income)}</p>
+                  <div className="relative mt-2.5 grid grid-cols-3 gap-1.5 border-t border-emerald-100 pt-2 text-[10px] leading-tight sm:text-[11px]">
+                    <div>
+                      <p className="text-emerald-700">Budget</p>
+                      <p className="font-extrabold">{formatDashboardCurrency(summary.manualIncome)}</p>
+                    </div>
+                    <div>
+                      <p className="text-emerald-700">Paychecks</p>
+                      <p className="font-extrabold">{formatDashboardCurrency(paycheckIncome.currentMonthNetPay)}</p>
+                    </div>
+                    <div>
+                      <p className="text-emerald-700">Unpaid this month</p>
+                      <p className="font-extrabold">{formatDashboardCurrency(cscIncome.currentMonthUnpaidPay)}</p>
+                    </div>
                   </div>
-                  <DollarSign className="h-8 w-8 text-green-600 opacity-80" />
                 </div>
-              </div>
 
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold text-red-700">Expenses</p>
-                    <p className="mt-1 text-2xl font-extrabold">${summary.expenses.toFixed(2)}</p>
-                  </div>
-                  <CreditCard className="h-8 w-8 text-red-600 opacity-80" />
-                </div>
-              </div>
-
-              <div className={`${summary.netIncome >= 0 ? 'border-blue-200 bg-blue-50 text-blue-950' : 'border-orange-200 bg-orange-50 text-orange-950'} rounded-2xl border p-4 shadow-sm`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className={`text-sm font-bold ${summary.netIncome >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>Net Income</p>
-                    <p className="mt-1 text-2xl font-extrabold">${summary.netIncome.toFixed(2)}</p>
-                  </div>
-                  <Monitor className={`h-8 w-8 opacity-80 ${summary.netIncome >= 0 ? 'text-blue-600' : 'text-orange-600'}`} />
-                </div>
-              </div>
-
-              <div className={`${summary.budgetVariance <= 0 ? 'border-purple-200 bg-purple-50 text-purple-950' : 'border-yellow-200 bg-yellow-50 text-yellow-950'} rounded-2xl border p-4 shadow-sm`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className={`text-sm font-bold ${summary.budgetVariance <= 0 ? 'text-purple-700' : 'text-yellow-700'}`}>Budget Variance</p>
-                    <p className="mt-1 text-2xl font-extrabold">
-                      {summary.budgetVariance > 0 ? '+' : ''}${summary.budgetVariance.toFixed(2)}
-                    </p>
-                  </div>
-                  <Package className={`h-8 w-8 opacity-80 ${summary.budgetVariance <= 0 ? 'text-purple-600' : 'text-yellow-600'}`} />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-blue-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold">Budget Items</p>
-                    <p className="mt-1 text-2xl font-extrabold">{budgetOverview.totalItems}</p>
-                    <p className="mt-1 text-xs opacity-80">
-                      {budgetOverview.pendingItems} pending · {budgetOverview.paidItems} paid · {budgetOverview.pausedItems} paused · {budgetOverview.notPayingItems} excluded
-                    </p>
-                  </div>
-                  <CreditCard className="h-8 w-8 opacity-80" />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-yellow-300 bg-yellow-50 p-4 text-yellow-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold">CSC Unpaid Shift Projection</p>
-                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(cscIncome.unpaidPay)}</p>
-                    <p className="mt-1 text-xs opacity-80">
-                      {cscIncome.unpaidShiftCount} unpaid shifts · {cscIncome.estimatedHours.toFixed(1)} estimated hrs
-                    </p>
-                  </div>
-                  <DollarSign className="h-8 w-8 opacity-80" />
-                </div>
-              </div>
-
-              <div className={`${paycheckIncome.rateWarnings.length ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-green-200 bg-green-50 text-green-950'} rounded-2xl border p-4 shadow-sm`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold">CSC Paychecks</p>
-                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(paycheckIncome.currentMonthNetPay)}</p>
-                    <p className="mt-1 text-xs opacity-80">
-                      This month · {paycheckIncome.currentMonthCount} check{paycheckIncome.currentMonthCount === 1 ? '' : 's'} · {paycheckIncome.currentMonthHours.toFixed(1)} hrs
-                    </p>
-                    <p className="mt-1 text-xs opacity-80">
-                      All scanned net: {formatDashboardCurrency(paycheckIncome.totalNetPay)}
-                    </p>
-                  </div>
-                  <DollarSign className="h-8 w-8 opacity-80" />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold">Ride Expenses</p>
-                    <p className="mt-1 text-2xl font-extrabold">{formatDashboardCurrency(rideExpenses.currentMonth.total)}</p>
-                    <p className="mt-1 text-xs opacity-80">
-                      This month · fares and fees {formatDashboardCurrency(rideExpenses.currentMonth.fareAndFees)} · tips {formatDashboardCurrency(rideExpenses.currentMonth.tip)}
-                    </p>
-                    <p className="mt-1 text-xs opacity-80">
-                      All tracked rides: {formatDashboardCurrency(rideExpenses.allTime.total)}
-                    </p>
-                  </div>
-                  <Car className="h-8 w-8 opacity-80" />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold">Overdue</p>
-                    <p className="mt-1 text-2xl font-extrabold">{budgetOverview.overdueItems}</p>
-                    <p className="mt-1 text-xs opacity-80">Budget items past due</p>
-                  </div>
-                  <AlertCircle className="h-8 w-8 opacity-80" />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold">Due Soon</p>
-                    <p className="mt-1 text-2xl font-extrabold">{budgetOverview.dueSoonItems}</p>
-                    <p className="mt-1 text-xs opacity-80">Budget items due within 5 days</p>
-                  </div>
-                  <Clock className="h-8 w-8 opacity-80" />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold">Paid Items</p>
-                    <p className="mt-1 text-2xl font-extrabold">{budgetOverview.paidItems}</p>
-                    <p className="mt-1 text-xs opacity-80">{budgetOverview.pendingItems} still pending</p>
-                  </div>
-                  <Package className="h-8 w-8 opacity-80" />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-900">
-                <div className="flex items-center gap-2">
-                  <Archive className="h-5 w-5" />
-                  <h3 className="font-extrabold">Archived Budget Items</h3>
-                </div>
-                <p className="mt-2 text-2xl font-extrabold">{budgetOverview.archivedItems}</p>
-                <p className="text-sm text-slate-600">Stored in the budget archive drawer.</p>
-              </div>
-
-              <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 text-orange-950">
-                <h3 className="font-extrabold">Budget Totals</h3>
-                <p className="mt-2 text-sm">
-                  Estimated: <span className="font-extrabold">${budgetOverview.totalEstimated.toFixed(2)}</span>
-                </p>
-                <p className="text-sm">
-                  Paid: <span className="font-extrabold">${budgetOverview.totalActual.toFixed(2)}</span>
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-green-950">
-                <h3 className="font-extrabold">Latest CSC Paycheck</h3>
-                {paycheckIncome.latestPaycheck ? (
-                  <>
-                    <p className="mt-2 text-sm">
-                      Check date: <span className="font-extrabold">{formatDashboardDate(paycheckIncome.latestPaycheck.checkDate)}</span>
-                    </p>
-                    <p className="text-sm">
-                      Net pay: <span className="font-extrabold">{formatDashboardCurrency(paycheckIncome.latestPaycheck.netPay)}</span>
-                    </p>
-                    <p className="text-sm">
-                      Rate: <span className="font-extrabold">${paycheckIncome.latestPaycheck.rate.toFixed(2)}/hr</span> · Hours: <span className="font-extrabold">{paycheckIncome.latestPaycheck.hours.toFixed(2)}</span>
-                    </p>
-                  </>
-                ) : (
-                  <p className="mt-2 text-sm text-green-800">No scanned paychecks yet.</p>
-                )}
-              </div>
-
-              <div className={`${paycheckIncome.rateWarnings.length ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-900'} rounded-2xl border p-4`}>
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5" />
-                  <h3 className="font-extrabold">Pay Rate Check</h3>
-                </div>
-                <p className="mt-2 text-sm">
-                  Guard card proof submitted: <span className="font-extrabold">06/22/2026</span>
-                </p>
-                <p className="text-sm">
-                  Expected future CSC rate: <span className="font-extrabold">$19.50/hr</span>
-                </p>
-                {paycheckIncome.rateWarnings.length ? (
-                  <p className="mt-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-bold text-amber-900">
-                    {paycheckIncome.rateWarnings.length} scanned paycheck{paycheckIncome.rateWarnings.length === 1 ? '' : 's'} below $19.50/hr after 06/22/2026.
+                <div className="relative overflow-hidden rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white p-3.5 text-rose-950 shadow-sm sm:rounded-2xl sm:p-4">
+                  <CreditCard className="absolute right-3 top-3 h-8 w-8 text-rose-200 sm:h-9 sm:w-9" />
+                  <p className="relative text-[11px] font-extrabold uppercase leading-tight tracking-wide text-rose-700 sm:text-xs">Total Expenses</p>
+                  <p className="relative mt-1.5 text-2xl font-black leading-none sm:text-[28px]">{formatDashboardCurrency(summary.expenses)}</p>
+                  <p className="relative mt-2.5 border-t border-rose-100 pt-2 text-[10px] font-semibold leading-tight text-rose-700 sm:text-[11px]">
+                    Active budget costs and this month&apos;s ride expenses.
                   </p>
-                ) : (
-                  <p className="mt-2 text-sm text-slate-600">No post-guard-card rate warnings.</p>
+                </div>
+
+                <div className={`${summary.netIncome >= 0 ? 'border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-100 text-blue-950' : 'border-orange-200 bg-gradient-to-br from-orange-50 to-red-100 text-orange-950'} relative overflow-hidden rounded-xl border p-3.5 shadow-sm sm:rounded-2xl sm:p-4`}>
+                  <PiggyBank className={`${summary.netIncome >= 0 ? 'text-blue-200' : 'text-orange-200'} absolute right-3 top-3 h-8 w-8 sm:h-9 sm:w-9`} />
+                  <p className={`${summary.netIncome >= 0 ? 'text-blue-700' : 'text-orange-700'} relative text-[11px] font-extrabold uppercase leading-tight tracking-wide sm:text-xs`}>Projected Month-End Surplus</p>
+                  <p className="relative mt-1.5 text-2xl font-black leading-none sm:text-[28px]">{formatDashboardCurrency(summary.netIncome)}</p>
+                  <p className={`${summary.netIncome >= 0 ? 'border-blue-200 text-blue-700' : 'border-orange-200 text-orange-700'} relative mt-2.5 border-t pt-2 text-[10px] font-semibold leading-tight sm:text-[11px]`}>
+                    Assumes this month&apos;s listed unpaid shifts are completed and paid.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section aria-labelledby="cash-runway-title" className="overflow-hidden rounded-xl border border-indigo-200 bg-white shadow-sm sm:rounded-2xl">
+              <div className="flex flex-col gap-2 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 via-white to-sky-50 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                <div>
+                  <h2 id="cash-runway-title" className="text-sm font-extrabold text-slate-900 sm:text-base">Next-Income Cash Runway</h2>
+                  <p className="mt-0.5 text-[10px] leading-tight text-slate-500 sm:text-[11px]">
+                    Money available before the next CSC Friday paycheck.
+                    {cashFlow.updatedAt ? ` Updated ${formatDashboardUpdatedAt(cashFlow.updatedAt)}.` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCashFlowDraft(cashFlow);
+                    setIsEditingCashFlow((current) => !current);
+                  }}
+                  className="self-start rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-[11px] font-extrabold text-indigo-700 transition-colors hover:bg-indigo-50 sm:self-auto"
+                >
+                  {isEditingCashFlow ? 'Close' : 'Update Available Cash'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-px bg-indigo-100 lg:grid-cols-6">
+                <div className={`${summary.actualMonthToDateNet >= 0 ? 'bg-emerald-50 text-emerald-950' : 'bg-rose-50 text-rose-950'} p-2.5 sm:p-3`}>
+                  <p className={`${summary.actualMonthToDateNet >= 0 ? 'text-emerald-700' : 'text-rose-700'} text-[10px] font-extrabold uppercase leading-tight tracking-wide sm:text-[11px]`}>Actual MTD Net</p>
+                  <p className="mt-1 text-lg font-black leading-none sm:text-xl">{formatDashboardCurrency(summary.actualMonthToDateNet)}</p>
+                  <p className="mt-1.5 text-[10px] leading-tight opacity-75">Received minus paid</p>
+                </div>
+
+                <div className="bg-white p-2.5 text-slate-950 sm:p-3">
+                  <p className="text-[10px] font-extrabold uppercase leading-tight tracking-wide text-slate-500 sm:text-[11px]">Available Now</p>
+                  <p className="mt-1 text-lg font-black leading-none sm:text-xl">
+                    {cashFlowOverview.hasAvailableNow ? formatDashboardCurrency(cashFlowOverview.availableNow) : 'Set amount'}
+                  </p>
+                  <p className="mt-1.5 text-[10px] leading-tight text-slate-500">Current cash balance</p>
+                </div>
+
+                <div
+                  className="bg-sky-50 p-2.5 text-sky-950 sm:p-3"
+                  title={`CSC pay period ${formatDashboardDate(cscWeeklyPay.payPeriodStart)} to ${formatDashboardDate(cscWeeklyPay.payPeriodEnd)} · ${cscWeeklyPay.expectedHours.toFixed(2)} hours · ${cscWeeklyPay.shiftCount} shift${cscWeeklyPay.shiftCount === 1 ? '' : 's'} · ${cscWeeklyPay.archivedShiftCount} from Archive`}
+                >
+                  <p className="text-[10px] font-extrabold uppercase leading-tight tracking-wide text-sky-700 sm:text-[11px]">Next Income</p>
+                  <p className="mt-1 text-lg font-black leading-none sm:text-xl">{formatDashboardCurrency(cashFlowOverview.nextIncomeAmount)}</p>
+                  <p className="mt-1.5 text-[10px] leading-tight text-sky-700">
+                    Expected gross · Fri {formatDashboardDate(cashFlowOverview.nextIncomeDate)}
+                  </p>
+                </div>
+
+                <div className="bg-amber-50 p-2.5 text-amber-950 sm:p-3">
+                  <p className="text-[10px] font-extrabold uppercase leading-tight tracking-wide text-amber-700 sm:text-[11px]">Due Before Then</p>
+                  <p className="mt-1 text-lg font-black leading-none sm:text-xl">
+                    {cashFlowOverview.hasNextIncomeDate ? formatDashboardCurrency(cashFlowOverview.dueBeforeNextIncome) : 'Set date'}
+                  </p>
+                  <p className="mt-1.5 text-[10px] leading-tight text-amber-700">
+                    {cashFlowOverview.hasNextIncomeDate
+                      ? `${cashFlowOverview.dueBeforeNextIncomeCount} item${cashFlowOverview.dueBeforeNextIncomeCount === 1 ? '' : 's'}`
+                      : 'Uses budget due dates'}
+                  </p>
+                </div>
+
+                <div className={`${cashFlowOverview.lowestBalance >= 0 ? 'bg-blue-50 text-blue-950' : 'bg-rose-50 text-rose-950'} p-2.5 sm:p-3`}>
+                  <p className={`${cashFlowOverview.lowestBalance >= 0 ? 'text-blue-700' : 'text-rose-700'} text-[10px] font-extrabold uppercase leading-tight tracking-wide sm:text-[11px]`}>Lowest Balance</p>
+                  <p className="mt-1 text-lg font-black leading-none sm:text-xl">
+                    {cashFlowOverview.hasAvailableNow && cashFlowOverview.hasNextIncomeDate
+                      ? formatDashboardCurrency(cashFlowOverview.lowestBalance)
+                      : 'Needs setup'}
+                  </p>
+                  <p className="mt-1.5 text-[10px] leading-tight opacity-75">Before next income</p>
+                </div>
+
+                <div className={`${cashFlowOverview.safeToSpend > 0 ? 'bg-indigo-50 text-indigo-950' : 'bg-slate-50 text-slate-950'} p-2.5 sm:p-3`}>
+                  <p className={`${cashFlowOverview.safeToSpend > 0 ? 'text-indigo-700' : 'text-slate-500'} text-[10px] font-extrabold uppercase leading-tight tracking-wide sm:text-[11px]`}>Safe to Spend</p>
+                  <p className="mt-1 text-lg font-black leading-none sm:text-xl">
+                    {cashFlowOverview.hasAvailableNow && cashFlowOverview.hasNextIncomeDate
+                      ? formatDashboardCurrency(cashFlowOverview.safeToSpend)
+                      : 'Needs setup'}
+                  </p>
+                  <p className="mt-1.5 text-[10px] leading-tight opacity-75">
+                    {cashFlowOverview.hasAvailableNow && cashFlowOverview.hasNextIncomeDate
+                      ? `${formatDashboardCurrency(cashFlowOverview.afterNextIncome)} after deposit`
+                      : 'After bills due first'}
+                  </p>
+                </div>
+              </div>
+
+              {isEditingCashFlow && (
+                <form onSubmit={handleSaveCashFlow} className="grid gap-3 border-t border-indigo-100 bg-indigo-50/50 p-3 sm:grid-cols-[1fr_auto] sm:items-end sm:p-4">
+                  <label className="block text-[11px] font-bold text-slate-700">
+                    Cash available now
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={cashFlowDraft.availableNow}
+                      onChange={(event) => setCashFlowDraft((current) => ({ ...current, availableNow: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                      placeholder="0.00"
+                    />
+                  </label>
+                  <div className="flex gap-2 sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCashFlowDraft(cashFlow);
+                        setIsEditingCashFlow(false);
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button type="submit" className="rounded-lg bg-indigo-700 px-3 py-2 text-xs font-extrabold text-white hover:bg-indigo-800">
+                      Save
+                    </button>
+                  </div>
+                </form>
+              )}
+            </section>
+
+            <div className="grid items-start gap-3 sm:gap-4 lg:grid-cols-[1.35fr_1fr]">
+              <div className="flex min-w-0 flex-col gap-2 sm:gap-2.5">
+                <section aria-labelledby="csc-earnings-title" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-slate-100 via-white to-emerald-50 px-3.5 py-2 text-slate-900 sm:px-4">
+                  <div>
+                    <h2 id="csc-earnings-title" className="text-sm font-extrabold sm:text-base">CSC Earnings</h2>
+                    <p className="mt-0.5 text-[10px] leading-tight text-slate-600 sm:text-[11px]">Paid income, upcoming pay, and latest check.</p>
+                  </div>
+                  <DollarSign className="h-5 w-5 text-emerald-600" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-px bg-slate-200 sm:grid-cols-3">
+                  <div className="bg-emerald-50 p-2.5 sm:p-3">
+                    <p className="text-[10px] font-extrabold uppercase leading-tight tracking-wide text-emerald-700 sm:text-[11px]">Paid This Month</p>
+                    <p className="mt-1 text-xl font-black leading-none text-emerald-950 sm:text-[22px]">{formatDashboardCurrency(paycheckIncome.currentMonthNetPay)}</p>
+                    <p className="mt-1.5 text-[10px] leading-tight text-emerald-700 sm:text-[11px]">
+                      {paycheckIncome.currentMonthCount} check{paycheckIncome.currentMonthCount === 1 ? '' : 's'} · {paycheckIncome.currentMonthHours.toFixed(1)} hrs
+                    </p>
+                  </div>
+
+                  <div className="bg-amber-50 p-2.5 sm:p-3">
+                    <p className="text-[10px] font-extrabold uppercase leading-tight tracking-wide text-amber-700 sm:text-[11px]">Unpaid Shifts</p>
+                    <p className="mt-1 text-xl font-black leading-none text-amber-950 sm:text-[22px]">{formatDashboardCurrency(cscIncome.unpaidPay)}</p>
+                    <p className="mt-1.5 text-[10px] leading-tight text-amber-700 sm:text-[11px]">
+                      {cscIncome.unpaidShiftCount} shift{cscIncome.unpaidShiftCount === 1 ? '' : 's'} · {cscIncome.estimatedHours.toFixed(1)} estimated hrs
+                    </p>
+                  </div>
+
+                  <div className="col-span-2 bg-blue-50 p-2.5 sm:col-span-1 sm:p-3">
+                    <p className="text-[10px] font-extrabold uppercase leading-tight tracking-wide text-blue-700 sm:text-[11px]">Latest Paycheck</p>
+                    {paycheckIncome.latestPaycheck ? (
+                      <>
+                        <p className="mt-1 text-xl font-black leading-none text-blue-950 sm:text-[22px]">{formatDashboardCurrency(paycheckIncome.latestPaycheck.netPay)}</p>
+                        <p className="mt-1.5 text-[10px] leading-tight text-blue-700 sm:text-[11px]">
+                          {formatDashboardDate(paycheckIncome.latestPaycheck.checkDate)} · ${paycheckIncome.latestPaycheck.rate.toFixed(2)}/hr · {paycheckIncome.latestPaycheck.hours.toFixed(2)} hrs
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-2 text-xs font-semibold text-blue-700">No scanned paychecks yet.</p>
+                    )}
+                  </div>
+                </div>
+
+                </section>
+
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-2.5 text-sky-950 sm:px-4">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="rounded-lg bg-white p-1.5 shadow-sm"><Car className="h-5 w-5 text-sky-600" /></span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-extrabold">Ride Expenses This Month</p>
+                      <p className="mt-0.5 truncate text-[10px] leading-tight text-sky-700 sm:text-[11px]">
+                        Fares {formatDashboardCurrency(rideExpenses.currentMonth.fareAndFees)} · Tips {formatDashboardCurrency(rideExpenses.currentMonth.tip)} · All time {formatDashboardCurrency(rideExpenses.allTime.total)}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="shrink-0 text-lg font-black leading-none">{formatDashboardCurrency(rideExpenses.currentMonth.total)}</p>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2.5 text-violet-950 sm:px-4">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="rounded-lg bg-white p-1.5 shadow-sm"><Clock className="h-5 w-5 text-violet-600" /></span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-extrabold">Next 14 Days Cash Flow</p>
+                      <p className="mt-0.5 truncate text-[10px] leading-tight text-violet-700 sm:text-[11px]">
+                        Incoming {formatDashboardCurrency(cashFlowOverview.incomingNextFourteenDays)} · Due {formatDashboardCurrency(cashFlowOverview.dueNextFourteenDays)} across {cashFlowOverview.dueNextFourteenDaysCount} item{cashFlowOverview.dueNextFourteenDaysCount === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  </div>
+                  <p className={`${cashFlowOverview.nextFourteenDayNet >= 0 ? 'text-emerald-700' : 'text-rose-700'} shrink-0 text-lg font-black leading-none`}>
+                    {formatDashboardCurrency(cashFlowOverview.nextFourteenDayNet)}
+                  </p>
+                </div>
+              </div>
+
+              <section aria-labelledby="budget-health-title" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-3.5 py-2.5 sm:px-4">
+                  <div>
+                    <h2 id="budget-health-title" className="text-sm font-extrabold text-slate-900 sm:text-base">Budget Health</h2>
+                    <p className="mt-0.5 text-[10px] leading-tight text-slate-500 sm:text-[11px]">What needs attention right now.</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Active items</p>
+                    <p className="mt-0.5 text-lg font-black leading-none text-slate-900">
+                      {budgetOverview.overdueItems + budgetOverview.dueSoonItems + budgetOverview.pendingItems + budgetOverview.paidItems}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 p-3">
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-2.5 text-red-950 sm:p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-extrabold text-red-700">Overdue</p>
+                      <AlertCircle className="h-4 w-4 text-red-500" />
+                    </div>
+                    <p className="mt-1.5 text-xl font-black leading-none sm:text-2xl">
+                      {budgetOverview.overdueItems} <span className="text-xs font-extrabold">item{budgetOverview.overdueItems === 1 ? '' : 's'}</span>
+                    </p>
+                    <p className="mt-1.5 text-xs font-black text-red-700">{formatDashboardCurrency(budgetOverview.overdueAmount)}</p>
+                  </div>
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-amber-950 sm:p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-extrabold text-amber-700">Due Soon</p>
+                      <Clock className="h-4 w-4 text-amber-500" />
+                    </div>
+                    <p className="mt-1.5 text-xl font-black leading-none sm:text-2xl">
+                      {budgetOverview.dueSoonItems} <span className="text-xs font-extrabold">item{budgetOverview.dueSoonItems === 1 ? '' : 's'}</span>
+                    </p>
+                    <p className="mt-1.5 text-xs font-black text-amber-700">{formatDashboardCurrency(budgetOverview.dueSoonAmount)}</p>
+                    <p className="mt-1 text-[10px] leading-tight text-amber-700">
+                      {budgetOverview.closestDueSoonDate ? `Closest due ${formatDashboardDate(budgetOverview.closestDueSoonDate)}` : 'Nothing due in the next 5 days'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-blue-950 sm:p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-extrabold text-blue-700">Pending</p>
+                      <CreditCard className="h-4 w-4 text-blue-500" />
+                    </div>
+                    <p className="mt-1.5 text-xl font-black leading-none sm:text-2xl">
+                      {budgetOverview.pendingItems} <span className="text-xs font-extrabold">item{budgetOverview.pendingItems === 1 ? '' : 's'}</span>
+                    </p>
+                    <p className="mt-1.5 text-xs font-black text-blue-700">{formatDashboardCurrency(budgetOverview.pendingAmount)}</p>
+                  </div>
+
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-emerald-950 sm:p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-extrabold text-emerald-700">Paid</p>
+                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    </div>
+                    <p className="mt-1.5 text-xl font-black leading-none sm:text-2xl">
+                      {budgetOverview.paidItems} <span className="text-xs font-extrabold">item{budgetOverview.paidItems === 1 ? '' : 's'}</span>
+                    </p>
+                    <p className="mt-1.5 text-xs font-black text-emerald-700">{formatDashboardCurrency(budgetOverview.paidAmount)}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 border-t border-slate-100 bg-slate-50 text-[10px] leading-tight sm:text-[11px]">
+                  <div className="border-r border-slate-200 px-3 py-2 sm:px-4">
+                    <p className="text-slate-500">Budgeted</p>
+                    <p className="font-extrabold text-slate-900">{formatDashboardCurrency(budgetOverview.totalEstimated)}</p>
+                  </div>
+                  <div className="px-3 py-2 sm:px-4">
+                    <p className="text-slate-500">Paid amount</p>
+                    <p className="font-extrabold text-slate-900">{formatDashboardCurrency(budgetOverview.paidAmount)}</p>
+                  </div>
+                </div>
+                <p className="border-t border-slate-100 px-3.5 py-2 text-[10px] leading-tight text-slate-500 sm:px-4 sm:text-[11px]">
+                  Archived {budgetOverview.archivedItems}
+                  {(budgetOverview.pausedItems > 0 || budgetOverview.notPayingItems > 0)
+                    ? ` · ${budgetOverview.pausedItems} paused · ${budgetOverview.notPayingItems} excluded from active totals`
+                    : ''}
+                </p>
+              </section>
+            </div>
+
+          </div>
+        )}
+      </section>
+
+
+
+      {homelightSavings.missingCount > 0 && (
+      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-2xl border-2 border-lime-300 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => setShowHomelightSavings((current) => !current)}
+          className="flex w-full flex-col gap-3 bg-gradient-to-r from-lime-100 via-emerald-50 to-teal-50 px-4 py-4 text-left sm:flex-row sm:items-center sm:justify-between sm:px-5"
+          aria-expanded={showHomelightSavings}
+          aria-controls="homelight-savings-details"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            {showHomelightSavings ? <ChevronDown className="h-5 w-5 shrink-0 text-emerald-800" /> : <ChevronRight className="h-5 w-5 shrink-0 text-emerald-800" />}
+            <PiggyBank className="h-7 w-7 shrink-0 text-emerald-700" />
+            <div className="min-w-0">
+              <h2 className="text-lg font-black text-emerald-950 sm:text-xl">Homelight Savings Plan</h2>
+              <p className="text-xs font-semibold text-emerald-800 sm:text-sm">
+                June 10 through December 31, 2026 · Contracted savings goal {formatDashboardCurrency(homelightSavings.totalRequired)}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid w-full grid-cols-2 gap-1.5 text-[10px] font-black sm:w-auto sm:grid-cols-4 sm:gap-2 sm:text-xs">
+            <span className="rounded-lg bg-white px-2 py-1.5 text-emerald-900 shadow-sm">
+              Saved {formatDashboardCurrency(homelightSavings.totalSaved)}
+            </span>
+            <span className="rounded-lg bg-white px-2 py-1.5 text-slate-800 shadow-sm">
+              Due Now {formatDashboardCurrency(homelightSavings.requiredToDate)}
+            </span>
+            <span className={`rounded-lg px-2 py-1.5 text-white shadow-sm ${homelightSavings.overallVariance < 0 ? 'bg-red-600' : 'bg-emerald-600'}`}>
+              {homelightSavings.overallVariance === 0
+                ? 'On Track'
+                : `${homelightSavings.overallVariance < 0 ? 'Behind' : 'Ahead'} ${formatDashboardCurrency(Math.abs(homelightSavings.overallVariance))}`}
+            </span>
+            <span className="rounded-lg bg-slate-800 px-2 py-1.5 text-white shadow-sm">
+              Left {formatDashboardCurrency(homelightSavings.remaining)}
+            </span>
+          </div>
+        </button>
+
+        {showHomelightSavings && (
+          <div id="homelight-savings-details" className="border-t border-lime-200 p-3 sm:p-5">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-3 xl:grid-cols-6">
+              {homelightSavings.months.map((month) => {
+                const statusStyles = {
+                  met: 'border-emerald-300 bg-emerald-50 text-emerald-950',
+                  short: 'border-red-300 bg-red-50 text-red-950',
+                  inProgress: 'border-blue-300 bg-blue-50 text-blue-950',
+                  notLinked: 'border-slate-300 bg-slate-100 text-slate-800',
+                  upcoming: 'border-amber-300 bg-amber-50 text-amber-950',
+                };
+                const statusLabels = {
+                  met: month.variance > 0 ? `+${formatDashboardCurrency(month.variance)}` : 'Met',
+                  short: `Short ${formatDashboardCurrency(Math.abs(month.variance))}`,
+                  inProgress: `${formatDashboardCurrency(Math.abs(month.variance))} left`,
+                  notLinked: 'Not linked',
+                  upcoming: 'Upcoming',
+                };
+
+                return (
+                  <div key={month.key} className={`min-w-0 rounded-xl border p-2 sm:p-3 ${statusStyles[month.status]}`}>
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="text-xs font-black sm:text-sm">
+                        <span className="sm:hidden">{month.shortLabel}</span>
+                        <span className="hidden sm:inline">{month.label}</span>
+                      </p>
+                      {month.status === 'met' && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />}
+                    </div>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide opacity-70 sm:text-[10px]">Required</p>
+                    <p className="text-sm font-black sm:text-lg">{formatDashboardCurrency(month.required)}</p>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide opacity-70 sm:text-[10px]">Saved</p>
+                    <p className="text-sm font-black sm:text-base">{formatDashboardCurrency(month.saved)}</p>
+                    <p className="mt-1 truncate text-[9px] font-black sm:text-[10px]" title={statusLabels[month.status]}>
+                      {statusLabels[month.status]}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-black text-emerald-950">
+                  {homelightSavings.linkedCount} of {HOMELIGHT_SAVINGS_MONTHS.length} months linked to Budget Editor
+                </p>
+                <p className="text-xs font-semibold text-emerald-800">
+                  Enter each month’s saved amount in the Editor’s Actual Cost field. Monthly and cumulative differences update here automatically.
+                </p>
+                {homelightSavings.nextMonth && (
+                  <p className="mt-1 text-xs font-black text-emerald-900">
+                    Next: {homelightSavings.nextMonth.label} {formatDashboardDate(homelightSavings.nextMonth.dueDate)} · {formatDashboardCurrency(homelightSavings.nextMonth.required)} required
+                  </p>
                 )}
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {homelightSavings.missingCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={setupHomelightSavingsPlan}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white hover:bg-emerald-800"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add {homelightSavings.missingCount} Missing Month{homelightSavings.missingCount === 1 ? '' : 's'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpenEditor}
+                  className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800"
+                >
+                  Open Budget Editor
+                </button>
               </div>
             </div>
           </div>
         )}
       </section>
+      )}
 
 
 
@@ -1349,37 +1986,52 @@ const DashboardTab = ({
               </div>
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <p className="text-xs font-bold text-slate-500">Closed / Settled</p>
-                <p className="mt-1 text-2xl font-black text-slate-900">{debtSummary.closedCount}</p>
+            <div className="mt-4 grid grid-cols-4 gap-1.5 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
+              <div className="flex min-h-[64px] flex-col justify-center rounded-xl border border-slate-200 bg-white p-1.5 text-center sm:min-h-0 sm:block sm:p-3 sm:text-left">
+                <p className="text-[9px] font-bold leading-3 text-slate-500 sm:text-xs sm:leading-normal">
+                  <span className="sm:hidden">Closed</span>
+                  <span className="hidden sm:inline">Closed / Settled</span>
+                </p>
+                <p className="mt-0.5 text-xl font-black text-slate-900 sm:mt-1 sm:text-2xl">{debtSummary.closedCount}</p>
               </div>
-              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
-                <p className="text-xs font-bold text-violet-700">In Collections</p>
-                <p className="mt-1 text-2xl font-black text-violet-950">{debtSummary.collectionsCount}</p>
+              <div className="flex min-h-[64px] flex-col justify-center rounded-xl border border-violet-200 bg-violet-50 p-1.5 text-center sm:min-h-0 sm:block sm:p-3 sm:text-left">
+                <p className="text-[9px] font-bold leading-3 text-violet-700 sm:text-xs sm:leading-normal">
+                  <span className="sm:hidden">Collect.</span>
+                  <span className="hidden sm:inline">In Collections</span>
+                </p>
+                <p className="mt-0.5 text-xl font-black text-violet-950 sm:mt-1 sm:text-2xl">{debtSummary.collectionsCount}</p>
               </div>
-              <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
-                <p className="text-xs font-bold text-orange-700">Charged Off</p>
-                <p className="mt-1 text-2xl font-black text-orange-950">{debtSummary.chargedOffCount}</p>
+              <div className="flex min-h-[64px] flex-col justify-center rounded-xl border border-orange-200 bg-orange-50 p-1.5 text-center sm:min-h-0 sm:block sm:p-3 sm:text-left">
+                <p className="text-[9px] font-bold leading-3 text-orange-700 sm:text-xs sm:leading-normal">
+                  <span className="sm:hidden">Charged</span>
+                  <span className="hidden sm:inline">Charged Off</span>
+                </p>
+                <p className="mt-0.5 text-xl font-black text-orange-950 sm:mt-1 sm:text-2xl">{debtSummary.chargedOffCount}</p>
               </div>
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <p className="text-xs font-bold text-amber-700">120+ Days</p>
-                <p className="mt-1 text-2xl font-black text-amber-950">{debtSummary.stageCounts['120+']}</p>
+              <div className="flex min-h-[64px] flex-col justify-center rounded-xl border border-amber-200 bg-amber-50 p-1.5 text-center sm:min-h-0 sm:block sm:p-3 sm:text-left">
+                <p className="text-[9px] font-bold leading-3 text-amber-700 sm:text-xs sm:leading-normal">
+                  <span className="sm:hidden">120+</span>
+                  <span className="hidden sm:inline">120+ Days</span>
+                </p>
+                <p className="mt-0.5 text-xl font-black text-amber-950 sm:mt-1 sm:text-2xl">{debtSummary.stageCounts['120+']}</p>
               </div>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            <div className="mt-2 grid grid-cols-6 gap-1 sm:mt-4 sm:grid-cols-3 sm:gap-2 xl:grid-cols-6">
               {[
-                ['Current', debtSummary.stageCounts.current],
-                ['1-29 Days', debtSummary.stageCounts['1-29']],
-                ['30-59 Days', debtSummary.stageCounts['30-59']],
-                ['60-89 Days', debtSummary.stageCounts['60-89']],
-                ['90-119 Days', debtSummary.stageCounts['90-119']],
-                ['120+ Days', debtSummary.stageCounts['120+']],
-              ].map(([label, count]) => (
-                <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center">
-                  <p className="text-xs font-bold text-slate-600">{label}</p>
-                  <p className="mt-1 text-xl font-black text-slate-950">{count}</p>
+                ['Current', 'Current', debtSummary.stageCounts.current],
+                ['1-29', '1-29 Days', debtSummary.stageCounts['1-29']],
+                ['30-59', '30-59 Days', debtSummary.stageCounts['30-59']],
+                ['60-89', '60-89 Days', debtSummary.stageCounts['60-89']],
+                ['90-119', '90-119 Days', debtSummary.stageCounts['90-119']],
+                ['120+', '120+ Days', debtSummary.stageCounts['120+']],
+              ].map(([mobileLabel, label, count]) => (
+                <div key={label} className="flex min-h-[58px] min-w-0 flex-col justify-center rounded-lg border border-slate-200 bg-slate-50 px-0.5 py-1.5 text-center sm:min-h-0 sm:block sm:px-3 sm:py-2">
+                  <p className="text-[8px] font-bold leading-3 text-slate-600 sm:text-xs sm:leading-normal">
+                    <span className="sm:hidden">{mobileLabel}</span>
+                    <span className="hidden sm:inline">{label}</span>
+                  </p>
+                  <p className="mt-0.5 text-lg font-black leading-5 text-slate-950 sm:mt-1 sm:text-xl sm:leading-normal">{count}</p>
                 </div>
               ))}
             </div>
@@ -1457,33 +2109,57 @@ const DashboardTab = ({
 
 
       <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
-        <div className="bg-blue-600 text-white px-4 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-bold whitespace-nowrap">Budget List</h3>
-            <button
-              onClick={() => {
-                const allExpanded = {};
-                categoryOrder.forEach(bucket => {
-                  allExpanded[bucket] = true;
-                });
-                setExpandedCategories(allExpanded);
-              }}
-              className="p-1 hover:bg-white/20 rounded transition-colors"
-              title="Expand All Categories"
-              aria-label="Expand All Categories"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setExpandedCategories({})}
-              className="p-1 hover:bg-white/20 rounded transition-colors"
-              title="Collapse All Categories"
-              aria-label="Collapse All Categories"
-            >
-              <Minus className="w-5 h-5" />
-            </button>
+        <div className="flex flex-col gap-2 bg-blue-600 px-3 py-3 text-white sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-4">
+          <div className="flex w-full items-center justify-between gap-2 sm:contents">
+            <div className="flex min-w-0 items-center gap-1.5 sm:order-1 sm:gap-2">
+              <h3 className="whitespace-nowrap text-lg font-bold">Budget List</h3>
+              <button
+                onClick={() => {
+                  const allExpanded = {};
+                  categoryOrder.forEach(bucket => {
+                    allExpanded[bucket] = true;
+                  });
+                  setExpandedCategories(allExpanded);
+                }}
+                className="rounded p-1 transition-colors hover:bg-white/20"
+                title="Expand All Categories"
+                aria-label="Expand All Categories"
+              >
+                <Plus className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => setExpandedCategories({})}
+                className="rounded p-1 transition-colors hover:bg-white/20"
+                title="Collapse All Categories"
+                aria-label="Collapse All Categories"
+              >
+                <Minus className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="ml-auto flex shrink-0 gap-1.5 whitespace-nowrap sm:order-3 sm:gap-2">
+              <button
+                onClick={exportAllToCSV}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-600 text-white hover:bg-green-700 sm:h-auto sm:w-auto sm:gap-2 sm:px-3 sm:py-1.5 sm:text-sm"
+                title="Export CSV"
+                aria-label="Export CSV"
+              >
+                <Download className="h-4 w-4" />
+                <span className="hidden sm:inline">Export CSV</span>
+              </button>
+              <button
+                onClick={printReport}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-700 text-white hover:bg-blue-800 sm:h-auto sm:w-auto sm:gap-2 sm:px-3 sm:py-1.5 sm:text-sm"
+                title="Print Report"
+                aria-label="Print Report"
+              >
+                <Printer className="h-4 w-4" />
+                <span className="hidden sm:inline">Print Report</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+
+          <div className="grid w-full grid-cols-4 gap-1.5 sm:order-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-2">
             {[
               { id: 'all', label: 'All Items', color: 'bg-white/20 hover:bg-white/30' },
               { id: 'overdue', label: 'Overdue', color: 'bg-red-500/80 hover:bg-red-500' },
@@ -1498,7 +2174,7 @@ const DashboardTab = ({
                 onClick={() => handleFilterChange(filter.id)}
                 title={`Filter budget list by ${filter.label}`}
                 aria-label={`Filter budget list by ${filter.label}`}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                className={`flex min-h-8 items-center justify-center rounded-full px-1.5 py-1 text-center text-[10px] font-bold leading-tight transition-colors sm:min-h-0 sm:px-3 sm:text-xs sm:font-medium sm:leading-normal ${
                   statusFilter === filter.id
                     ? 'ring-2 ring-white ' + filter.color
                     : filter.color
@@ -1507,22 +2183,6 @@ const DashboardTab = ({
                 {filter.label}
               </button>
             ))}
-          </div>
-          <div className="flex gap-2 whitespace-nowrap">
-            <button
-              onClick={exportAllToCSV}
-              className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Export CSV</span>
-            </button>
-            <button
-              onClick={printReport}
-              className="flex items-center gap-2 px-3 py-1.5 bg-blue-700 text-white rounded-lg hover:bg-blue-800 text-sm"
-            >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">Print Report</span>
-            </button>
           </div>
         </div>
 

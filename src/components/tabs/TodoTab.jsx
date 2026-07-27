@@ -32,10 +32,12 @@ import {
 } from "lucide-react";
 import PageContainer from "../common/PageContainer";
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 import PremiumTodoListView from "../todo/PremiumTodoListView";
 import ArchivedDrawer from "../ui/ArchivedDrawer";
 import ContactManager from "../contacts/ContactManager";
 import { createGoogleCalendarEvent } from "../../utils/googleCalendarApi";
+import { formatPhoneInput, formatPhoneNumber } from "../../utils/phone";
 import {
   CONTACT_APPLY_FIELDS,
   createEmptyContact,
@@ -55,6 +57,7 @@ const TASK_FILE_UPLOAD_ENDPOINT = "/budget-dashboard-fs/upload-task-file.php";
 const TASK_FILE_UPLOAD_LOCALWP_ENDPOINT = "http://main-dashboard.local/budget-dashboard-fs/upload-task-file.php";
 const TASK_FILE_PUBLIC_BASE_PATH = "/budget-dashboard-fs";
 const CUSTOM_TASK_CATEGORIES_STORAGE_KEY = "todoTab.taskCategories.custom.v1";
+const TASK_WORKFLOW_STATUSES = ["Pending", "Waiting"];
 
 const TASK_TYPES = [
   "General",
@@ -68,6 +71,13 @@ const TASK_TYPES = [
   "Dental",
   "Phone / Lifeline",
 ];
+
+const normalizeTaskWorkflowStatus = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "waiting" || normalized === "follow-up due" || normalized === "follow up due"
+    ? "Waiting"
+    : "Pending";
+};
 
 const cleanTaskCategoryName = (value = "") => String(value || "").replace(/\s+/g, " ").trim();
 
@@ -166,6 +176,10 @@ const DEFAULT_FORM = {
   fileName: "",
   notes: "",
   followUpNotes: "",
+  status: "Pending",
+  waitingOn: "",
+  followUpDate: "",
+  followUpTime: "",
   company: "",
   vehicle: "",
   policyStatus: "",
@@ -211,6 +225,10 @@ const FIELD_LABELS = {
   questions: ["questions", "ask", "ask about"],
   outcome: ["outcome", "result", "goal"],
   notes: ["notes", "note"],
+  status: ["task status", "workflow status"],
+  waitingOn: ["waiting on", "awaiting", "waiting for"],
+  followUpDate: ["follow-up date", "follow up date", "followup date"],
+  followUpTime: ["follow-up time", "follow up time", "followup time"],
   followUpNotes: ["follow-up notes", "follow up notes", "followup notes", "follow-up", "follow up"],
   fileName: ["file", "file name", "filename"],
 };
@@ -248,6 +266,10 @@ const FIELD_LABEL_DISPLAY = {
   outcome: "Outcome",
   fileName: "File name",
   notes: "Notes",
+  status: "Status",
+  waitingOn: "Waiting on",
+  followUpDate: "Follow-up date",
+  followUpTime: "Follow-up time",
   company: "Company",
   vehicle: "Vehicle",
   policyStatus: "Policy status",
@@ -303,13 +325,15 @@ const REQUIRED_FIELDS_BY_TYPE = {
 
 const MULTILINE_FIELDS = new Set(["details", "contactDetails", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
 const FORMATTED_TEXT_FIELDS = new Set(["notes", "followUpNotes"]);
-const DATE_PICKER_FIELDS = new Set(["date", "deadline", "effectiveDate"]);
-const TIME_PICKER_FIELDS = new Set(["time"]);
+const DATE_PICKER_FIELDS = new Set(["date", "deadline", "effectiveDate", "followUpDate"]);
+const TIME_PICKER_FIELDS = new Set(["time", "followUpTime"]);
+const PHONE_NUMBER_FIELDS = new Set(["phone", "directPhone", "cellPhone", "fax"]);
 const shouldUseFormattingToolbar = (field) => FORMATTED_TEXT_FIELDS.has(field);
 const DOCUMENT_DETAIL_FIELDS = new Set(["fileName", "documents"]);
 const NOTE_DETAIL_FIELDS = new Set(["notes", "followUpNotes"]);
 
 const SCHEDULE_FORM_FIELDS = ["date", "time", "deadline", "effectiveDate"];
+const FOLLOW_UP_FORM_FIELDS = ["status", "waitingOn", "followUpDate", "followUpTime"];
 const CONTACT_FORM_FIELDS = [
   "contactName",
   "person",
@@ -526,6 +550,29 @@ const TEXT_COLOR_OPTIONS = [
   { label: "Purple", value: "#7c3aed" },
 ];
 
+const DEFAULT_NOTE_TEXT_COLOR = "#111827";
+
+const normalizeFormattedTextColor = (value = "") => {
+  const color = String(value || "").trim();
+  const compactColor = color.toLowerCase().replace(/\s+/g, "");
+
+  // White text is unreadable on the light note cards and is not a supported
+  // palette option. Convert any legacy white formatting back to the default.
+  if (
+    !color ||
+    compactColor === "white" ||
+    compactColor === "transparent" ||
+    compactColor === "#fff" ||
+    compactColor === "#ffffff" ||
+    compactColor === "rgb(255,255,255)" ||
+    compactColor === "rgba(255,255,255,1)"
+  ) {
+    return DEFAULT_NOTE_TEXT_COLOR;
+  }
+
+  return color;
+};
+
 const looksLikeHtmlNote = (value = "") => /<(p|div|span|strong|em|u|s|ul|ol|li|a|br)\b/i.test(String(value ?? ""));
 
 const sanitizeFormattedHtml = (value = "") => {
@@ -551,7 +598,7 @@ const sanitizeFormattedHtml = (value = "") => {
     if (node.tagName === "FONT") {
       const color = node.getAttribute("color");
       const span = document.createElement("span");
-      if (color) span.setAttribute("style", `color: ${color};`);
+      if (color) span.setAttribute("style", `color: ${normalizeFormattedTextColor(color)};`);
       span.innerHTML = node.innerHTML;
       node.replaceWith(span);
       return;
@@ -567,9 +614,9 @@ const sanitizeFormattedHtml = (value = "") => {
       }
 
       if (name === "style") {
-        const colorMatch = valueText.match(/color\s*:\s*(#[0-9a-fA-F]{3,6}|rgb\([^)]*\)|[a-zA-Z]+)/);
-        if (colorMatch) {
-          node.setAttribute("style", `color: ${colorMatch[1]};`);
+        const textColor = node.style.color;
+        if (textColor) {
+          node.setAttribute("style", `color: ${normalizeFormattedTextColor(textColor)};`);
         } else {
           node.removeAttribute("style");
         }
@@ -645,7 +692,7 @@ const FormattedText = ({ value, className = "" }) => {
   const rawValue = String(value ?? "");
   const html = looksLikeHtmlNote(rawValue) ? sanitizeFormattedHtml(rawValue) : formatTextToHtml(rawValue);
   if (!html) return null;
-  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className={className} style={{ color: DEFAULT_NOTE_TEXT_COLOR }} dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
 const getEditorHtml = (value = "") => {
@@ -654,7 +701,7 @@ const getEditorHtml = (value = "") => {
   return looksLikeHtmlNote(rawValue) ? sanitizeFormattedHtml(rawValue) : formatTextToHtml(rawValue);
 };
 
-const FormattingToolbar = ({ editorRef, selectionRef, colorValue, setColorValue }) => {
+const FormattingToolbar = ({ editorRef, selectionRef, colorValue, setColorValue, onFormatChange }) => {
   const [showColorMenu, setShowColorMenu] = useState(false);
   const buttonClass = "rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 hover:bg-slate-100";
 
@@ -691,6 +738,10 @@ const FormattingToolbar = ({ editorRef, selectionRef, colorValue, setColorValue 
     }
   };
 
+  const commitFormattingChange = () => {
+    window.requestAnimationFrame(() => onFormatChange?.());
+  };
+
   const runCommand = (command, value = null) => {
     focusAndRestoreSelection();
     if (command === "createLink") {
@@ -698,20 +749,23 @@ const FormattingToolbar = ({ editorRef, selectionRef, colorValue, setColorValue 
       if (!url || !/^https?:\/\//i.test(url)) return;
       document.execCommand(command, false, url);
       saveCurrentSelection();
+      commitFormattingChange();
       return;
     }
     document.execCommand(command, false, value);
     saveCurrentSelection();
+    commitFormattingChange();
   };
 
   const applyColor = (color) => {
-    const nextColor = color || "#111827";
+    const nextColor = normalizeFormattedTextColor(color || DEFAULT_NOTE_TEXT_COLOR);
     setColorValue(nextColor);
     setShowColorMenu(false);
     focusAndRestoreSelection();
     document.execCommand("styleWithCSS", false, true);
     document.execCommand("foreColor", false, nextColor);
     saveCurrentSelection();
+    commitFormattingChange();
   };
 
   return (
@@ -792,7 +846,13 @@ const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeho
 
   return (
     <div>
-      <FormattingToolbar editorRef={editorRef} selectionRef={selectionRef} colorValue={colorValue} setColorValue={setColorValue} />
+      <FormattingToolbar
+        editorRef={editorRef}
+        selectionRef={selectionRef}
+        colorValue={colorValue}
+        setColorValue={setColorValue}
+        onFormatChange={updateValueFromEditor}
+      />
       <div
         ref={editorRef}
         contentEditable
@@ -814,6 +874,9 @@ const FormattingTextarea = ({ value, onChange, rows = 2, className = "", placeho
         {...props}
       />
       <style>{`
+        .rich-note-editor {
+          color: ${DEFAULT_NOTE_TEXT_COLOR};
+        }
         .rich-note-editor:empty::before {
           content: attr(data-placeholder);
           color: #94a3b8;
@@ -993,6 +1056,9 @@ const buildConnectedFollowUpSourceSummary = (task = {}) => {
     getFirstFilledValue(task, ["website", "systemLink"]) ? `Website: ${getFirstFilledValue(task, ["website", "systemLink"])}` : "",
     getFirstFilledValue(task, ["deadline", "date", "effectiveDate"]) ? `Date / deadline: ${getFirstFilledValue(task, ["deadline", "date", "effectiveDate"])}` : "",
     task.time ? `Time: ${formatTodoTimeForTextInput(task.time)}` : "",
+    normalizeTaskWorkflowStatus(task.status) === "Waiting" ? "Status: Waiting" : "",
+    task.waitingOn ? `Waiting on: ${task.waitingOn}` : "",
+    task.followUpDate ? `Follow-up: ${formatTaskFollowUpSchedule(task)}` : "",
     getFirstFilledValue(task, ["amount"]) ? `Amount: ${getFirstFilledValue(task, ["amount"])}` : "",
     task.details ? `Details: ${stripTodoCalendarHtml(task.details).trim()}` : "",
     task.notes ? `Notes: ${stripTodoCalendarHtml(task.notes).trim()}` : "",
@@ -1011,6 +1077,10 @@ const buildConnectedFollowUpSourceSnapshot = (task = {}) => ({
   date: task.date || "",
   deadline: task.deadline || "",
   time: task.time || "",
+  status: normalizeTaskWorkflowStatus(task.status),
+  waitingOn: task.waitingOn || "",
+  followUpDate: task.followUpDate || "",
+  followUpTime: task.followUpTime || "",
   person: task.person || "",
   organization: task.organization || task.company || "",
   phone: task.phone || "",
@@ -1136,6 +1206,28 @@ const formatTodoTimeForTextInput = (value = "") => {
 
   return `${displayHour}:${String(minute).padStart(2, "0")} ${meridiem}`;
 };
+
+const getTaskFollowUpTimestamp = (task = {}) => {
+  const dateValue = normalizeTodoCalendarDate(task.followUpDate || "");
+  if (!dateValue) return Number.NaN;
+
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const normalizedTime = normalizeTodoCalendarTime(task.followUpTime || "") || "00:00:00";
+  const [hour, minute, second] = normalizedTime.split(":").map(Number);
+  const followUpDateTime = new Date(year, month - 1, day, hour || 0, minute || 0, second || 0);
+
+  return followUpDateTime.getTime();
+};
+
+const isTaskFollowUpDue = (task = {}, nowTimestamp = Date.now()) => {
+  const followUpTimestamp = getTaskFollowUpTimestamp(task);
+  return Number.isFinite(followUpTimestamp) && followUpTimestamp <= nowTimestamp;
+};
+
+const formatTaskFollowUpSchedule = (task = {}) =>
+  [task.followUpDate, task.followUpTime ? formatTodoTimeForTextInput(task.followUpTime) : ""]
+    .filter(Boolean)
+    .join(" at ");
 
 const TodoDatePickerInput = ({ value, onChange, className = "", placeholder = "mm/dd/yyyy" }) => {
   const pickerRef = useRef(null);
@@ -1408,6 +1500,9 @@ const buildTodoGoogleCalendarEventPayload = (task = {}) => {
     task.website ? `Website: ${task.website}` : "",
     task.systemLink ? `System link: ${task.systemLink}` : "",
     task.questions ? `Questions:\n${task.questions}` : "",
+    normalizeTaskWorkflowStatus(task.status) === "Waiting" ? "Status: Waiting" : "",
+    task.waitingOn ? `Waiting on: ${task.waitingOn}` : "",
+    task.followUpDate ? `Follow-up: ${formatTaskFollowUpSchedule(task)}` : "",
     noteText ? `Notes:\n${noteText}` : "",
     followUpText ? `Follow-up notes:\n${followUpText}` : "",
     normalizeTaskAttachments(task.attachments).length
@@ -1721,7 +1816,7 @@ const readStoredArchivedTasks = () => {
   try {
     const saved = localStorage.getItem(ARCHIVE_STORAGE_KEY);
     const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(normalizeTaskCategory) : [];
   } catch {
     return [];
   }
@@ -1809,7 +1904,7 @@ const extractLabeledField = (line = "") => {
 };
 
 const appendField = (task, field, value) => {
-  const cleanValue = field === "time" ? formatTodoTimeForTextInput(value) : String(value || "").trim();
+  const cleanValue = TIME_PICKER_FIELDS.has(field) ? formatTodoTimeForTextInput(value) : String(value || "").trim();
   if (!cleanValue) return;
 
   if (!task[field]) {
@@ -1892,7 +1987,13 @@ const normalizeTaskCategory = (task = {}) => {
     ...task,
     type: normalizedType,
     typeOverride: normalizedOverride,
+    status: normalizeTaskWorkflowStatus(task.status),
+    followUpTime: task.followUpTime ? formatTodoTimeForTextInput(task.followUpTime) : "",
     attachments: normalizeTaskAttachments(task.attachments),
+    phone: formatPhoneNumber(task.phone || ""),
+    directPhone: formatPhoneNumber(task.directPhone || ""),
+    cellPhone: formatPhoneNumber(task.cellPhone || ""),
+    fax: formatPhoneNumber(task.fax || ""),
   });
 };
 
@@ -1903,6 +2004,10 @@ const normalizeDerivedFields = (task) => {
     const phoneMatch = combined.match(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
     if (phoneMatch) task.phone = phoneMatch[0].trim();
   }
+
+  PHONE_NUMBER_FIELDS.forEach((field) => {
+    task[field] = formatPhoneNumber(task[field] || "");
+  });
 
   if (!task.website && !task.systemLink) {
     const urlMatch = combined.match(/https?:\/\/[^\s]+|www\.[^\s]+/i);
@@ -1919,6 +2024,12 @@ const normalizeDerivedFields = (task) => {
 
   if (task.time) {
     task.time = formatTodoTimeForTextInput(task.time);
+  }
+
+  task.status = normalizeTaskWorkflowStatus(task.status);
+
+  if (task.followUpTime) {
+    task.followUpTime = formatTodoTimeForTextInput(task.followUpTime);
   }
 
   if (!task.time) {
@@ -2109,6 +2220,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const [isTaskFileUploading, setIsTaskFileUploading] = useState(false);
   const [taskFileUploadStatus, setTaskFileUploadStatus] = useState("");
   const [taskFileUploadError, setTaskFileUploadError] = useState("");
+  const [statusClock, setStatusClock] = useState(() => Date.now());
   const completionCelebrationTimeoutRef = useRef(null);
   const previousTaskCompletionRef = useRef(new Map(tasks.map((task) => [task.id, Boolean(task.completed)])));
 
@@ -2125,6 +2237,11 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
 
   useEffect(() => {
     hasHydrated.current = true;
+  }, []);
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => setStatusClock(Date.now()), 30000);
+    return () => window.clearInterval(timerId);
   }, []);
 
   useEffect(() => {
@@ -2319,8 +2436,10 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     (field) => ALWAYS_VISIBLE_CONTACT_FIELDS.has(field) || visibleFormFields.includes(field) || Boolean(form[field])
   );
   const preparationFormFields = PREPARATION_FORM_FIELDS.filter((field) => visibleFormFields.includes(field));
+  const followUpFormFields = FOLLOW_UP_FORM_FIELDS;
   const organizedFormFieldNames = new Set([
     ...scheduleFormFields,
+    ...followUpFormFields,
     ...contactFormFields,
     ...preparationFormFields,
   ]);
@@ -3394,18 +3513,25 @@ const addParsedTasks = () => {
 
   const getTaskStatus = (task) => {
     if (task.completed) return "done";
+    const workflowStatus = normalizeTaskWorkflowStatus(task.status);
     const rawDate = getTaskDateValue(task);
     const parsedDate = Date.parse(rawDate);
-    if (Number.isNaN(parsedDate)) return "pending";
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dueDate = new Date(parsedDate);
-    dueDate.setHours(0, 0, 0, 0);
-    const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+    if (!Number.isNaN(parsedDate)) {
+      const today = new Date(statusClock);
+      today.setHours(0, 0, 0, 0);
+      const dueDate = new Date(parsedDate);
+      dueDate.setHours(0, 0, 0, 0);
+      const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
 
-    if (diffDays < 0) return "overdue";
-    if (diffDays <= 5) return "dueSoon";
+      if (diffDays < 0) return "overdue";
+      if (workflowStatus !== "Waiting" && diffDays <= 5) return "dueSoon";
+    }
+
+    if (workflowStatus === "Waiting") {
+      return isTaskFollowUpDue(task, statusClock) ? "followUpDue" : "waiting";
+    }
+
     return "pending";
   };
 
@@ -3414,6 +3540,8 @@ const addParsedTasks = () => {
     if (isBlocked) return "bg-amber-50 border-amber-200";
     const status = getTaskStatus(task);
     if (status === "overdue") return "bg-white border-red-200";
+    if (status === "followUpDue") return "bg-fuchsia-50 border-fuchsia-300";
+    if (status === "waiting") return "bg-blue-50 border-blue-200";
     if (status === "dueSoon") return "bg-white border-yellow-200";
     return "bg-white border-slate-200";
   };
@@ -3423,6 +3551,8 @@ const addParsedTasks = () => {
     if (isBlocked) return "bg-amber-50 border-amber-200";
     const status = getTaskStatus(task);
     if (status === "overdue") return "bg-green-50 border-red-200";
+    if (status === "followUpDue") return "bg-fuchsia-50 border-fuchsia-300";
+    if (status === "waiting") return "bg-blue-50 border-blue-200";
     if (status === "dueSoon") return "bg-green-50 border-yellow-200";
     return "bg-green-50 border-green-200";
   };
@@ -3432,6 +3562,8 @@ const addParsedTasks = () => {
     if (isBlocked) return "Blocked";
     const status = getTaskStatus(task);
     if (status === "overdue") return "Overdue";
+    if (status === "followUpDue") return "Follow-up Due";
+    if (status === "waiting") return "Waiting";
     if (status === "dueSoon") return "Due Soon";
     return "Pending";
   };
@@ -3441,6 +3573,8 @@ const addParsedTasks = () => {
     if (isBlocked) return "bg-yellow-500 text-white";
     const status = getTaskStatus(task);
     if (status === "overdue") return "bg-red-600 text-white";
+    if (status === "followUpDue") return "bg-fuchsia-700 text-white";
+    if (status === "waiting") return "bg-blue-600 text-white";
     if (status === "dueSoon") return "bg-yellow-500 text-white";
     return "bg-slate-200 text-slate-700";
   };
@@ -3497,7 +3631,7 @@ const addParsedTasks = () => {
         totalCount: categoryTasks.length,
       };
     }).filter((item) => item.activeCount > 0);
-  }, [taskCategoryTypes, tasksByType]);
+  }, [statusClock, taskCategoryTypes, tasksByType]);
 
   const totalActiveTasks = useMemo(() => tasks.filter((task) => !task.completed).length, [tasks]);
 
@@ -3880,6 +4014,20 @@ const addParsedTasks = () => {
   );
 
   const renderInput = (field, value, onChange) => {
+    if (field === "status") {
+      return (
+        <select
+          value={normalizeTaskWorkflowStatus(value)}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+        >
+          {TASK_WORKFLOW_STATUSES.map((status) => (
+            <option key={status} value={status}>{status}</option>
+          ))}
+        </select>
+      );
+    }
+
     if (MULTILINE_FIELDS.has(field)) {
       if (shouldUseFormattingToolbar(field)) {
         return (
@@ -3924,8 +4072,10 @@ const addParsedTasks = () => {
 
     return (
       <input
+        type={PHONE_NUMBER_FIELDS.has(field) ? "tel" : "text"}
+        inputMode={PHONE_NUMBER_FIELDS.has(field) ? "tel" : undefined}
         value={value || ""}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChange(PHONE_NUMBER_FIELDS.has(field) ? formatPhoneInput(event.target.value) : event.target.value)}
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
       />
     );
@@ -3942,7 +4092,7 @@ const addParsedTasks = () => {
   ));
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-emerald-50" className="flex flex-col gap-6 bg-emerald-50 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-lime-100" className="flex flex-col gap-3 bg-lime-100 py-3 sm:gap-6 sm:py-6">
       {completionCelebration && (
         <div
           key={completionCelebration.id}
@@ -4157,17 +4307,17 @@ const addParsedTasks = () => {
         title="To-Do"
         subtitle="Manage tasks, deadlines, contacts, documents, follow-ups, and completion history."
         theme="emerald"
-        compactMobile
+        className="budget-mobile-header"
         actions={
-          <>
+          <div className="grid w-full grid-cols-4 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:gap-2">
             <button
               type="button"
               onClick={() => setIsImportOpen(true)}
               title="Import structured text"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 bg-white text-emerald-900 hover:bg-emerald-50`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-full !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!w-auto sm:!gap-2 sm:!px-4 sm:!text-sm bg-white text-emerald-900 hover:bg-emerald-50`}
             >
               <FileText className="h-4 w-4" />
-              <span className="hidden sm:inline">Import</span>
+              <span>Import</span>
             </button>
 
             <button
@@ -4179,9 +4329,10 @@ const addParsedTasks = () => {
                 setIsCreateOpen(true);
               }}
               title="Add task"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 bg-slate-950 text-white hover:bg-slate-800`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-full !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!w-auto sm:!gap-2 sm:!px-4 sm:!text-sm bg-slate-950 text-white hover:bg-slate-800`}
             >
               <Plus className="h-4 w-4" />
+              <span className="sm:hidden">Add</span>
               <span className="hidden sm:inline">Add Task</span>
             </button>
 
@@ -4189,22 +4340,22 @@ const addParsedTasks = () => {
               type="button"
               onClick={() => setIsExportOpen(true)}
               title="Open export options"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 bg-indigo-600 text-white hover:bg-indigo-500`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-full !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!w-auto sm:!gap-2 sm:!px-4 sm:!text-sm bg-indigo-600 text-white hover:bg-indigo-500`}
             >
               <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">Export</span>
+              <span>Export</span>
             </button>
 
             <button
               type="button"
               onClick={() => setShowPremiumTodoView(true)}
-              title="View premium To-Do list"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-9 !px-0 sm:!h-10 sm:!w-auto sm:!px-4 border border-white/30 bg-white/15 text-white hover:bg-white/25`}
+              title="Open print list"
+              className={`${TAB_HEADER_ACTION_CLASS} !h-9 !w-full !gap-1 !px-1 !text-[10px] sm:!h-10 sm:!w-auto sm:!gap-2 sm:!px-4 sm:!text-sm border border-white/30 bg-white/15 text-white hover:bg-white/25`}
             >
               <ListTodo className="h-4 w-4" />
-              <span className="hidden sm:inline">Premium View</span>
+              <span>Print List</span>
             </button>
-          </>
+          </div>
         }
       />
 
@@ -4420,6 +4571,7 @@ const addParsedTasks = () => {
           const completedCount = rawCategoryTasks.length - activeCount;
           const overdueCount = rawCategoryTasks.filter((task) => !task.completed && getTaskStatus(task) === "overdue").length;
           const dueSoonCount = rawCategoryTasks.filter((task) => !task.completed && getTaskStatus(task) === "dueSoon").length;
+          const followUpDueCount = rawCategoryTasks.filter((task) => !task.completed && getTaskStatus(task) === "followUpDue").length;
 
           return (
             <div
@@ -4472,6 +4624,12 @@ const addParsedTasks = () => {
                       {dueSoonCount}
                     </span>
                   )}
+                  {followUpDueCount > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-fuchsia-700 px-2 py-0.5 text-xs font-bold text-white" title={`${followUpDueCount} follow-up task${followUpDueCount === 1 ? "" : "s"} due`}>
+                      <Clock className="h-3 w-3" />
+                      {followUpDueCount} follow-up
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
@@ -4511,9 +4669,9 @@ const addParsedTasks = () => {
                   <table className="todo-task-table w-full table-fixed text-sm">
                     <colgroup>
                       <col className="w-8" />
-                      <col className="w-[24%]" />
+                      <col className="w-[23%]" />
                       <col className="w-[13%]" />
-                      <col className="w-[10%]" />
+                      <col className="w-[15%]" />
                       <col />
                       <col style={{ width: "188px" }} />
                     </colgroup>
@@ -4521,7 +4679,7 @@ const addParsedTasks = () => {
                       <tr className="border-b-2 border-green-700">
                         <th className="px-1 py-2 text-left font-medium text-gray-700"></th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Task</th>
-                        <th className="px-2 py-2 text-left font-medium text-gray-700">Due Date / Time</th>
+                        <th className="px-2 py-2 text-left font-medium text-gray-700">Hard Deadline / Time</th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Status</th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Details</th>
                         <th className="px-2 py-2 text-left font-medium text-gray-700">Actions</th>
@@ -4556,6 +4714,10 @@ const addParsedTasks = () => {
                             "date",
                             "deadline",
                             "time",
+                            "status",
+                            "waitingOn",
+                            "followUpDate",
+                            "followUpTime",
                             "notes",
                             "followUpNotes",
                           ]);
@@ -4587,7 +4749,7 @@ const addParsedTasks = () => {
                                   <input
                                     value={task.taskName || ""}
                                     onChange={(event) => updateTaskField(task.id, "taskName", event.target.value)}
-                                    className={`w-full rounded border border-slate-300 bg-white p-1 text-sm font-semibold ${
+                                    className={`w-full rounded-lg border-2 border-slate-900 bg-[#FFF4C2] px-3 py-2.5 text-base font-bold leading-snug shadow-sm outline-none transition-colors focus:border-blue-800 focus:ring-2 focus:ring-blue-200 ${
                                       task.completed ? "text-slate-400 line-through" : "text-slate-900"
                                     }`}
                                   />
@@ -4601,7 +4763,7 @@ const addParsedTasks = () => {
                                   )}
                                 </td>
                                 <td className="todo-task-cell todo-task-due-cell align-top px-2 py-2">
-                                  <div className="todo-mobile-field-label">Due date and time</div>
+                                  <div className="todo-mobile-field-label">Hard deadline and time</div>
                                   <div className="todo-task-datetime-fields">
                                     <TodoDatePickerInput
                                       value={task.deadline || task.date || ""}
@@ -4620,6 +4782,25 @@ const addParsedTasks = () => {
                                 <td className="todo-task-cell todo-task-status-cell align-top px-2 py-2">
                                   <div className="todo-mobile-field-label">Status</div>
                                   <span className={`inline-flex rounded px-2 py-1 text-xs font-bold ${statusClass}`}>{statusLabel}</span>
+                                  {!task.completed && !isBlocked && (
+                                    <select
+                                      value={normalizeTaskWorkflowStatus(task.status)}
+                                      onChange={(event) => updateTaskField(task.id, "status", event.target.value)}
+                                      className="mt-2 w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-xs font-semibold text-slate-800"
+                                      title="Change task status"
+                                      aria-label={`Change status for ${task.taskName || "task"}`}
+                                    >
+                                      {TASK_WORKFLOW_STATUSES.map((status) => (
+                                        <option key={status} value={status}>{status}</option>
+                                      ))}
+                                    </select>
+                                  )}
+                                  {normalizeTaskWorkflowStatus(task.status) === "Waiting" && task.waitingOn && (
+                                    <div className="mt-2 text-xs font-semibold leading-snug text-blue-900">On: {task.waitingOn}</div>
+                                  )}
+                                  {normalizeTaskWorkflowStatus(task.status) === "Waiting" && task.followUpDate && (
+                                    <div className="mt-1 text-xs font-semibold leading-snug text-fuchsia-800">Follow up: {formatTaskFollowUpSchedule(task)}</div>
+                                  )}
                                 </td>
                                 <td className="todo-task-cell todo-task-details-cell align-top px-2 py-2">
                                   <div className="todo-mobile-field-label">Details</div>
@@ -4754,6 +4935,44 @@ const addParsedTasks = () => {
                                 <tr className={`todo-task-detail-row ${getTaskDetailRowClass(task, isBlocked)} border-b border-slate-200`}>
                                   <td className="todo-task-detail-spacer"></td>
                                   <td colSpan={5} className="todo-task-detail-cell px-2 pb-3">
+
+                                    {normalizeTaskWorkflowStatus(task.status) === "Waiting" && (
+                                      <div className="mt-2 rounded-lg border border-fuchsia-200 bg-fuchsia-50 p-3">
+                                        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-fuchsia-900">Waiting & Follow-up</div>
+                                        <div className="grid gap-2 md:grid-cols-3">
+                                          <label className="text-xs font-semibold text-slate-700">
+                                            Waiting on
+                                            <input
+                                              value={task.waitingOn || ""}
+                                              onChange={(event) => updateTaskField(task.id, "waitingOn", event.target.value)}
+                                              placeholder="Person or organization"
+                                              className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                                            />
+                                          </label>
+                                          <label className="text-xs font-semibold text-slate-700">
+                                            Follow-up date
+                                            <div className="mt-1">
+                                              <TodoDatePickerInput
+                                                value={task.followUpDate || ""}
+                                                onChange={(value) => updateTaskField(task.id, "followUpDate", value)}
+                                                className="w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                                              />
+                                            </div>
+                                          </label>
+                                          <label className="text-xs font-semibold text-slate-700">
+                                            Follow-up time
+                                            <div className="mt-1">
+                                              <TodoTimePickerInput
+                                                value={task.followUpTime || ""}
+                                                onChange={(value) => updateTaskField(task.id, "followUpTime", value)}
+                                                className="w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                                              />
+                                            </div>
+                                          </label>
+                                        </div>
+                                        <p className="mt-2 text-xs font-semibold text-fuchsia-800">At the follow-up date and time, the badge changes to Follow-up Due. The hard deadline remains unchanged.</p>
+                                      </div>
+                                    )}
 
                                     <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
                                       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Notes</div>
@@ -4951,9 +5170,7 @@ const addParsedTasks = () => {
                 <h3 className="text-lg font-bold text-slate-900">Import structured text</h3>
                 <p className="text-sm text-slate-600">Paste tasks, parse them, then add the previewed tasks.</p>
               </div>
-              <button type="button" onClick={() => setIsImportOpen(false)} title="Close import" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
-                <X className="h-5 w-5" />
-              </button>
+              <CloseScreenButton onClick={() => setIsImportOpen(false)} />
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -4999,9 +5216,7 @@ const addParsedTasks = () => {
                 <h3 className="text-lg font-bold text-slate-900">{editingId ? "Edit task" : "Add task"}</h3>
                 <p className="text-sm text-slate-600">Only the fields that fit this task type are shown first.</p>
               </div>
-              <button type="button" onClick={closeTaskForm} title="Close task form" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
-                <X className="h-5 w-5" />
-              </button>
+              <CloseScreenButton onClick={closeTaskForm} />
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -5051,9 +5266,17 @@ const addParsedTasks = () => {
                 <section className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
                   <div className="mb-3">
                     <h4 className="font-black text-slate-900">Schedule</h4>
-                    <p className="text-xs font-semibold text-slate-500">Keep the appointment date separate from the final deadline.</p>
+                    <p className="text-xs font-semibold text-slate-500">Keep the appointment date and hard deadline separate from follow-up timing.</p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(scheduleFormFields)}</div>
+                </section>
+
+                <section className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/40 p-4">
+                  <div className="mb-3">
+                    <h4 className="font-black text-slate-900">Waiting & Follow-up</h4>
+                    <p className="text-xs font-semibold text-slate-500">Use Waiting when the next action belongs to someone else. Follow-up timing does not replace the hard deadline.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(followUpFormFields)}</div>
                 </section>
 
                 <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
@@ -5127,9 +5350,7 @@ const addParsedTasks = () => {
                 <h3 className="text-lg font-bold text-slate-900">Export To-Do List</h3>
                 <p className="text-sm text-slate-600">Copy or download the current task list.</p>
               </div>
-              <button type="button" onClick={() => setIsExportOpen(false)} title="Close export" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
-                <X className="h-5 w-5" />
-              </button>
+              <CloseScreenButton onClick={() => setIsExportOpen(false)} />
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -5244,9 +5465,7 @@ const addParsedTasks = () => {
                 <h3 className="text-lg font-black text-slate-900">Task Details</h3>
                 <p className="text-sm font-semibold text-slate-600">{selectedTask.taskName || "Untitled task"}</p>
               </div>
-              <button type="button" onClick={() => setSelectedTaskId(null)} title="Close task detail drawer" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
-                <X className="h-5 w-5" />
-              </button>
+              <CloseScreenButton onClick={() => setSelectedTaskId(null)} />
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -5264,7 +5483,17 @@ const addParsedTasks = () => {
                   </select>
                 </label>
                 <label className="text-sm font-semibold">
-                  Due Date
+                  Status
+                  <select
+                    value={normalizeTaskWorkflowStatus(selectedTask.status)}
+                    onChange={(event) => updateTaskField(selectedTask.id, "status", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  >
+                    {TASK_WORKFLOW_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                </label>
+                <label className="text-sm font-semibold">
+                  Hard deadline
                   <div className="mt-1">
                     <TodoDatePickerInput
                       value={selectedTask.deadline || selectedTask.date || ""}
@@ -5274,11 +5503,35 @@ const addParsedTasks = () => {
                   </div>
                 </label>
                 <label className="text-sm font-semibold">
-                  Time
+                  Deadline time
                   <div className="mt-1">
                     <TodoTimePickerInput
                       value={selectedTask.time || ""}
                       onChange={(value) => updateTaskField(selectedTask.id, "time", value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                </label>
+                <label className="text-sm font-semibold">
+                  Waiting on
+                  <input value={selectedTask.waitingOn || ""} onChange={(event) => updateTaskField(selectedTask.id, "waitingOn", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </label>
+                <label className="text-sm font-semibold">
+                  Follow-up date
+                  <div className="mt-1">
+                    <TodoDatePickerInput
+                      value={selectedTask.followUpDate || ""}
+                      onChange={(value) => updateTaskField(selectedTask.id, "followUpDate", value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                </label>
+                <label className="text-sm font-semibold">
+                  Follow-up time
+                  <div className="mt-1">
+                    <TodoTimePickerInput
+                      value={selectedTask.followUpTime || ""}
+                      onChange={(value) => updateTaskField(selectedTask.id, "followUpTime", value)}
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     />
                   </div>
@@ -5297,7 +5550,7 @@ const addParsedTasks = () => {
                 </label>
 
                 {Array.from(new Set([...(TYPE_FIELDS[selectedTask.type] || []), ...Object.keys(DEFAULT_FORM).filter((field) => selectedTask[field])]))
-                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id", "time"].includes(field))
+                  .filter((field) => !["taskName", "details", "type", "typeOverride", "completed", "id", "time", "status", "waitingOn", "followUpDate", "followUpTime"].includes(field))
                   .map((field) => (
                     <label key={field} className="text-sm font-semibold">
                       {getFieldLabel(selectedTask, field)}

@@ -47,12 +47,6 @@ export default defineConfig({
     port: 4174,
     strictPort: true,
     https: useLan ? false : localHttps,
-    watch: {
-      ignored: [
-        '**/uploads/**',
-        '**/private-data/**',
-      ],
-    },
     proxy: {
       '/wp-json': {
         target: 'http://main-dashboard.local',
@@ -60,11 +54,6 @@ export default defineConfig({
         secure: false,
       },
       '/budget-dashboard-fs/save.php': {
-        target: 'http://main-dashboard.local',
-        changeOrigin: true,
-        secure: false,
-      },
-      '/budget-dashboard-fs/upload-paycheck-file.php': {
         target: 'http://main-dashboard.local',
         changeOrigin: true,
         secure: false,

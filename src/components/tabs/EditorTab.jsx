@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import PageContainer from "../common/PageContainer.jsx";
 import CreditReportScanner from '../credit/CreditReportScanner.jsx';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -56,6 +57,41 @@ const ITEM_TEMPLATES = [
   { name: 'Netflix', category: 'subscriptions', estBudget: 15.49, recurrence: 'monthly' },
   { name: 'Spotify', category: 'subscriptions', estBudget: 10.99, recurrence: 'monthly' },
 ];
+
+const HOMELIGHT_SAVINGS_PROGRAM_ID = 'homelight-savings-2026';
+const HOMELIGHT_SAVINGS_MONTHS = [
+  { key: '2026-07', label: 'July', dueDate: '2026-07-31', required: 500 },
+  { key: '2026-08', label: 'August', dueDate: '2026-08-31', required: 500 },
+  { key: '2026-09', label: 'September', dueDate: '2026-09-30', required: 1000 },
+  { key: '2026-10', label: 'October', dueDate: '2026-10-31', required: 1000 },
+  { key: '2026-11', label: 'November', dueDate: '2026-11-30', required: 1000 },
+  { key: '2026-12', label: 'December', dueDate: '2026-12-31', required: 1000 },
+];
+
+const normalizeHomelightDate = (value = '') => {
+  const raw = String(value || '').trim();
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) return `${slashMatch[3]}-${slashMatch[1].padStart(2, '0')}-${slashMatch[2].padStart(2, '0')}`;
+
+  return '';
+};
+
+const getHomelightSavingsMonthKey = (item = {}) => {
+  if (item.homelightSavingsProgramId === HOMELIGHT_SAVINGS_PROGRAM_ID && item.homelightSavingsMonth) {
+    return item.homelightSavingsMonth;
+  }
+
+  const itemName = String(item.category || '').trim().toLowerCase();
+  const dueDate = normalizeHomelightDate(item.dueDate);
+  const matchingMonth = HOMELIGHT_SAVINGS_MONTHS.find((month) => month.dueDate === dueDate);
+
+  return itemName.includes('homelight') && itemName.includes('sav') && matchingMonth
+    ? matchingMonth.key
+    : '';
+};
 
 const ACCOUNT_STATUS_OPTIONS = [
   'Open',
@@ -250,6 +286,78 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     setIsSaving(true);
     await saveBudget(customState, customMessage);
     setTimeout(() => setIsSaving(false), 1000);
+  };
+
+  const homelightSavingsProgress = useMemo(() => {
+    const linkedItems = new Map();
+
+    Object.values(state?.buckets || {}).forEach((items) => {
+      (items || []).forEach((item) => {
+        const monthKey = getHomelightSavingsMonthKey(item);
+        if (monthKey && !linkedItems.has(monthKey)) linkedItems.set(monthKey, item);
+      });
+    });
+
+    const totalSaved = Array.from(linkedItems.values()).reduce(
+      (sum, item) => sum + (Number(item.actualCost) || 0),
+      0
+    );
+
+    return {
+      linkedCount: linkedItems.size,
+      missingCount: Math.max(HOMELIGHT_SAVINGS_MONTHS.length - linkedItems.size, 0),
+      totalSaved,
+    };
+  }, [state?.buckets]);
+
+  const setupHomelightSavingsPlan = () => {
+    const linkedMonths = new Set();
+    const updatedBuckets = {};
+
+    Object.entries(state?.buckets || {}).forEach(([bucketName, items]) => {
+      updatedBuckets[bucketName] = (items || []).map((item) => {
+        const monthKey = getHomelightSavingsMonthKey(item);
+        if (!monthKey || linkedMonths.has(monthKey)) return item;
+
+        linkedMonths.add(monthKey);
+        return {
+          ...item,
+          homelightSavingsProgramId: HOMELIGHT_SAVINGS_PROGRAM_ID,
+          homelightSavingsMonth: monthKey,
+          recurrence: 'none',
+        };
+      });
+    });
+
+    const missingItems = HOMELIGHT_SAVINGS_MONTHS
+      .filter((month) => !linkedMonths.has(month.key))
+      .map((month) => ({
+        id: `homelight-savings-${month.key}`,
+        category: `Homelight Savings - ${month.label}`,
+        estBudget: month.required,
+        actualCost: 0,
+        dueDate: month.dueDate,
+        status: 'pending',
+        recurrence: 'none',
+        note: `Homelight contracted savings requirement for ${month.label} 2026. Enter the amount saved in Actual Cost.`,
+        homelightSavingsProgramId: HOMELIGHT_SAVINGS_PROGRAM_ID,
+        homelightSavingsMonth: month.key,
+      }));
+
+    updatedBuckets.housing = [...(updatedBuckets.housing || []), ...missingItems];
+
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setCollapsedCategories((current) => ({ ...current, housing: false }));
+    setTimeout(
+      () => saveBudgetWithIndicator(
+        updatedState,
+        missingItems.length
+          ? `Homelight savings plan linked and ${missingItems.length} missing month${missingItems.length === 1 ? '' : 's'} added.`
+          : 'Homelight savings plan linked to the Budget Editor.'
+      ),
+      100
+    );
   };
 
   const getRowBackgroundColor = (item) => {
@@ -639,7 +747,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
   const handleRollForward = (bucket, id) => {
     const item = state.buckets[bucket].find(item => item.id === id);
-    if (!item || ['notPaying', 'paused'].includes(item.status)) return;
+    if (!item || getHomelightSavingsMonthKey(item) || ['notPaying', 'paused'].includes(item.status)) return;
 
     const currentDate = new Date(item.dueDate);
     const nextDate = new Date(currentDate);
@@ -1184,7 +1292,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
       if (itemIndex !== -1) {
         const item = updatedBuckets[bucket][itemIndex];
-        if (['notPaying', 'paused'].includes(item.status)) return;
+        if (getHomelightSavingsMonthKey(item) || ['notPaying', 'paused'].includes(item.status)) return;
 
         const currentDate = new Date(item.dueDate);
         const nextDate = new Date(currentDate);
@@ -1379,13 +1487,13 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
         {!isCollapsed && (
           <div
-            className="border border-gray-300 rounded-b-lg table-scroll-wrapper"
+            className="editor-table-scroll table-scroll-wrapper rounded-b-lg border border-gray-300"
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, bucketName)}
           >
             {bucketName === 'banking' ? (
               // BANKING & FINANCE - CUSTOM TABLE
-              <table className="w-full banking-table table-fixed">
+              <table className="editor-budget-table editor-banking-table banking-table w-full table-fixed">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
@@ -1589,13 +1697,15 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                                 >
                                   <Undo2 className="w-3.5 h-3.5" />
                                 </button>
-                                <button
-                                  onClick={() => handleRollForward(bucketName, item.id)}
-                                  className="px-1.5 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                                  title="Roll Forward to Next Month"
-                                >
-                                  <CalendarClock className="w-3.5 h-3.5" />
-                                </button>
+                                {!getHomelightSavingsMonthKey(item) && (
+                                  <button
+                                    onClick={() => handleRollForward(bucketName, item.id)}
+                                    className="px-1.5 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                                    title="Roll Forward to Next Month"
+                                  >
+                                    <CalendarClock className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </>
                             ) : (
                               <button
@@ -1680,7 +1790,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                 </tbody>
               </table>
             ) : (
-              <table className="w-full min-w-[900px]">
+              <table className="editor-budget-table editor-standard-table w-full min-w-0 md:min-w-[900px]">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-1 py-2 text-left text-sm font-medium text-gray-700 w-8"></th>
@@ -1747,6 +1857,11 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                           className="w-full p-1 border rounded bg-white"
                           placeholder="Enter item name"
                         />
+                        {getHomelightSavingsMonthKey(item) && (
+                          <span className="mt-1 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">
+                            Homelight plan · Actual Cost = saved
+                          </span>
+                        )}
                         {item.status === 'paused' && (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
                             <span
@@ -1863,13 +1978,15 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                               >
                                 <Undo2 className="w-4 h-4" />
                               </button>
-                              <button
-                                onClick={() => handleRollForward(bucketName, item.id)}
-                                className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                                title="Roll Forward to Next Month"
-                              >
-                                <CalendarClock className="w-4 h-4" />
-                              </button>
+                              {!getHomelightSavingsMonthKey(item) && (
+                                <button
+                                  onClick={() => handleRollForward(bucketName, item.id)}
+                                  className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                                  title="Roll Forward to Next Month"
+                                >
+                                  <CalendarClock className="w-4 h-4" />
+                                </button>
+                              )}
                             </>
                           ) : (
                             <button
@@ -1990,7 +2107,171 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
 
   return (
-    <PageContainer className="py-6">
+    <PageContainer className="overflow-x-hidden py-6">
+      <style>{`
+        @media (max-width: 767.98px) {
+          .editor-table-scroll {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: hidden;
+          }
+
+          .editor-budget-table,
+          .editor-budget-table tbody {
+            display: block;
+            width: 100%;
+            min-width: 0;
+          }
+
+          .editor-budget-table {
+            table-layout: auto;
+          }
+
+          .editor-budget-table thead {
+            display: none;
+          }
+
+          .editor-budget-table tbody tr {
+            box-sizing: border-box;
+            display: grid;
+            width: 100%;
+            min-width: 0;
+            grid-template-columns: repeat(12, minmax(0, 1fr));
+            gap: 8px;
+            padding: 10px;
+          }
+
+          .editor-budget-table tbody td {
+            display: block;
+            width: auto !important;
+            min-width: 0;
+            padding: 0;
+          }
+
+          .editor-budget-table tbody td::before {
+            display: block;
+            margin-bottom: 3px;
+            color: #475569;
+            font-size: 10px;
+            font-weight: 800;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+          }
+
+          .editor-budget-table input,
+          .editor-budget-table select,
+          .editor-budget-table textarea {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            font-size: 16px;
+          }
+
+          .editor-budget-table tbody td:nth-child(1) {
+            grid-column: 1 / span 1;
+            align-self: center;
+          }
+
+          .editor-budget-table tbody td:nth-child(2) {
+            grid-column: 2 / span 1;
+            align-self: center;
+          }
+
+          .editor-budget-table tbody td:nth-child(3) {
+            grid-column: 3 / span 1;
+            align-self: center;
+          }
+
+          .editor-budget-table tbody td:nth-child(4) {
+            grid-column: 4 / -1;
+            align-self: start;
+          }
+
+          .editor-standard-table tbody td:nth-child(5) {
+            grid-column: 1 / span 4;
+          }
+
+          .editor-standard-table tbody td:nth-child(5)::before {
+            content: "Est. Budget";
+          }
+
+          .editor-standard-table tbody td:nth-child(6) {
+            grid-column: 5 / span 4;
+          }
+
+          .editor-standard-table tbody td:nth-child(6)::before {
+            content: "Actual Cost";
+          }
+
+          .editor-standard-table tbody td:nth-child(7) {
+            grid-column: 9 / -1;
+          }
+
+          .editor-standard-table tbody td:nth-child(7)::before {
+            content: "Date";
+          }
+
+          .editor-standard-table tbody td:nth-child(8) {
+            grid-column: 1 / -1;
+          }
+
+          .editor-standard-table tbody td:nth-child(8)::before,
+          .editor-banking-table tbody td:nth-child(10)::before {
+            content: "Actions";
+          }
+
+          .editor-standard-table tbody td:nth-child(8) > div,
+          .editor-banking-table tbody td:nth-child(10) > div {
+            gap: 4px;
+          }
+
+          .editor-banking-table tbody td:nth-child(5) {
+            grid-column: 1 / span 6;
+          }
+
+          .editor-banking-table tbody td:nth-child(5)::before {
+            content: "Minimum";
+          }
+
+          .editor-banking-table tbody td:nth-child(6) {
+            grid-column: 7 / -1;
+          }
+
+          .editor-banking-table tbody td:nth-child(6)::before {
+            content: "Balance";
+          }
+
+          .editor-banking-table tbody td:nth-child(7) {
+            grid-column: 1 / span 6;
+          }
+
+          .editor-banking-table tbody td:nth-child(7)::before {
+            content: "Actual Paid";
+          }
+
+          .editor-banking-table tbody td:nth-child(8) {
+            grid-column: 7 / -1;
+          }
+
+          .editor-banking-table tbody td:nth-child(8)::before {
+            content: "Available";
+          }
+
+          .editor-banking-table tbody td:nth-child(9) {
+            grid-column: 1 / -1;
+          }
+
+          .editor-banking-table tbody td:nth-child(9)::before {
+            content: "Due Date";
+          }
+
+          .editor-banking-table tbody td:nth-child(10) {
+            grid-column: 1 / -1;
+          }
+        }
+      `}</style>
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-gray-700 whitespace-nowrap hidden md:inline">Filter by Status:</span>
@@ -2041,6 +2322,31 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           </span>
         </div>
       </div>
+
+      <section className="mb-6 flex flex-col gap-3 rounded-xl border-2 border-lime-300 bg-gradient-to-r from-lime-50 to-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <PiggyBank className="mt-0.5 h-6 w-6 shrink-0 text-emerald-700" />
+          <div>
+            <h3 className="font-black text-emerald-950">Homelight Savings Plan</h3>
+            <p className="text-xs font-semibold text-emerald-800 sm:text-sm">
+              {homelightSavingsProgress.linkedCount} of {HOMELIGHT_SAVINGS_MONTHS.length} months linked · ${homelightSavingsProgress.totalSaved.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} saved
+            </p>
+            <p className="mt-1 text-xs text-emerald-800">
+              Est. Budget is the contracted minimum. Enter the amount actually saved in Actual Cost.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={setupHomelightSavingsPlan}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white hover:bg-emerald-800"
+        >
+          <Plus className="h-4 w-4" />
+          {homelightSavingsProgress.missingCount > 0
+            ? `Add ${homelightSavingsProgress.missingCount} Missing Month${homelightSavingsProgress.missingCount === 1 ? '' : 's'}`
+            : 'Refresh Plan Links'}
+        </button>
+      </section>
 
       <div className="flex flex-col gap-3 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -2271,14 +2577,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                   {debtEditor.item.category || 'Budget item'} · track amount owed, delinquency, closure, collections, settlement, and account history.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setDebtEditor(null)}
-                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
-                aria-label="Close debt details"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <CloseScreenButton onClick={() => setDebtEditor(null)} />
             </div>
 
             <div className="flex-1 overflow-y-auto p-5">

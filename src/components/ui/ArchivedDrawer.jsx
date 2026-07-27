@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { X, RotateCcw, Trash2, Archive, ListTodo, WalletCards } from 'lucide-react';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
 
 const ArchivedDrawer = ({
   isOpen,
@@ -283,14 +284,7 @@ const ArchivedDrawer = ({
             {isTodoArchive ? <ListTodo className="w-5 h-5" /> : <WalletCards className="w-5 h-5" />}
             <h2 className="text-xl font-semibold">{drawerTitle}</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="text-white hover:text-purple-200 transition-colors"
-            title="Close archive drawer"
-            aria-label="Close archive drawer"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          <CloseScreenButton onClick={onClose} />
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">

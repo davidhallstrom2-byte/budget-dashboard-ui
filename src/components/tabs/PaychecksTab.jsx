@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import {
   AlertCircle,
   Check,
+  ChevronDown,
+  ChevronRight,
   CircleDollarSign,
   Download,
   Eye,
@@ -18,9 +20,17 @@ const PAYCHECK_STORAGE_KEY = "paychecksTab.paychecks.v1";
 const PAYCHECK_UPLOAD_ENDPOINT = "/budget-dashboard-fs/upload-paycheck-file.php";
 const PAYCHECK_UPLOAD_LOCALWP_HTTP_ENDPOINT = "http://main-dashboard.local/budget-dashboard-fs/upload-paycheck-file.php";
 const PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT = "https://main-dashboard.local/budget-dashboard-fs/upload-paycheck-file.php";
-const GUARD_CARD_PROOF_SUBMITTED_DATE = "2026-06-22";
-const FUTURE_EXPECTED_CSC_RATE = 19.5;
+// Browser file previews use the LocalWP endpoint directly so navigation keeps its filename query.
 const MAX_PAYCHECK_SCAN_TEXT_LENGTH = 16000;
+const KNOWN_PAYCHECK_ATTACHMENT_RECOVERY = {
+  "7333153": {
+    id: "file-recovered-check-7333153",
+    originalName: "C7339495---Regular.pdf",
+    savedName: "2026-07-04_paycheck-1783130562234-205fd3e31aae1_195cf38f.pdf",
+    mimeType: "application/pdf",
+    uploadedAt: "2026-07-04T00:00:00.000Z",
+  },
+};
 
 const DEFAULT_PAYCHECK = {
   id: "",
@@ -37,9 +47,25 @@ const DEFAULT_PAYCHECK = {
   taxes: "",
   deductions: "",
   netPay: "",
-  checkAmount: "",
-  expectedRate: "",
-  payRateNote: "",
+  paylocityDetails: {
+    federalIncomeTaxCurrent: "",
+    federalIncomeTaxYtd: "",
+    socialSecurityCurrent: "",
+    socialSecurityYtd: "",
+    medicareCurrent: "",
+    medicareYtd: "",
+    californiaIncomeTaxCurrent: "",
+    californiaIncomeTaxYtd: "",
+    californiaSdiCurrent: "",
+    californiaSdiYtd: "",
+    deductionsCurrent: "",
+    deductionsYtd: "",
+    grossPayYtd: "",
+    netPayYtd: "",
+    sickHoursAvailable: "",
+    federalFilingStatus: "",
+    stateFilingStatus: "",
+  },
   notes: "",
   scanText: "",
   attachment: null,
@@ -56,6 +82,11 @@ const formatMoney = (value) => {
   const number = money(value);
   if (number === null) return "";
   return number.toFixed(2);
+};
+
+const formatOptionalMoney = (value) => {
+  if (String(value ?? "").trim() === "") return "";
+  return formatMoney(value);
 };
 
 const formatPaycheckAmount = (value, referenceAmount = "") => {
@@ -186,17 +217,124 @@ const safeJsonParse = (value, fallback) => {
 const normalizePaycheckAttachment = (attachment = null) => {
   if (!attachment || typeof attachment !== "object") return null;
 
-  return {
-    id: attachment.id || createId(),
-    originalName: attachment.originalName || attachment.name || "",
-    savedName: attachment.savedName || "",
-    url: attachment.url || "",
-    viewUrl: attachment.viewUrl || "",
-    downloadUrl: attachment.downloadUrl || "",
-    mimeType: attachment.mimeType || attachment.type || "",
-    size: Number(attachment.size || 0),
-    uploadedAt: attachment.uploadedAt || new Date().toISOString(),
+  const source =
+    (Array.isArray(attachment) ? attachment[0] : null) ||
+    attachment.file ||
+    attachment.attachment ||
+    attachment.uploaded?.[0] ||
+    attachment.data?.file ||
+    attachment;
+
+  if (!source || typeof source !== "object") return null;
+
+  const url =
+    source.url ||
+    source.fileUrl ||
+    source.file_url ||
+    "";
+  const viewUrl =
+    source.viewUrl ||
+    source.view_url ||
+    source.previewUrl ||
+    source.preview_url ||
+    "";
+  const downloadUrl =
+    source.downloadUrl ||
+    source.download_url ||
+    "";
+
+  const findUrlParameter = (names = []) => {
+    for (const candidate of [viewUrl, downloadUrl, url]) {
+      if (!candidate) continue;
+      try {
+        const parsedUrl = new URL(candidate, "https://main-dashboard.local");
+        for (const name of names) {
+          const value = parsedUrl.searchParams.get(name);
+          if (value) return value;
+        }
+      } catch {
+        // Ignore malformed legacy URLs and continue through the other fields.
+      }
+    }
+    return "";
   };
+
+  const savedName =
+    source.savedName ||
+    source.saved_name ||
+    source.saved_file_name ||
+    source.storageName ||
+    source.storage_name ||
+    findUrlParameter(["savedName", "saved_name", "saved_file_name"]);
+  const originalName =
+    source.originalName ||
+    source.original_name ||
+    source.original_file_name ||
+    source.fileName ||
+    source.file_name ||
+    source.name ||
+    findUrlParameter(["originalName", "original_name", "original_file_name"]);
+
+  if (!savedName && !url && !viewUrl && !downloadUrl) return null;
+
+  return {
+    id: source.id || source.fileId || source.file_id || createId(),
+    originalName,
+    savedName,
+    url,
+    viewUrl,
+    downloadUrl,
+    mimeType: source.mimeType || source.mime_type || source.type || "",
+    size: Number(source.size || source.fileSize || source.file_size || 0),
+    uploadedAt:
+      source.uploadedAt ||
+      source.uploaded_at ||
+      source.createdAt ||
+      source.created_at ||
+      new Date().toISOString(),
+  };
+};
+
+const getStoredPaycheckAttachment = (paycheck = {}) => {
+  const nestedAttachment = normalizePaycheckAttachment(
+    paycheck.attachment ||
+    paycheck.paycheckFile ||
+    paycheck.savedFile ||
+    paycheck.fileAttachment
+  );
+
+  if (nestedAttachment?.savedName) return nestedAttachment;
+
+  const rootAttachment = normalizePaycheckAttachment({
+    id: paycheck.fileId || paycheck.file_id,
+    originalName:
+      paycheck.originalName ||
+      paycheck.original_name ||
+      paycheck.original_file_name ||
+      paycheck.fileName ||
+      paycheck.file_name,
+    savedName:
+      paycheck.savedName ||
+      paycheck.saved_name ||
+      paycheck.saved_file_name ||
+      paycheck.storageName ||
+      paycheck.storage_name,
+    url: paycheck.fileUrl || paycheck.file_url,
+    viewUrl: paycheck.viewUrl || paycheck.view_url,
+    downloadUrl: paycheck.downloadUrl || paycheck.download_url,
+    mimeType: paycheck.mimeType || paycheck.mime_type,
+    size: paycheck.fileSize || paycheck.file_size,
+    uploadedAt: paycheck.uploadedAt || paycheck.uploaded_at,
+  });
+
+  if (rootAttachment?.savedName) return rootAttachment;
+
+  const checkNumber = String(paycheck.checkNumber || "").trim();
+  const recoveredAttachment = normalizePaycheckAttachment(
+    KNOWN_PAYCHECK_ATTACHMENT_RECOVERY[checkNumber]
+  );
+
+  return recoveredAttachment || nestedAttachment || rootAttachment;
 };
 
 const normalizeEarningsLine = (line = {}) => ({
@@ -213,25 +351,107 @@ const normalizeEarningsLines = (lines = []) =>
     ? lines.map(normalizeEarningsLine).filter((line) => line.type || line.rate || line.hours || line.amount)
     : [];
 
+const formatWorkLineDate = (value = "") => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const buildDate = (yearValue, monthValue, dayValue) => {
+    const year = Number(yearValue);
+    const month = Number(monthValue);
+    const day = Number(dayValue);
+    const date = new Date(year, month - 1, day);
+
+    if (
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
+      return "";
+    }
+
+    return `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${year}`;
+  };
+
+  const yearFirst = text.match(
+    /(?:^|\D)(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})(?=\D|$)/
+  );
+  if (yearFirst) return buildDate(yearFirst[1], yearFirst[2], yearFirst[3]);
+
+  const monthFirst = text.match(
+    /(?:^|\D)(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})(?=\D|$)/
+  );
+  if (monthFirst) return buildDate(monthFirst[3], monthFirst[1], monthFirst[2]);
+
+  const shortYear = text.match(
+    /(?:^|\D)(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})(?=\D|$)/
+  );
+  if (shortYear) return buildDate(`20${shortYear[3]}`, shortYear[1], shortYear[2]);
+
+  const compactYearFirst = text.match(
+    /(?:^|\D)(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?=\D|$)/
+  );
+  if (compactYearFirst) {
+    return buildDate(compactYearFirst[1], compactYearFirst[2], compactYearFirst[3]);
+  }
+
+  const compactMonthFirst = text.match(
+    /(?:^|\D)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(20\d{2})(?=\D|$)/
+  );
+  if (compactMonthFirst) {
+    return buildDate(compactMonthFirst[3], compactMonthFirst[1], compactMonthFirst[2]);
+  }
+
+  return "";
+};
+
+const getWorkLineDates = (lines = []) =>
+  Array.from(
+    new Set(
+      normalizeEarningsLines(lines)
+        .map((line) => formatWorkLineDate(line.workLine))
+        .filter(Boolean)
+    )
+  );
+
+const normalizePaylocityDetails = (details = {}) => {
+  const source = details && typeof details === "object" ? details : {};
+  const moneyFields = [
+    "federalIncomeTaxCurrent",
+    "federalIncomeTaxYtd",
+    "socialSecurityCurrent",
+    "socialSecurityYtd",
+    "medicareCurrent",
+    "medicareYtd",
+    "californiaIncomeTaxCurrent",
+    "californiaIncomeTaxYtd",
+    "californiaSdiCurrent",
+    "californiaSdiYtd",
+    "deductionsCurrent",
+    "deductionsYtd",
+    "grossPayYtd",
+    "netPayYtd",
+  ];
+
+  return {
+    ...DEFAULT_PAYCHECK.paylocityDetails,
+    ...source,
+    ...Object.fromEntries(
+      moneyFields.map((field) => [field, formatOptionalMoney(source[field])])
+    ),
+    sickHoursAvailable:
+      String(source.sickHoursAvailable ?? "").trim() === ""
+        ? ""
+        : formatRate(source.sickHoursAvailable),
+    federalFilingStatus: String(source.federalFilingStatus || "").trim(),
+    stateFilingStatus: String(source.stateFilingStatus || "").trim(),
+  };
+};
+
 const sumEarningsLineField = (lines = [], field) =>
   lines.reduce((sum, line) => sum + (money(line[field]) || 0), 0);
 
 const getUniqueEarningsRates = (lines = []) =>
   Array.from(new Set(lines.map((line) => line.rate).filter(Boolean)));
-
-const buildEarningsSummary = (lines = []) =>
-  lines
-    .map((line) =>
-      [
-        line.type || "Earnings",
-        line.rate ? `$${line.rate}/hr` : "",
-        line.hours ? `${line.hours} hrs` : "",
-        line.amount ? `$${line.amount}` : "",
-      ]
-        .filter(Boolean)
-        .join(" - ")
-    )
-    .join("\n");
 
 const getPaycheckRateDisplay = (paycheck = {}) => {
   const uniqueRates = getUniqueEarningsRates(normalizeEarningsLines(paycheck.earningsLines));
@@ -268,6 +488,7 @@ const getPaycheckEarningsRows = (paycheck = {}) => {
       rate: line.rate || "0.00",
       hours: line.hours || "0.00",
       amount: line.amount || "0.00",
+      dateWorked: formatWorkLineDate(line.workLine),
     }));
   }
 
@@ -278,26 +499,9 @@ const getPaycheckEarningsRows = (paycheck = {}) => {
       rate: formatRate(paycheck.rate) || "0.00",
       hours: formatRate(paycheck.hours) || "0.00",
       amount: formatMoney(paycheck.grossPay) || "0.00",
+      dateWorked: "",
     },
   ];
-};
-
-const isPaycheckRateWarning = (paycheck = {}) =>
-  /below expected|lower pre-guard-card/i.test(paycheck.payRateNote || "");
-
-const getPaycheckNotesDisplay = (paycheck = {}) => {
-  const notes = String(paycheck.notes || "").trim();
-  const earningsLines = normalizeEarningsLines(paycheck.earningsLines);
-  if (!notes || !earningsLines.length) return notes;
-
-  const earningsSummary = buildEarningsSummary(earningsLines).trim();
-  if (notes === earningsSummary) return "";
-
-  return notes
-    .split("\n")
-    .filter((line) => !/^Regular\s+-\s+\$\d/i.test(line) && !/^Overtime\s+-\s+\$\d/i.test(line))
-    .join("\n")
-    .trim();
 };
 
 const normalizePaycheck = (paycheck = {}) => {
@@ -318,26 +522,36 @@ const normalizePaycheck = (paycheck = {}) => {
     earningsLines,
     taxes: formatMoney(paycheck.taxes),
     deductions: String(paycheck.deductions || "").trim(),
-    netPay: formatMoney(paycheck.netPay),
-    checkAmount: formatMoney(paycheck.checkAmount),
-    expectedRate: formatRate(paycheck.expectedRate),
-    attachment: normalizePaycheckAttachment(paycheck.attachment),
+    netPay: formatMoney(paycheck.netPay || paycheck.checkAmount),
+    paylocityDetails: normalizePaylocityDetails(paycheck.paylocityDetails),
+    attachment: getStoredPaycheckAttachment(paycheck),
     createdAt: paycheck.createdAt || new Date().toISOString(),
     updatedAt: paycheck.updatedAt || new Date().toISOString(),
   };
 
   normalized.hours = earningsHours || normalizePaycheckHours(paycheck.hours, normalized.grossPay, normalized.rate);
 
-  return {
-    ...normalized,
-    payRateNote: buildPayRateNote(normalized),
-  };
+  delete normalized.checkAmount;
+  delete normalized.expectedRate;
+  delete normalized.payRateNote;
+
+  return normalized;
 };
 
 const readStoredPaychecks = () => {
   if (typeof localStorage === "undefined") return [];
   const parsed = safeJsonParse(localStorage.getItem(PAYCHECK_STORAGE_KEY), []);
-  return Array.isArray(parsed) ? parsed.map(normalizePaycheck) : [];
+  if (!Array.isArray(parsed)) return [];
+
+  const normalized = parsed.map(normalizePaycheck);
+
+  try {
+    localStorage.setItem(PAYCHECK_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Keep the paycheck screen usable if browser storage is temporarily unavailable.
+  }
+
+  return normalized;
 };
 
 const writeStoredPaychecks = (paychecks = []) => {
@@ -359,7 +573,7 @@ const getUploadEndpointCandidates = () => {
     : [PAYCHECK_UPLOAD_LOCALWP_HTTP_ENDPOINT, PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT];
 
   const candidates = isLocalDevHost
-    ? [...localWpCandidates, PAYCHECK_UPLOAD_ENDPOINT]
+    ? [PAYCHECK_UPLOAD_ENDPOINT, ...localWpCandidates]
     : [PAYCHECK_UPLOAD_ENDPOINT];
 
   return Array.from(new Set(candidates));
@@ -372,65 +586,133 @@ const resolveUploadEndpoint = () => {
   const isLocalWpHost = host === "main-dashboard.local";
   if (isLocalWpHost) return PAYCHECK_UPLOAD_ENDPOINT;
   if (!isLocalDevHost) return PAYCHECK_UPLOAD_ENDPOINT;
-  return window.location.protocol === "https:" ? PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT : PAYCHECK_UPLOAD_LOCALWP_HTTP_ENDPOINT;
+  return PAYCHECK_UPLOAD_ENDPOINT;
 };
 
-const resolvePaycheckEndpointUrl = (url = "") => {
-  const rawUrl = String(url || "").trim();
-  if (!rawUrl) return "";
-  if (!rawUrl.startsWith("/budget-dashboard-fs/")) return rawUrl;
+const resolveDirectFileEndpoint = () => {
+  if (typeof window === "undefined") return PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT;
 
-  const endpoint = resolveUploadEndpoint();
-  try {
-    const endpointUrl = new URL(endpoint, window.location.origin);
-    return `${endpointUrl.origin}${rawUrl}`;
-  } catch {
-    return rawUrl;
+  const host = window.location.hostname;
+  const isLocalDevHost = host === "localhost" || host === "127.0.0.1";
+  const isLocalWpHost = host === "main-dashboard.local";
+
+  if (isLocalWpHost) return PAYCHECK_UPLOAD_ENDPOINT;
+  if (isLocalDevHost) return PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT;
+  return PAYCHECK_UPLOAD_ENDPOINT;
+};
+
+const getDirectAttachmentUrl = (attachment = {}, action = "view") => {
+  const normalized = normalizePaycheckAttachment(attachment);
+  if (!normalized?.savedName) return "";
+
+  const params = new URLSearchParams({ action });
+  params.set("savedName", normalized.savedName);
+  if (normalized.originalName) {
+    params.set("originalName", normalized.originalName);
   }
+
+  return `${resolveDirectFileEndpoint()}?${params.toString()}`;
 };
 
-const buildPaycheckFileUrl = (action, attachment = {}) => {
-  const endpoint = resolveUploadEndpoint();
-  const params = new URLSearchParams({
-    action,
-    savedName: attachment.savedName || "",
-  });
-
-  if (attachment.originalName) params.set("originalName", attachment.originalName);
-  return `${endpoint}?${params.toString()}`;
+const optionalNumber = (value) => {
+  if (String(value ?? "").trim() === "") return null;
+  return money(value);
 };
 
-const getAttachmentViewUrl = (attachment = {}) => {
-  if (attachment.viewUrl) return resolvePaycheckEndpointUrl(attachment.viewUrl);
-  if (attachment.savedName) return buildPaycheckFileUrl("view", attachment);
-  return resolvePaycheckEndpointUrl(attachment.url);
+const amountsMatch = (first, second, tolerance = 0.02) =>
+  first !== null && second !== null && Math.abs(first - second) <= tolerance;
+
+const getPaylocityTaxRows = (paycheck = {}) => {
+  const details = normalizePaylocityDetails(paycheck.paylocityDetails);
+  return [
+    ["Federal income tax", details.federalIncomeTaxCurrent, details.federalIncomeTaxYtd],
+    ["Social Security", details.socialSecurityCurrent, details.socialSecurityYtd],
+    ["Medicare", details.medicareCurrent, details.medicareYtd],
+    ["California income tax", details.californiaIncomeTaxCurrent, details.californiaIncomeTaxYtd],
+    ["California SDI", details.californiaSdiCurrent, details.californiaSdiYtd],
+  ]
+    .filter(([, current, ytd]) => current !== "" || ytd !== "")
+    .map(([label, current, ytd]) => ({ label, current, ytd }));
 };
 
-const getAttachmentDownloadUrl = (attachment = {}) => {
-  if (attachment.downloadUrl) return resolvePaycheckEndpointUrl(attachment.downloadUrl);
-  if (attachment.savedName) return buildPaycheckFileUrl("download", attachment);
-  return resolvePaycheckEndpointUrl(attachment.url);
+const getCurrentDeductionAmount = (paycheck = {}) => {
+  const details = normalizePaylocityDetails(paycheck.paylocityDetails);
+  const detailedAmount = optionalNumber(details.deductionsCurrent);
+  if (detailedAmount !== null) return detailedAmount;
+
+  const raw = String(paycheck.deductions || "").trim();
+  if (!raw || /no deductions|none/i.test(raw)) return 0;
+  if (/^\$?[\d,]+(?:\.\d{1,2})?$/.test(raw)) return money(raw);
+  return null;
 };
 
-const buildPayRateNote = (paycheck = {}) => {
+const getPaycheckReconciliation = (paycheck = {}) => {
   const earningsLines = normalizeEarningsLines(paycheck.earningsLines);
-  const rates = earningsLines.length
-    ? earningsLines.map((line) => money(line.rate)).filter((rate) => rate !== null)
-    : [money(paycheck.rate)].filter((rate) => rate !== null);
-  const lowestRate = rates.length ? Math.min(...rates) : null;
-  const checkDate = formatDateForInput(paycheck.checkDate);
+  const checks = [];
 
-  if (!lowestRate) return paycheck.payRateNote || "";
+  if (earningsLines.length) {
+    const earningsGross = sumEarningsLineField(earningsLines, "amount");
+    const statedGross = optionalNumber(paycheck.grossPay);
+    checks.push({
+      id: "gross",
+      label: "Earnings equal gross pay",
+      actual: earningsGross,
+      expected: statedGross,
+      passed: amountsMatch(earningsGross, statedGross),
+      detail: `$${earningsGross.toFixed(2)} earnings, $${(statedGross || 0).toFixed(2)} gross`,
+    });
 
-  if (checkDate && checkDate >= GUARD_CARD_PROOF_SUBMITTED_DATE && lowestRate < FUTURE_EXPECTED_CSC_RATE) {
-    return `Rate below expected $${FUTURE_EXPECTED_CSC_RATE.toFixed(2)}/hr after guard card proof submitted on 06/22/2026. Verify payroll if this was paid after the new rate should apply.`;
+    const earningsHours = sumEarningsLineField(earningsLines, "hours");
+    const statedHours = optionalNumber(paycheck.hours);
+    checks.push({
+      id: "hours",
+      label: "Earnings hours equal total hours",
+      actual: earningsHours,
+      expected: statedHours,
+      passed: amountsMatch(earningsHours, statedHours),
+      detail: `${earningsHours.toFixed(2)} earnings hours, ${(statedHours || 0).toFixed(2)} total hours`,
+    });
   }
 
-  if (lowestRate < FUTURE_EXPECTED_CSC_RATE) {
-    return "Lower pre-guard-card payroll rate. Guard card proof was submitted on 06/22/2026. Future CSC pay should be $19.50/hr.";
+  const gross = optionalNumber(paycheck.grossPay);
+  const taxes = optionalNumber(paycheck.taxes);
+  const deductions = getCurrentDeductionAmount(paycheck);
+  const net = optionalNumber(paycheck.netPay);
+
+  if (gross !== null && gross > 0 && taxes !== null && deductions !== null && net !== null) {
+    const calculatedNet = gross - taxes - deductions;
+    checks.push({
+      id: "net",
+      label: "Gross minus taxes and deductions equals net pay",
+      actual: calculatedNet,
+      expected: net,
+      passed: amountsMatch(calculatedNet, net),
+      detail: `$${calculatedNet.toFixed(2)} calculated, $${net.toFixed(2)} net`,
+    });
   }
 
-  return "Rate meets expected post-guard-card CSC rate.";
+  const failedChecks = checks.filter((check) => !check.passed);
+  return {
+    checks,
+    failedChecks,
+    status: !checks.length ? "unavailable" : failedChecks.length ? "warning" : "verified",
+  };
+};
+
+const hasPaylocityDetails = (paycheck = {}) => {
+  const details = normalizePaylocityDetails(paycheck.paylocityDetails);
+  return (
+    getPaylocityTaxRows(paycheck).length > 0 ||
+    [
+      details.deductionsCurrent,
+      details.deductionsYtd,
+      details.grossPayYtd,
+      details.netPayYtd,
+      details.sickHoursAvailable,
+      details.federalFilingStatus,
+      details.stateFilingStatus,
+    ].some((value) => String(value || "").trim())
+  );
 };
 
 const cleanScanText = (value = "") =>
@@ -442,8 +724,24 @@ const cleanScanText = (value = "") =>
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
+const sanitizePaycheckScanText = (value = "") =>
+  cleanScanText(value)
+    .split("\n")
+    .filter((line) => {
+      const text = line.trim();
+      if (!text) return true;
+      if (/\b(?:bank\s+account|account\s+number|routing\s+number|micr)\b/i.test(text)) return false;
+      if (/^[\s⑆⑇⑈<>|:]*\d{8,}[\s⑆⑇⑈<>|:]+\d{4,}/.test(text)) return false;
+      if (/^\d{2,6}\s+\S.+\b(?:street|st|avenue|ave|boulevard|blvd|road|rd|drive|dr|lane|ln|court|ct|place|pl)\b/i.test(text)) return false;
+      if (/^[A-Za-z .'-]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$/i.test(text)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
 const limitScanText = (value = "") => {
-  const text = cleanScanText(value);
+  const text = sanitizePaycheckScanText(value);
   if (text.length <= MAX_PAYCHECK_SCAN_TEXT_LENGTH) return text;
   return `${text.slice(0, MAX_PAYCHECK_SCAN_TEXT_LENGTH).trim()}\n\n[Scan text truncated to ${MAX_PAYCHECK_SCAN_TEXT_LENGTH.toLocaleString()} characters.]`;
 };
@@ -464,6 +762,96 @@ const findNumberAfterLabel = (text, labelPattern) => {
   const regex = new RegExp(`${labelPattern}\\s*:?\\s*(\\d+(?:\\.\\d+)?)`, "i");
   const match = text.match(regex);
   return match ? formatRate(match[1]) : "";
+};
+
+const findCurrentYtdPair = (text, labelPattern) => {
+  const regex = new RegExp(
+    `${labelPattern}\\s*:?\\s*\\$?\\s*(\\d[\\d,]*\\.\\d{2})\\s+\\$?\\s*(\\d[\\d,]*\\.\\d{2})`,
+    "i"
+  );
+  const match = text.match(regex);
+  return match
+    ? { current: formatMoney(match[1]), ytd: formatMoney(match[2]) }
+    : { current: "", ytd: "" };
+};
+
+const findGrossCurrentYtd = (text) => {
+  const match = text.match(
+    /Gross Earnings\s*:?\s*(?:\d+(?:\.\d+)?\s+)?\$?\s*(\d[\d,]*\.\d{2})\s+\$?\s*(\d[\d,]*\.\d{2})/i
+  );
+  return match
+    ? { current: formatMoney(match[1]), ytd: formatMoney(match[2]) }
+    : { current: "", ytd: "" };
+};
+
+const findSickHoursAvailable = (text = "") => {
+  const line = text
+    .split("\n")
+    .map((value) => value.trim())
+    .find((value) => /sick/i.test(value) && /available|balance/i.test(value));
+  if (!line) return "";
+
+  const values = line.match(/\d+(?:\.\d+)?/g) || [];
+  return values.length ? formatRate(values[values.length - 1]) : "";
+};
+
+const findFilingStatus = (text, jurisdiction) => {
+  const regex = new RegExp(
+    `${jurisdiction}\\s+(?:tax\\s+)?filing\\s+status\\s*:?\\s*([^\\n|]{1,60})`,
+    "i"
+  );
+  const match = text.match(regex);
+  if (!match) return "";
+  return match[1]
+    .replace(/\s{2,}.*$/, "")
+    .replace(/\b(State|Federal)\s+(?:tax\s+)?filing\s+status.*$/i, "")
+    .trim();
+};
+
+const parsePaylocityDetails = (text = "", flatText = "") => {
+  const federalIncomeTax = findCurrentYtdPair(
+    flatText,
+    "(?:Federal Income Tax|Federal Withholding|FITW)"
+  );
+  const socialSecurity = findCurrentYtdPair(
+    flatText,
+    "(?:Social Security|OASDI)"
+  );
+  const medicare = findCurrentYtdPair(flatText, "Medicare");
+  const californiaIncomeTax = findCurrentYtdPair(
+    flatText,
+    "(?:California Income Tax|California Withholding|CA Withholding|CAS)"
+  );
+  const californiaSdi = findCurrentYtdPair(
+    flatText,
+    "(?:California SDI|CA SDI|CASDI)"
+  );
+  const deductionTotals = findCurrentYtdPair(
+    flatText,
+    "(?:Total Deductions|Deductions Total)"
+  );
+  const grossTotals = findGrossCurrentYtd(flatText);
+  const netTotals = findCurrentYtdPair(flatText, "Net Pay");
+
+  return normalizePaylocityDetails({
+    federalIncomeTaxCurrent: federalIncomeTax.current,
+    federalIncomeTaxYtd: federalIncomeTax.ytd,
+    socialSecurityCurrent: socialSecurity.current,
+    socialSecurityYtd: socialSecurity.ytd,
+    medicareCurrent: medicare.current,
+    medicareYtd: medicare.ytd,
+    californiaIncomeTaxCurrent: californiaIncomeTax.current,
+    californiaIncomeTaxYtd: californiaIncomeTax.ytd,
+    californiaSdiCurrent: californiaSdi.current,
+    californiaSdiYtd: californiaSdi.ytd,
+    deductionsCurrent: deductionTotals.current,
+    deductionsYtd: deductionTotals.ytd,
+    grossPayYtd: grossTotals.ytd,
+    netPayYtd: netTotals.ytd,
+    sickHoursAvailable: findSickHoursAvailable(text),
+    federalFilingStatus: findFilingStatus(text, "Federal"),
+    stateFilingStatus: findFilingStatus(text, "(?:State|California)"),
+  });
 };
 
 const parseEarningsLines = (flatText = "") => {
@@ -510,7 +898,7 @@ const parsePaycheckScanText = (rawText = "") => {
   if (netPayMatch) parsed.netPay = formatMoney(netPayMatch[1]);
 
   const checkAmountMatch = flat.match(/Check Amount\s*:?\s*\$?\s*(\d[\d,]*(?:\.\d{2})?)/i);
-  if (checkAmountMatch) parsed.checkAmount = formatMoney(checkAmountMatch[1]);
+  if (checkAmountMatch && !parsed.netPay) parsed.netPay = formatMoney(checkAmountMatch[1]);
 
   const grossMatch = flat.match(/Gross Earnings\s*:?\s*(?:\d+(?:\.\d+)?)?\s*\$?\s*(\d[\d,]*(?:\.\d{2})?)/i);
   if (grossMatch) parsed.grossPay = formatMoney(grossMatch[1]);
@@ -529,8 +917,26 @@ const parsePaycheckScanText = (rawText = "") => {
   const taxTotalMatch = flat.match(/Taxes\s+(\d+(?:\.\d{2})?)\s+(\d+(?:\.\d{2})?)/i);
   if (taxTotalMatch) parsed.taxes = formatPaycheckAmount(taxTotalMatch[1], parsed.grossPay);
 
+  parsed.paylocityDetails = parsePaylocityDetails(text, flat);
+  const scannedTaxTotal = getPaylocityTaxRows(parsed).reduce(
+    (sum, row) => sum + (optionalNumber(row.current) || 0),
+    0
+  );
+  if (!parsed.taxes && scannedTaxTotal > 0) {
+    parsed.taxes = scannedTaxTotal.toFixed(2);
+  }
+
+  if (
+    !parsed.grossPay &&
+    parsed.paylocityDetails.grossPayYtd
+  ) {
+    const grossTotals = findGrossCurrentYtd(flat);
+    parsed.grossPay = grossTotals.current;
+  }
+
   if (/No Deductions/i.test(text)) {
     parsed.deductions = "No deductions";
+    parsed.paylocityDetails.deductionsCurrent = "0.00";
   }
 
   if (!parsed.rate && parsed.grossPay && parsed.hours) {
@@ -538,11 +944,6 @@ const parsePaycheckScanText = (rawText = "") => {
     const hours = money(parsed.hours);
     if (gross && hours) parsed.rate = formatRate(gross / hours);
   }
-
-  parsed.netPay = parsed.netPay || parsed.checkAmount;
-  parsed.checkAmount = parsed.checkAmount || parsed.netPay;
-  parsed.expectedRate = parsed.checkDate && parsed.checkDate >= GUARD_CARD_PROOF_SUBMITTED_DATE ? "19.50" : "18.50";
-  parsed.payRateNote = buildPayRateNote(parsed);
 
   return normalizePaycheck(parsed);
 };
@@ -648,7 +1049,7 @@ const extractTextFromFile = async (file) => {
 
 export default function PaychecksTab() {
   const [paychecks, setPaychecks] = useState(readStoredPaychecks);
-  const [form, setForm] = useState(() => normalizePaycheck({ id: createId(), expectedRate: "19.50" }));
+  const [form, setForm] = useState(() => normalizePaycheck({ id: createId() }));
   const [editingId, setEditingId] = useState("");
   const [scanText, setScanText] = useState("");
   const [scanStatus, setScanStatus] = useState("");
@@ -656,6 +1057,8 @@ export default function PaychecksTab() {
   const [uploadStatus, setUploadStatus] = useState("");
   const [uploadError, setUploadError] = useState("");
   const [isScanning, setIsScanning] = useState(false);
+  const [isScanSectionOpen, setIsScanSectionOpen] = useState(false);
+  const [isPaycheckFormOpen, setIsPaycheckFormOpen] = useState(false);
 
   const totals = useMemo(() => {
     return paychecks.reduce(
@@ -668,6 +1071,32 @@ export default function PaychecksTab() {
       { grossPay: 0, taxes: 0, netPay: 0, hours: 0 }
     );
   }, [paychecks]);
+
+  const duplicateCheckNumbers = useMemo(() => {
+    const counts = new Map();
+    paychecks.forEach((paycheck) => {
+      const checkNumber = String(paycheck.checkNumber || "").trim();
+      if (!checkNumber) return;
+      counts.set(checkNumber, (counts.get(checkNumber) || 0) + 1);
+    });
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([checkNumber]) => checkNumber)
+    );
+  }, [paychecks]);
+
+  const duplicatePaycheckMatches = useMemo(() => {
+    const checkNumber = String(form.checkNumber || "").trim();
+    if (!checkNumber) return [];
+    return paychecks.filter(
+      (paycheck) =>
+        paycheck.id !== editingId &&
+        String(paycheck.checkNumber || "").trim() === checkNumber
+    );
+  }, [editingId, form.checkNumber, paychecks]);
+
+  const formHasDuplicateCheckNumber = duplicatePaycheckMatches.length > 0;
 
   const updatePaychecks = (updater) => {
     setPaychecks((current) => {
@@ -683,18 +1112,8 @@ export default function PaychecksTab() {
     setForm((current) => normalizePaycheck({ ...current, [field]: value, updatedAt: new Date().toISOString() }));
   };
 
-  const updatePaycheckNotes = (paycheckId, value) => {
-    updatePaychecks((current) =>
-      current.map((item) =>
-        item.id === paycheckId
-          ? { ...item, notes: value, updatedAt: new Date().toISOString() }
-          : item
-      )
-    );
-  };
-
   const resetForm = () => {
-    setForm(normalizePaycheck({ id: createId(), expectedRate: "19.50" }));
+    setForm(normalizePaycheck({ id: createId() }));
     setEditingId("");
     setScanText("");
     setScanStatus("");
@@ -718,6 +1137,7 @@ export default function PaychecksTab() {
         const response = await fetch(endpoint, {
           method: "POST",
           body: formData,
+          credentials: "include",
         });
         const payload = await response.json().catch(() => null);
 
@@ -725,7 +1145,18 @@ export default function PaychecksTab() {
           throw new Error(payload?.error || `Upload failed at ${endpoint}`);
         }
 
-        return normalizePaycheckAttachment(payload.file || payload);
+        const attachment = normalizePaycheckAttachment(
+          payload.file ||
+          payload.attachment ||
+          payload.uploaded?.[0] ||
+          payload
+        );
+
+        if (!attachment?.savedName) {
+          throw new Error("The upload succeeded, but the server filename was missing.");
+        }
+
+        return attachment;
       } catch (error) {
         lastError = error;
       }
@@ -741,11 +1172,14 @@ export default function PaychecksTab() {
   };
 
   const deletePaycheckFile = async (attachment) => {
-    if (!attachment?.savedName) return;
+    const normalizedAttachment = normalizePaycheckAttachment(attachment);
+    if (!normalizedAttachment?.savedName) return;
 
     const formData = new FormData();
     formData.append("action", "delete");
-    formData.append("savedName", attachment.savedName);
+    formData.append("savedName", normalizedAttachment.savedName);
+    formData.append("saved_name", normalizedAttachment.savedName);
+    formData.append("saved_file_name", normalizedAttachment.savedName);
 
     let lastError = null;
 
@@ -754,6 +1188,7 @@ export default function PaychecksTab() {
         const response = await fetch(endpoint, {
           method: "POST",
           body: formData,
+          credentials: "include",
         });
         const payload = await response.json().catch(() => null);
 
@@ -793,14 +1228,34 @@ export default function PaychecksTab() {
         ...Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== "" && value !== null)),
         id: form.id || parsed.id || createId(),
         attachment,
-        scanText: extractedText,
+        scanText: limitScanText(extractedText),
         fileName: file.name,
       });
 
       setForm(next);
       setScanText(limitScanText(extractedText));
-      setScanStatus(extractedText ? "Paycheck scanned. Review fields before saving." : "File uploaded. OCR did not find readable text, so enter pay fields manually.");
+      const matchingPaycheck = next.checkNumber
+        ? paychecks.find(
+            (paycheck) =>
+              paycheck.id !== editingId &&
+              String(paycheck.checkNumber || "").trim() ===
+              String(next.checkNumber || "").trim()
+          )
+        : null;
+
+      if (matchingPaycheck) {
+        setScanStatus(
+          `Check #${next.checkNumber} is already saved. Use Attach to Existing Check below to restore its file without creating a duplicate.`
+        );
+      } else {
+        setScanStatus(
+          extractedText
+            ? "Paycheck scanned. Review fields before saving."
+            : "File uploaded. OCR did not find readable text, so enter pay fields manually."
+        );
+      }
       setUploadStatus(`${file.name} saved locally.`);
+      setIsPaycheckFormOpen(true);
     } catch (error) {
       setScanError(error?.message || "Could not scan paycheck.");
     } finally {
@@ -816,13 +1271,26 @@ export default function PaychecksTab() {
         ...Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== "" && value !== null)),
         id: current.id || parsed.id || createId(),
         attachment: current.attachment,
-        scanText,
+        scanText: limitScanText(scanText),
       })
     );
-    setScanStatus("Edited scan text applied. Review fields before saving.");
+    setScanError("");
+    setScanStatus(
+      "Edited scan text applied. The paycheck file remains saved. Open Add Paycheck to review the populated fields."
+    );
   };
 
   const savePaycheck = () => {
+    if (!editingId && formHasDuplicateCheckNumber) {
+      setScanError(
+        form.attachment
+          ? `Check #${form.checkNumber} is already saved. Use Attach to Existing Check instead.`
+          : `Check #${form.checkNumber} is already saved. Edit the existing check instead of creating a duplicate.`
+      );
+      setIsPaycheckFormOpen(true);
+      return;
+    }
+
     const normalized = normalizePaycheck({
       ...form,
       id: editingId || form.id || createId(),
@@ -840,11 +1308,64 @@ export default function PaychecksTab() {
     resetForm();
   };
 
+  const attachScannedFileToExistingPaycheck = (paycheckId) => {
+    const matchingPaycheck = paychecks.find(
+      (paycheck) => paycheck.id === paycheckId
+    );
+
+    if (!matchingPaycheck) {
+      setScanError("The existing paycheck could not be found. Refresh the page and scan the file again.");
+      return;
+    }
+
+    if (!form.attachment) {
+      setScanError("Scan the original paycheck file before attaching it to the existing check.");
+      return;
+    }
+
+    const attachment = normalizePaycheckAttachment(form.attachment);
+    if (!attachment?.savedName) {
+      setScanError(
+        "The paycheck file was uploaded without a server filename, so it was not attached. Select the file again and retry."
+      );
+      return;
+    }
+
+    const attachmentName =
+      attachment?.originalName || attachment?.savedName || "Paycheck file";
+
+    updatePaychecks((current) =>
+      current.map((paycheck) =>
+        paycheck.id === paycheckId
+          ? normalizePaycheck({
+              ...paycheck,
+              attachment,
+              fileName: form.fileName || paycheck.fileName || attachmentName,
+              updatedAt: new Date().toISOString(),
+            })
+          : paycheck
+      )
+    );
+
+    setForm(normalizePaycheck({ id: createId() }));
+    setEditingId("");
+    setScanText("");
+    setScanError("");
+    setUploadError("");
+    setUploadStatus("");
+    setScanStatus(
+      `${attachmentName} attached to existing Check #${
+        matchingPaycheck.checkNumber || form.checkNumber
+      }. No duplicate paycheck was created.`
+    );
+    setIsPaycheckFormOpen(false);
+  };
+
   const editPaycheck = (paycheck) => {
     setForm(normalizePaycheck(paycheck));
     setEditingId(paycheck.id);
     setScanText(paycheck.scanText || "");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setIsPaycheckFormOpen(false);
   };
 
   const removePaycheck = async (paycheck) => {
@@ -875,83 +1396,335 @@ export default function PaychecksTab() {
     setForm((current) => normalizePaycheck({ ...current, attachment: null }));
   };
 
+  const fetchAttachmentBlob = async (attachment, action) => {
+    const normalizedAttachment = normalizePaycheckAttachment(attachment);
+    if (!normalizedAttachment?.savedName) {
+      throw new Error("This paycheck does not have a valid saved file link.");
+    }
+
+    let lastError = null;
+
+    for (const endpoint of getUploadEndpointCandidates()) {
+      const formData = new FormData();
+      formData.append("action", action);
+      formData.append("savedName", normalizedAttachment.savedName);
+      formData.append("saved_name", normalizedAttachment.savedName);
+      formData.append("saved_file_name", normalizedAttachment.savedName);
+
+      if (normalizedAttachment.originalName) {
+        formData.append("originalName", normalizedAttachment.originalName);
+        formData.append("original_name", normalizedAttachment.originalName);
+        formData.append("original_file_name", normalizedAttachment.originalName);
+      }
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || "The saved paycheck file could not be loaded.");
+        }
+
+        const blob = await response.blob();
+        if (!blob.size) {
+          throw new Error("The saved paycheck file is empty.");
+        }
+
+        return blob;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("The saved paycheck file could not be loaded.");
+  };
+
   const downloadAttachment = async (attachment) => {
-    const url = getAttachmentDownloadUrl(attachment);
-    if (!url) return;
+    setUploadStatus("");
+    setUploadError("");
 
-    try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Download failed.");
+    const normalizedAttachment = normalizePaycheckAttachment(attachment);
+    const downloadUrl = getDirectAttachmentUrl(normalizedAttachment, "download");
 
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
+    if (!normalizedAttachment?.savedName || !downloadUrl) {
+      setUploadError("This paycheck does not have a valid saved file link.");
+      return;
+    }
+
+    const fileName =
+      normalizedAttachment.originalName ||
+      normalizedAttachment.savedName ||
+      "paycheck-file";
+
+    const openDownloadUrl = () => {
       const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = attachment.originalName || attachment.savedName || "paycheck";
+      link.href = downloadUrl;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(objectUrl);
+    };
+
+    try {
+      const response = await fetch(downloadUrl, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || `Download failed with status ${response.status}.`);
+      }
+
+      const blob = await response.blob();
+      if (!blob.size) throw new Error("The saved paycheck file is empty.");
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     } catch {
-      window.open(url, "_blank", "noopener,noreferrer");
+      openDownloadUrl();
     }
   };
 
-  const renderTextInput = (field, label, type = "text") => (
-    <label className="text-sm font-semibold text-slate-700">
+  const renderTextInput = (field, label, type = "text", wrapperClassName = "") => (
+    <label className={`min-w-0 text-xs font-bold text-slate-700 sm:text-sm ${wrapperClassName}`}>
       {label}
       <input
         type={type}
         value={form[field] || ""}
         onChange={(event) => updateForm(field, event.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+        className="mt-0.5 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-base sm:mt-1 sm:px-3 sm:py-2 sm:text-sm"
       />
     </label>
   );
 
+  const renderPaycheckEditor = ({ inline = false } = {}) => (
+    <div className={inline ? "p-2.5 sm:p-3" : "p-3 sm:p-4"}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-black uppercase tracking-wide text-slate-500">
+            {inline ? "Edit this paycheck" : "New paycheck"}
+          </div>
+          {inline ? (
+            <div className="mt-0.5 text-sm font-black text-slate-950">
+              {formatDateForDisplay(form.checkDate) || "No check date"}
+              {form.checkNumber ? `, Check #${form.checkNumber}` : ""}
+            </div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={resetForm}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+        >
+          <X className="h-4 w-4" />
+          {inline ? "Cancel" : "Clear"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:gap-2.5 md:grid-cols-4">
+        {renderTextInput("employer", "Employer", "text", "col-span-2")}
+        {renderTextInput("employeeName", "Employee", "text", "col-span-2")}
+        {renderTextInput("checkDate", "Check Date", "date")}
+        {renderTextInput("checkNumber", "Check Number")}
+        {renderTextInput("payPeriodStart", "Pay Period Start", "date")}
+        {renderTextInput("payPeriodEnd", "Pay Period End", "date")}
+        {!form.earningsLines?.length ? renderTextInput("rate", "Rate") : null}
+        {renderTextInput("hours", "Total Hours")}
+        {renderTextInput("grossPay", "Gross Pay")}
+        {renderTextInput("taxes", "Taxes")}
+        {renderTextInput("deductions", "Deductions")}
+        {renderTextInput("netPay", "Net Pay")}
+      </div>
+
+      {formHasDuplicateCheckNumber ? (
+        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-950">
+          <div className="flex items-start gap-2 font-bold">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Check #{form.checkNumber} is already saved. A second paycheck will not be created.
+            </span>
+          </div>
+          {form.attachment ? (
+            <div className="mt-2 flex flex-wrap gap-1.5 pl-6">
+              {duplicatePaycheckMatches.map((paycheck) => (
+                <button
+                  key={paycheck.id}
+                  type="button"
+                  onClick={() => attachScannedFileToExistingPaycheck(paycheck.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-2.5 py-1.5 text-xs font-black text-white hover:bg-blue-800"
+                >
+                  <Check className="h-4 w-4" />
+                  Attach to Existing Check
+                  {duplicatePaycheckMatches.length > 1
+                    ? ` from ${formatDateForDisplay(paycheck.checkDate) || "unknown date"}`
+                    : ""}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-1 pl-6 font-semibold text-amber-900">
+              Edit the existing paycheck instead.
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {!inline && form.earningsLines?.length > 0 ? (
+        <div className="mt-2.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+          <div className="mb-1.5 text-xs font-black text-slate-900">Earnings</div>
+          <div className="space-y-1">
+            {form.earningsLines.map((line) => (
+              <div
+                key={line.id}
+                className="grid grid-cols-[minmax(0,1fr)_70px_48px_68px] items-center gap-1 rounded-md bg-white px-2 py-1.5 text-xs text-slate-700"
+              >
+                <span className="truncate font-black text-slate-950">
+                  {line.type || "Earnings"}
+                  {formatWorkLineDate(line.workLine) ? (
+                    <span className="ml-1 font-semibold text-slate-500">
+                      {formatWorkLineDate(line.workLine)}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-right font-bold">${line.rate || "0.00"}/hr</span>
+                <span className="text-right">{line.hours || "0.00"}h</span>
+                <span className="text-right font-bold">${line.amount || "0.00"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {form.attachment ? (
+        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+          <div className="min-w-0">
+            <div className="truncate text-xs font-bold text-slate-900">
+              {form.attachment.originalName || form.attachment.savedName}
+            </div>
+            <div className="text-[11px] text-slate-500">Saved paycheck file</div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {!inline ? (
+              <>
+                {getDirectAttachmentUrl(form.attachment, "view") ? (
+                  <a
+                    href={getDirectAttachmentUrl(form.attachment, "view")}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg bg-blue-700 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-blue-800"
+                    title="View paycheck file"
+                  >
+                    <Eye className="h-4 w-4" />
+                    View
+                  </a>
+                ) : null}
+                {getDirectAttachmentUrl(form.attachment, "download") ? (
+                  <button
+                    type="button"
+                    onClick={() => downloadAttachment(form.attachment)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-slate-800"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={removeAttachmentFromForm}
+              className="inline-flex items-center gap-1 rounded-lg bg-red-700 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-red-800"
+            >
+              <Trash2 className="h-4 w-4" />
+              Remove File
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-2.5 flex justify-end">
+        <button
+          type="button"
+          onClick={savePaycheck}
+          className="inline-flex items-center gap-2 rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800 sm:text-sm"
+        >
+          {inline ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          {inline ? "Save Changes" : "Add Paycheck"}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-teal-50" className="flex flex-col gap-6 bg-teal-50 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-slate-100 sm:bg-teal-50" className="flex flex-col gap-2 bg-slate-100 py-2 sm:gap-3 sm:bg-teal-50 sm:py-3">
       <TabPageHeader
         icon={CircleDollarSign}
         title="Paychecks"
         subtitle="Scan paycheck stubs, preserve the original file, and track rates, hours, gross pay, taxes, and net pay."
         theme="teal"
+        className="budget-mobile-header"
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Paycheck totals">
-        <div className="rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-cyan-700">Hours</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">{totals.hours.toFixed(2)}</p>
+      <section className="grid grid-cols-2 gap-1.5 sm:gap-2 md:grid-cols-4" aria-label="Paycheck totals">
+        <div className="rounded-xl border border-cyan-200 bg-white p-2.5 shadow-sm sm:p-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-cyan-700 sm:text-xs">Hours</p>
+          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">{totals.hours.toFixed(2)}</p>
         </div>
-        <div className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-blue-700">Gross</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">${totals.grossPay.toFixed(2)}</p>
+        <div className="rounded-xl border border-blue-200 bg-white p-2.5 shadow-sm sm:p-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-blue-700 sm:text-xs">Gross</p>
+          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">${totals.grossPay.toFixed(2)}</p>
         </div>
-        <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-amber-700">Taxes</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">${totals.taxes.toFixed(2)}</p>
+        <div className="rounded-xl border border-amber-200 bg-white p-2.5 shadow-sm sm:p-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-amber-700 sm:text-xs">Taxes</p>
+          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">${totals.taxes.toFixed(2)}</p>
         </div>
-        <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Net</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">${totals.netPay.toFixed(2)}</p>
+        <div className="rounded-xl border border-emerald-200 bg-white p-2.5 shadow-sm sm:p-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:text-xs">Net</p>
+          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">${totals.netPay.toFixed(2)}</p>
         </div>
       </section>
 
-      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-        <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-wide text-blue-950">
-          <ScanLine className="h-4 w-4" />
-          Scan Paycheck
-        </div>
+      <div className="overflow-hidden rounded-xl border border-blue-200 bg-blue-50">
+        <button
+          type="button"
+          onClick={() => setIsScanSectionOpen((current) => !current)}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-black uppercase tracking-wide text-blue-950 hover:bg-blue-100/70 sm:px-4 sm:py-3 sm:text-sm"
+          aria-expanded={isScanSectionOpen}
+          aria-controls="paycheck-scan-section"
+        >
+          <span className="flex items-center gap-2">
+            <ScanLine className="h-4 w-4" />
+            Scan Paycheck
+          </span>
+          {isScanSectionOpen ? <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5" /> : <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />}
+        </button>
 
-        <div className="grid gap-3 md:grid-cols-3">
-          <label className="text-sm font-semibold text-blue-950 md:col-span-2">
+        {isScanSectionOpen && (
+          <div id="paycheck-scan-section" className="border-t border-blue-200 p-3 sm:p-4">
+            <div className="grid gap-2 sm:gap-3 md:grid-cols-3">
+          <label className="text-xs font-bold text-blue-950 sm:text-sm md:col-span-2">
             Paycheck PDF or image
             <input
               type="file"
               accept="image/*,application/pdf,.pdf,.txt,.csv"
               onChange={handleScanFile}
               disabled={isScanning}
-              className="mt-1 block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-700 file:px-3 file:py-2 file:text-sm file:font-bold file:text-white hover:file:bg-blue-800 disabled:cursor-wait disabled:opacity-60"
+              className="mt-0.5 block w-full text-xs text-slate-700 file:mr-2 file:rounded-lg file:border-0 file:bg-blue-700 file:px-2.5 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-blue-800 disabled:cursor-wait disabled:opacity-60 sm:mt-1 sm:text-sm sm:file:mr-3 sm:file:px-3 sm:file:py-2 sm:file:text-sm"
             />
           </label>
 
@@ -960,174 +1733,73 @@ export default function PaychecksTab() {
               type="button"
               onClick={applyEditedScanText}
               disabled={!scanText.trim()}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400 sm:text-sm"
             >
               <Check className="h-4 w-4" />
               Apply Scan Text
             </button>
           </div>
-        </div>
-
-        {isScanning && <div className="mt-3 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-blue-900">Scanning paycheck and saving file...</div>}
-        {scanStatus && <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-bold text-green-900">{scanStatus}</div>}
-        {uploadStatus && <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-bold text-green-900">{uploadStatus}</div>}
-        {scanError && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-900">{scanError}</div>}
-        {uploadError && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-900">{uploadError}</div>}
-
-        <label className="mt-3 block text-sm font-semibold text-blue-950">
-          Extracted scan text
-          <textarea
-            value={scanText}
-            onChange={(event) => setScanText(event.target.value)}
-            rows={5}
-            placeholder="OCR text appears here. You can edit it, then click Apply Scan Text."
-            className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
-          />
-        </label>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="text-base font-black text-slate-900">{editingId ? "Edit Paycheck" : "Add Paycheck"}</h3>
-          <button
-            type="button"
-            onClick={resetForm}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
-          >
-            <X className="h-4 w-4" />
-            Clear
-          </button>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-4">
-          {renderTextInput("employer", "Employer")}
-          {renderTextInput("employeeName", "Employee")}
-          {renderTextInput("checkDate", "Check Date", "date")}
-          {renderTextInput("checkNumber", "Check Number")}
-          {renderTextInput("payPeriodStart", "Pay Period Start", "date")}
-          {renderTextInput("payPeriodEnd", "Pay Period End", "date")}
-          {renderTextInput("rate", "Rate")}
-          {renderTextInput("expectedRate", "Expected Rate")}
-          {renderTextInput("hours", "Hours")}
-          {renderTextInput("grossPay", "Gross Pay")}
-          {renderTextInput("taxes", "Taxes")}
-          {renderTextInput("deductions", "Deductions")}
-          {renderTextInput("netPay", "Net Pay")}
-          {renderTextInput("checkAmount", "Check Amount")}
-
-          <label className="text-sm font-semibold text-slate-700 md:col-span-2">
-            Pay Rate Note
-            <textarea
-              value={form.payRateNote || ""}
-              onChange={(event) => updateForm("payRateNote", event.target.value)}
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            />
-          </label>
-
-          <label className="text-sm font-semibold text-slate-700 md:col-span-2">
-            Notes
-            <textarea
-              value={form.notes || ""}
-              onChange={(event) => updateForm("notes", event.target.value)}
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            />
-          </label>
-        </div>
-
-        {form.earningsLines?.length > 0 && (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="mb-2 text-sm font-black text-slate-900">Earnings Lines</div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="py-1 pr-3 text-left font-bold">Type</th>
-                    <th className="py-1 px-3 text-right font-bold">Rate</th>
-                    <th className="py-1 px-3 text-right font-bold">Hours</th>
-                    <th className="py-1 px-3 text-left font-bold">WorkLine</th>
-                    <th className="py-1 pl-3 text-right font-bold">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {form.earningsLines.map((line) => (
-                    <tr key={line.id} className="border-t border-slate-200">
-                      <td className="py-1 pr-3 font-semibold text-slate-900">{line.type}</td>
-                      <td className="py-1 px-3 text-right text-slate-700">${line.rate || "0.00"}</td>
-                      <td className="py-1 px-3 text-right text-slate-700">{line.hours || "0.00"}</td>
-                      <td className="py-1 px-3 text-slate-700">{line.workLine}</td>
-                      <td className="py-1 pl-3 text-right font-semibold text-slate-900">${line.amount || "0.00"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
+
+            {isScanning && <div className="mt-2 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-bold text-blue-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">Scanning paycheck and saving file...</div>}
+            {scanStatus && <div className="mt-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1.5 text-xs font-bold text-green-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{scanStatus}</div>}
+            {uploadStatus && <div className="mt-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1.5 text-xs font-bold text-green-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{uploadStatus}</div>}
+            {scanError && <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{scanError}</div>}
+            {uploadError && <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{uploadError}</div>}
+
+            <label className="mt-2 block text-xs font-bold text-blue-950 sm:mt-3 sm:text-sm">
+              Extracted scan text
+              <textarea
+                value={scanText}
+                onChange={(event) => setScanText(event.target.value)}
+                rows={4}
+                placeholder="OCR text appears here. You can edit it, then click Apply Scan Text."
+                className="mt-0.5 w-full rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-base sm:mt-1 sm:px-3 sm:py-2 sm:text-sm"
+              />
+            </label>
           </div>
         )}
-
-        {form.attachment && (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-bold text-slate-900">{form.attachment.originalName || form.attachment.savedName}</div>
-                <div className="text-xs text-slate-500">Saved paycheck file</div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => window.open(getAttachmentViewUrl(form.attachment), "_blank", "noopener,noreferrer")}
-                  className="inline-flex items-center gap-1 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
-                >
-                  <Eye className="h-4 w-4" />
-                  View
-                </button>
-                <button
-                  type="button"
-                  onClick={() => downloadAttachment(form.attachment)}
-                  className="inline-flex items-center gap-1 rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
-                >
-                  <Download className="h-4 w-4" />
-                  Download
-                </button>
-                <button
-                  type="button"
-                  onClick={removeAttachmentFromForm}
-                  className="inline-flex items-center gap-1 rounded-lg bg-red-700 px-3 py-2 text-xs font-bold text-white hover:bg-red-800"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Remove
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={savePaycheck}
-            className="inline-flex items-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-bold text-white hover:bg-green-800"
-          >
-            <Plus className="h-4 w-4" />
-            {editingId ? "Save Paycheck" : "Add Paycheck"}
-          </button>
-        </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[880px] table-fixed text-sm">
-          <colgroup>
+      {!editingId ? (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <button
+            type="button"
+            onClick={() => setIsPaycheckFormOpen((current) => !current)}
+            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-black text-slate-900 hover:bg-slate-50 sm:px-4 sm:py-3 sm:text-base"
+            aria-expanded={isPaycheckFormOpen}
+            aria-controls="paycheck-form-section"
+          >
+            <span>Add Paycheck</span>
+            {isPaycheckFormOpen ? <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5" /> : <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />}
+          </button>
+          {isPaycheckFormOpen ? (
+            <div id="paycheck-form-section" className="border-t border-slate-200">
+              {renderPaycheckEditor()}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <section className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm" aria-labelledby="paycheck-history-title">
+        <div className="flex items-center justify-between gap-2 bg-slate-900 px-3 py-2 text-white sm:px-4 sm:py-2.5">
+          <h2 id="paycheck-history-title" className="text-sm font-black sm:text-base">Paycheck History</h2>
+          <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-bold sm:text-xs">
+            {paychecks.length} {paychecks.length === 1 ? "check" : "checks"}
+          </span>
+        </div>
+        <div className="overflow-visible md:overflow-x-auto">
+        <table className="block w-full text-sm md:table md:min-w-[720px] md:table-fixed">
+          <colgroup className="hidden md:table-column-group">
             <col className="w-[76px]" />
             <col className="w-[58px]" />
             <col className="w-[290px]" />
             <col className="w-[58px]" />
             <col className="w-[54px]" />
             <col className="w-[62px]" />
-            <col />
             <col className="w-[144px]" />
           </colgroup>
-          <thead className="bg-slate-100 text-slate-700">
+          <thead className="hidden bg-slate-100 text-slate-700 md:table-header-group">
             <tr>
               <th className="px-1.5 py-2 text-left font-bold">Date / Period</th>
               <th className="px-1.5 py-2 text-left font-bold">Check #</th>
@@ -1135,26 +1807,32 @@ export default function PaychecksTab() {
               <th className="px-1.5 py-2 text-right font-bold">Gross</th>
               <th className="px-1.5 py-2 text-right font-bold">Taxes</th>
               <th className="px-1.5 py-2 text-right font-bold">Net</th>
-              <th className="px-2 py-2 text-left font-bold">Notes</th>
               <th className="px-2.5 py-2 text-left font-bold">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="block divide-y divide-slate-200 md:table-row-group md:divide-y-0">
             {paychecks.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
+              <tr className="block md:table-row">
+                <td colSpan={7} className="block px-4 py-5 text-center text-sm text-slate-500 md:table-cell md:py-6">
                   No paychecks saved yet.
                 </td>
               </tr>
             ) : (
               paychecks.map((paycheck) => {
-                const hasRateWarning = isPaycheckRateWarning(paycheck);
                 const earningsRows = getPaycheckEarningsRows(paycheck);
+                const paycheckAttachment = getStoredPaycheckAttachment(paycheck);
+                const isDuplicateCheckNumber =
+                  Boolean(paycheck.checkNumber) &&
+                  duplicateCheckNumbers.has(String(paycheck.checkNumber).trim());
 
                 return (
-                  <tr key={paycheck.id} className="border-t border-slate-200 align-top">
-                    <td className="px-1.5 py-2 text-slate-900">
+                  <React.Fragment key={paycheck.id}>
+                  <tr className={`grid grid-cols-6 gap-2 p-3 align-top md:table-row md:border-t md:border-slate-200 md:p-0 ${
+                    editingId === paycheck.id ? "bg-blue-50/60" : "bg-white"
+                  }`}>
+                    <td className="col-span-4 block text-slate-900 md:table-cell md:px-1.5 md:py-2">
                       <div className="leading-tight">
+                        <div className="mb-0.5 text-[10px] font-black uppercase tracking-wide text-slate-500 md:hidden">Check Date</div>
                         <div className="font-black tabular-nums">{formatCompactDate(paycheck.checkDate)}</div>
                         {paycheck.payPeriodStart || paycheck.payPeriodEnd ? (
                           <div className="mt-0.5 whitespace-nowrap text-sm font-semibold text-slate-500">
@@ -1163,102 +1841,122 @@ export default function PaychecksTab() {
                         ) : null}
                       </div>
                     </td>
-                    <td className="px-1.5 py-2 text-slate-700 tabular-nums">{paycheck.checkNumber}</td>
-                    <td className="px-2 py-2">
-                      <div className="space-y-0.5">
-                        {earningsRows.map((line, index) => {
-                          const lineRate = money(line.rate);
-                          const isLowRateLine = hasRateWarning && lineRate !== null && lineRate < FUTURE_EXPECTED_CSC_RATE;
-
-                          return (
+                    <td className="col-span-2 block text-right text-slate-700 tabular-nums md:table-cell md:px-1.5 md:py-2 md:text-left">
+                      <div className="mb-0.5 text-[10px] font-black uppercase tracking-wide text-slate-500 md:hidden">Check #</div>
+                      <div>{paycheck.checkNumber || "—"}</div>
+                      {isDuplicateCheckNumber ? (
+                        <div className="mt-1 inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-black text-red-800">
+                          <AlertCircle className="h-3 w-3" />
+                          Duplicate
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="col-span-6 block md:table-cell md:px-2 md:py-2">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-500 md:hidden">Earnings</div>
+                      <div className="space-y-1 md:space-y-0.5">
+                        {earningsRows.map((line, index) => (
                             <div
                               key={`${paycheck.id}-earnings-${line.id || index}`}
-                              className={`grid grid-cols-[68px_72px_50px_66px] items-center gap-1 rounded px-1.5 py-1 text-sm leading-tight ${
-                                isLowRateLine ? "bg-amber-50 text-amber-900" : "bg-slate-50 text-slate-700"
-                              }`}
+                              className="grid grid-cols-[minmax(0,1fr)_72px_48px_66px] items-center gap-1 rounded bg-slate-50 px-1.5 py-1 text-xs leading-tight text-slate-700 sm:text-sm md:grid-cols-[68px_72px_50px_66px]"
                             >
-                              <span className={`truncate font-black ${isLowRateLine ? "text-amber-800" : "text-slate-950"}`}>
+                              <span className="truncate font-black text-slate-950">
                                 {line.type || "Earnings"}
+                                {line.dateWorked ? (
+                                  <span className="ml-1 font-semibold text-slate-500">
+                                    {line.dateWorked}
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="text-right font-bold">${line.rate || "0.00"}/hr</span>
                               <span className="text-right">{line.hours || "0.00"}h</span>
                               <span className="text-right font-bold">${line.amount || "0.00"}</span>
                             </div>
-                          );
-                        })}
+                        ))}
                       </div>
                     </td>
-                    <td className="px-1.5 py-2 text-right text-slate-700 tabular-nums">${paycheck.grossPay || "0.00"}</td>
-                    <td className="px-1.5 py-2 text-right text-slate-700 tabular-nums">${paycheck.taxes || "0.00"}</td>
-                    <td className="px-1.5 py-2 text-right font-bold text-green-700 tabular-nums">${paycheck.netPay || "0.00"}</td>
-                    <td className="px-2 py-2">
-                      <div className="space-y-1">
-                        {hasRateWarning ? (
-                          <div title={paycheck.payRateNote} className="inline-flex max-w-full items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-xs font-bold leading-tight text-amber-900">
-                            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">Rate warning</span>
-                          </div>
-                        ) : null}
-                        <textarea
-                          value={paycheck.notes || ""}
-                          onChange={(event) => updatePaycheckNotes(paycheck.id, event.target.value)}
-                          rows={earningsRows.length > 3 ? 3 : 2}
-                          placeholder="Add notes..."
-                          className="min-h-[42px] w-full resize-y rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm leading-snug text-slate-700 shadow-inner placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </div>
+                    <td className="col-span-2 block rounded-lg bg-blue-50 p-2 text-center text-slate-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-1.5 md:py-2 md:text-right">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-blue-700 md:hidden">Gross</div>
+                      <div className="font-bold md:font-normal">${paycheck.grossPay || "0.00"}</div>
                     </td>
-                    <td className="px-2.5 py-2.5">
-                      <div className="grid w-fit grid-cols-3 gap-2">
+                    <td className="col-span-2 block rounded-lg bg-amber-50 p-2 text-center text-slate-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-1.5 md:py-2 md:text-right">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-amber-700 md:hidden">Taxes</div>
+                      <div className="font-bold md:font-normal">${paycheck.taxes || "0.00"}</div>
+                    </td>
+                    <td className="col-span-2 block rounded-lg bg-emerald-50 p-2 text-center font-bold text-green-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-1.5 md:py-2 md:text-right">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-emerald-700 md:hidden">Net</div>
+                      <div>${paycheck.netPay || "0.00"}</div>
+                    </td>
+                    <td className="col-span-6 block md:table-cell md:px-2.5 md:py-2.5">
+                      <div className="grid w-full grid-cols-2 gap-1.5 sm:grid-cols-4 md:w-fit md:grid-cols-4 md:gap-2">
                         <button
                           type="button"
-                          onClick={() => editPaycheck(paycheck)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-blue-700 text-white hover:bg-blue-800"
-                          title="Edit paycheck"
-                          aria-label="Edit paycheck"
+                          onClick={() => editingId === paycheck.id ? resetForm() : editPaycheck(paycheck)}
+                          className={`inline-flex h-9 items-center justify-center rounded-md px-2 text-white md:w-9 md:px-0 ${
+                            editingId === paycheck.id
+                              ? "bg-slate-600 hover:bg-slate-700"
+                              : "bg-blue-700 hover:bg-blue-800"
+                          }`}
+                          title={editingId === paycheck.id ? "Cancel editing" : "Edit paycheck"}
+                          aria-label={editingId === paycheck.id ? "Cancel editing" : "Edit paycheck"}
                         >
-                          <Pencil className="h-4 w-4" />
+                          {editingId === paycheck.id ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                          <span className="ml-1 text-[11px] font-bold md:hidden">
+                            {editingId === paycheck.id ? "Cancel" : "Edit"}
+                          </span>
                         </button>
-                        {paycheck.attachment ? (
-                          <button
-                            type="button"
-                            onClick={() => window.open(getAttachmentViewUrl(paycheck.attachment), "_blank", "noopener,noreferrer")}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-900 text-white hover:bg-slate-800"
+                        {paycheckAttachment?.savedName ? (
+                          <a
+                            href={getDirectAttachmentUrl(paycheckAttachment, "view")}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-9 items-center justify-center rounded-md bg-slate-900 px-2 text-white hover:bg-slate-800 md:w-9 md:px-0"
                             title="View paycheck file"
                             aria-label="View paycheck file"
                           >
                             <Eye className="h-4 w-4" />
-                          </button>
+                            <span className="ml-1 text-[11px] font-bold md:hidden">View</span>
+                          </a>
                         ) : null}
-                        {paycheck.attachment ? (
+                        {paycheckAttachment?.savedName ? (
                           <button
                             type="button"
-                            onClick={() => downloadAttachment(paycheck.attachment)}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-700 text-white hover:bg-slate-800"
+                            onClick={() => downloadAttachment(paycheckAttachment)}
+                            className="inline-flex h-9 items-center justify-center rounded-md bg-slate-700 px-2 text-white hover:bg-slate-800 md:w-9 md:px-0"
                             title="Download paycheck file"
                             aria-label="Download paycheck file"
                           >
                             <Download className="h-4 w-4" />
+                            <span className="ml-1 text-[11px] font-bold md:hidden">Download</span>
                           </button>
                         ) : null}
                         <button
                           type="button"
                           onClick={() => removePaycheck(paycheck)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-red-700 text-white hover:bg-red-800"
+                          className="inline-flex h-9 items-center justify-center rounded-md bg-red-700 px-2 text-white hover:bg-red-800 md:w-9 md:px-0"
                           title="Delete paycheck"
                           aria-label="Delete paycheck"
                         >
                           <Trash2 className="h-4 w-4" />
+                          <span className="ml-1 text-[11px] font-bold md:hidden">Delete Check</span>
                         </button>
                       </div>
                     </td>
                   </tr>
+                  {editingId === paycheck.id ? (
+                    <tr className="block border-t border-blue-200 bg-blue-50/70 md:table-row">
+                      <td colSpan={7} className="block p-0 md:table-cell">
+                        {renderPaycheckEditor({ inline: true })}
+                      </td>
+                    </tr>
+                  ) : null}
+                  </React.Fragment>
                 );
               })
             )}
           </tbody>
         </table>
-      </div>
+        </div>
+      </section>
     </PageContainer>
   );
 }

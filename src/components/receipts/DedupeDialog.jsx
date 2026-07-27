@@ -1,5 +1,6 @@
 // C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\components\receipts\DedupeDialog.jsx
 import React from "react";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 
 function DiffCell({ a, b }) {
   const same = String(a ?? "") === String(b ?? "");
@@ -23,7 +24,7 @@ export default function DedupeDialog({ open, existing, incoming, similarity, onD
             <div style={{ fontSize:16, fontWeight:600 }}>Possible duplicate receipt detected</div>
             {similarity ? <div style={{ fontSize:12, color:"#6b7280", marginTop:2 }}>{similarity.reason} • similarity {Math.round((similarity.score || 0) * 100)}%</div> : null}
           </div>
-          <button className="bd-btn" onClick={()=>onClose?.()}>Close</button>
+          <CloseScreenButton onClick={() => onClose?.()} />
         </div>
         <div className="bd-modal-body">
           <table className="bd-table">

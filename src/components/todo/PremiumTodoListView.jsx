@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 
 const FIELD_ORDER = [
   "details",
@@ -220,7 +221,7 @@ const buildPrintableHtml = (tasks) => {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Hallstrom Premium To-Do List</title>
+  <title>To Do List</title>
   <style>
     body {
       margin: 0;
@@ -356,6 +357,98 @@ const buildPrintableHtml = (tasks) => {
       height: 8px;
     }
 
+    @media (max-width: 640px) {
+      body {
+        padding: 8px;
+      }
+
+      .page {
+        width: 100%;
+        max-width: none;
+        box-sizing: border-box;
+        padding: 12px;
+        border-radius: 14px;
+      }
+
+      .title {
+        padding-bottom: 10px;
+        margin-bottom: 12px;
+        border-bottom-width: 2px;
+      }
+
+      .title h1 {
+        font-size: 21px;
+        line-height: 1.15;
+      }
+
+      .title p {
+        margin-top: 5px;
+        font-size: 11px;
+        line-height: 1.3;
+      }
+
+      .type-section {
+        margin-top: 14px;
+      }
+
+      .type-heading {
+        padding: 7px 9px;
+        margin-bottom: 7px;
+        border-left-width: 5px;
+        border-radius: 9px;
+      }
+
+      .type-heading h2 {
+        font-size: 15px;
+      }
+
+      .type-heading span {
+        font-size: 11px;
+      }
+
+      .task-card {
+        padding: 9px 10px;
+        margin-bottom: 8px;
+        border-radius: 10px;
+      }
+
+      .task-title-row {
+        gap: 7px;
+        margin-bottom: 6px;
+      }
+
+      .checkbox {
+        font-size: 15px;
+      }
+
+      .task-title-row h3 {
+        font-size: 14px;
+        line-height: 1.25;
+      }
+
+      .field-row {
+        grid-template-columns: 78px minmax(0, 1fr);
+        gap: 7px;
+        padding: 4px 0;
+        font-size: 12px;
+      }
+
+      .field-value {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        line-height: 1.3;
+      }
+
+      .field-value ul,
+      .field-value ol {
+        margin-left: 16px;
+      }
+
+      .formatted-spacer {
+        height: 5px;
+      }
+    }
+
     @media print {
       body {
         background: #ffffff;
@@ -380,7 +473,7 @@ const buildPrintableHtml = (tasks) => {
 <body>
   <main class="page">
     <header class="title">
-      <h1>Hallstrom Premium To-Do List</h1>
+      <h1>To Do List</h1>
       <p>Structured life management list, generated ${formatDateForFile()}</p>
     </header>
     ${sections}
@@ -418,14 +511,14 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `Hallstrom_Premium_To-Do_List_${formatDateForFile()}.html`;
+    link.download = `To_Do_List_${formatDateForFile()}.html`;
     link.click();
 
     URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 px-4 py-6 print:static print:bg-white print:p-0">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 px-2 py-3 sm:px-4 sm:py-6 print:static print:bg-white print:p-0">
       <style>
         {`
           .formatted-task-text p {
@@ -450,6 +543,42 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
 
           .formatted-spacer {
             height: 8px;
+          }
+
+          @media (max-width: 640px) {
+            .premium-todo-toolbar {
+              margin-bottom: 8px;
+            }
+
+            .premium-todo-toolbar button {
+              min-height: 34px;
+              padding: 6px 10px;
+              border-radius: 9px;
+              font-size: 12px;
+            }
+
+            .premium-todo-print-root {
+              width: 100%;
+              box-sizing: border-box;
+            }
+
+            .premium-todo-field-value {
+              min-width: 0;
+              overflow-wrap: anywhere;
+            }
+
+            .formatted-task-text p {
+              margin-bottom: 3px;
+            }
+
+            .formatted-task-text ul,
+            .formatted-task-text ol {
+              margin-left: 16px;
+            }
+
+            .formatted-spacer {
+              height: 5px;
+            }
           }
 
           @media print {
@@ -483,13 +612,8 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
         `}
       </style>
 
-      <div className="premium-no-print mx-auto mb-4 flex max-w-[900px] items-center justify-between gap-3">
-        <button
-          onClick={onClose}
-          className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900 shadow-sm"
-        >
-          Close
-        </button>
+      <div className="premium-todo-toolbar premium-no-print mx-auto mb-4 flex max-w-[900px] items-center justify-between gap-2">
+        <CloseScreenButton onClick={onClose} />
 
         <div className="flex gap-2">
           <button
@@ -508,12 +632,12 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
         </div>
       </div>
 
-      <main className="premium-todo-print-root mx-auto max-w-[900px] rounded-[22px] border border-slate-200 bg-white p-9 font-serif text-slate-900 shadow-2xl print:max-w-none print:rounded-none print:border-0 print:p-0 print:shadow-none">
-        <header className="mb-6 border-b-[3px] border-slate-900 pb-4 text-center">
-          <h1 className="m-0 text-[32px] font-extrabold leading-tight">
-            Hallstrom Premium To-Do List
+      <main className="premium-todo-print-root mx-auto w-full max-w-[900px] rounded-xl border border-slate-200 bg-white p-3 font-serif text-slate-900 shadow-2xl sm:rounded-[22px] sm:p-9 print:max-w-none print:rounded-none print:border-0 print:p-0 print:shadow-none">
+        <header className="mb-3 border-b-2 border-slate-900 pb-2 text-center sm:mb-6 sm:border-b-[3px] sm:pb-4">
+          <h1 className="m-0 text-xl font-extrabold leading-tight sm:text-[32px]">
+            To Do List
           </h1>
-          <p className="mt-2 text-[15px] text-slate-600">
+          <p className="mt-1 text-[11px] leading-snug text-slate-600 sm:mt-2 sm:text-[15px]">
             Structured life management list, generated {formatDateForFile()}
           </p>
         </header>
@@ -527,29 +651,29 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
             const color = TYPE_COLORS[type] || TYPE_COLORS.General;
 
             return (
-              <section key={type} className="mt-7 break-inside-avoid">
+              <section key={type} className="mt-4 break-inside-avoid sm:mt-7">
                 <div
-                  className="mb-3 flex items-center justify-between rounded-xl bg-slate-100 px-4 py-3"
-                  style={{ borderLeft: `7px solid ${color}` }}
+                  className="mb-2 flex items-center justify-between rounded-lg border-l-[5px] bg-slate-100 px-3 py-2 sm:mb-3 sm:rounded-xl sm:border-l-[7px] sm:px-4 sm:py-3"
+                  style={{ borderLeftColor: color }}
                 >
-                  <h2 className="m-0 text-lg font-extrabold">{type}</h2>
-                  <span className="text-sm font-bold text-slate-500">
+                  <h2 className="m-0 text-[15px] font-extrabold sm:text-lg">{type}</h2>
+                  <span className="text-[11px] font-bold text-slate-500 sm:text-sm">
                     {items.length} item{items.length === 1 ? "" : "s"}
                   </span>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {items.map((task) => {
                     const fields = FIELD_ORDER.filter((field) => cleanDisplayValue(task[field]));
 
                     return (
                       <article
                         key={task.id || task.taskName}
-                        className="break-inside-avoid rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                        className="break-inside-avoid rounded-xl border border-slate-200 bg-white px-3 py-2.5 sm:rounded-2xl sm:px-4 sm:py-3"
                       >
-                        <div className="mb-3 flex items-start gap-3">
-                          <span className="text-lg leading-tight">☐</span>
-                          <h3 className="m-0 text-base font-extrabold leading-snug">
+                        <div className="mb-2 flex items-start gap-2 sm:mb-3 sm:gap-3">
+                          <span className="text-[15px] leading-tight sm:text-lg">☐</span>
+                          <h3 className="m-0 text-sm font-extrabold leading-snug sm:text-base">
                             {task.taskName || "Untitled task"}
                           </h3>
                         </div>
@@ -558,14 +682,14 @@ export default function PremiumTodoListView({ tasks = [], onClose }) {
                           {fields.map((field) => (
                             <div
                               key={field}
-                              className="grid grid-cols-[145px_1fr] gap-3 py-1 text-[13.5px]"
+                              className="grid grid-cols-[78px_minmax(0,1fr)] gap-2 py-1 text-xs sm:grid-cols-[145px_minmax(0,1fr)] sm:gap-3 sm:text-[13.5px]"
                             >
                               <div className="font-extrabold text-slate-700">
                                 {FIELD_LABELS[field] || field}
                               </div>
                               <FormattedText
                                 value={cleanDisplayValue(task[field])}
-                                className="formatted-task-text leading-snug text-slate-900"
+                                className="premium-todo-field-value formatted-task-text leading-snug text-slate-900"
                               />
                             </div>
                           ))}

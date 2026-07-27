@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { X } from "lucide-react";
 import { parseContactCandidatesFromText, parseContactText } from "../../utils/contactsStore";
+import { formatPhoneInput } from "../../utils/phone";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 
 const NativeTextarea = ({ value, onChange, minRows = 2, maxRows = 8, className = "" }) => (
   <textarea
@@ -628,14 +630,7 @@ export default function ContactManager({
             <h3 className="text-lg font-black text-slate-900">Manage Contacts</h3>
             <p className="text-sm font-semibold text-slate-600">Add, edit, delete, search, scan documents/images, and use saved contacts.</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            title="Close contacts"
-            className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <CloseScreenButton onClick={onClose} />
         </div>
 
         <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[390px_1fr]">
@@ -808,16 +803,20 @@ export default function ContactManager({
                 <label className="text-sm font-bold text-slate-800">
                   Direct Phone
                   <input
+                    type="tel"
+                    inputMode="tel"
                     value={contactForm.directPhone || ""}
-                    onChange={(event) => setContactForm((current) => ({ ...current, directPhone: event.target.value }))}
+                    onChange={(event) => setContactForm((current) => ({ ...current, directPhone: formatPhoneInput(event.target.value) }))}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
                 <label className="text-sm font-bold text-slate-800">
                   Mobile Phone
                   <input
+                    type="tel"
+                    inputMode="tel"
                     value={contactForm.cellPhone || ""}
-                    onChange={(event) => setContactForm((current) => ({ ...current, cellPhone: event.target.value }))}
+                    onChange={(event) => setContactForm((current) => ({ ...current, cellPhone: formatPhoneInput(event.target.value) }))}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
@@ -889,16 +888,20 @@ export default function ContactManager({
                         <label className="text-xs font-bold uppercase tracking-wide text-slate-600">
                           Phone
                           <input
+                            type="tel"
+                            inputMode="tel"
                             value={location.phone || ""}
-                            onChange={(event) => updateContactOfficeField(setContactForm, index, "phone", event.target.value)}
+                            onChange={(event) => updateContactOfficeField(setContactForm, index, "phone", formatPhoneInput(event.target.value))}
                             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
                           />
                         </label>
                         <label className="text-xs font-bold uppercase tracking-wide text-slate-600">
                           Fax
                           <input
+                            type="tel"
+                            inputMode="tel"
                             value={location.fax || ""}
-                            onChange={(event) => updateContactOfficeField(setContactForm, index, "fax", event.target.value)}
+                            onChange={(event) => updateContactOfficeField(setContactForm, index, "fax", formatPhoneInput(event.target.value))}
                             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900"
                           />
                         </label>

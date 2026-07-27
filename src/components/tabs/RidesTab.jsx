@@ -5,6 +5,8 @@ import {
   CalendarPlus,
   Car,
   Check,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Copy,
   Download,
@@ -12,6 +14,7 @@ import {
   FileUp,
   MapPin,
   Pencil,
+  Phone,
   Plus,
   Printer,
   Search,
@@ -22,7 +25,9 @@ import {
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
+import CloseScreenButton from '../common/CloseScreenButton.jsx';
 import { createGoogleCalendarEvent } from '../../utils/googleCalendarApi';
+import { formatPhoneInput, formatPhoneNumber } from '../../utils/phone';
 
 const RIDES_STORAGE_KEY = 'modivcareRides.v1';
 const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
@@ -594,8 +599,10 @@ const normalizeLeg = (leg = {}) => ({
   pickupWindow: String(leg.pickupWindow || '').trim(),
   pickupName: String(leg.pickupName || '').trim(),
   pickupAddress: String(leg.pickupAddress || '').trim(),
+  pickupPhone: formatPhoneNumber(String(leg.pickupPhone || '').trim()),
   dropoffName: String(leg.dropoffName || '').trim(),
   dropoffAddress: String(leg.dropoffAddress || '').trim(),
+  dropoffPhone: formatPhoneNumber(String(leg.dropoffPhone || '').trim()),
   status: String(leg.status || '').trim(),
   provider: String(leg.provider || '').trim(),
   notes: String(leg.notes || '').trim(),
@@ -778,8 +785,10 @@ const mergeScannedLeg = (existingLeg = {}, incomingLeg = {}) =>
     pickupWindow: mergeTextValue(existingLeg.pickupWindow, incomingLeg.pickupWindow),
     pickupName: mergeTextValue(existingLeg.pickupName, incomingLeg.pickupName),
     pickupAddress: mergeTextValue(existingLeg.pickupAddress, incomingLeg.pickupAddress),
+    pickupPhone: mergeTextValue(existingLeg.pickupPhone, incomingLeg.pickupPhone),
     dropoffName: mergeTextValue(existingLeg.dropoffName, incomingLeg.dropoffName, { replaceGenericDropoff: true }),
     dropoffAddress: mergeTextValue(existingLeg.dropoffAddress, incomingLeg.dropoffAddress),
+    dropoffPhone: mergeTextValue(existingLeg.dropoffPhone, incomingLeg.dropoffPhone),
     status: mergeTextValue(existingLeg.status, incomingLeg.status),
     provider: mergeTextValue(existingLeg.provider, incomingLeg.provider),
     notes: combineRideNotes(existingLeg.notes, incomingLeg.notes),
@@ -937,8 +946,10 @@ const formatRideForSearch = (ride = {}) =>
       leg.pickupWindow,
       leg.pickupName,
       leg.pickupAddress,
+      leg.pickupPhone,
       leg.dropoffName,
       leg.dropoffAddress,
+      leg.dropoffPhone,
       leg.status,
       leg.provider,
       leg.notes,
@@ -1077,7 +1088,9 @@ const buildRideGoogleCalendarEventPayload = (ride = {}) => {
           leg.pickupWindow ? `Pickup window: ${leg.pickupWindow}` : '',
           leg.appointmentTime ? `Appointment: ${leg.appointmentTime}` : '',
           leg.pickupName || leg.pickupAddress ? `From: ${[leg.pickupName, leg.pickupAddress].filter(Boolean).join(', ')}` : '',
+          leg.pickupPhone ? `Pickup phone: ${leg.pickupPhone}` : '',
           leg.dropoffName || leg.dropoffAddress ? `To: ${[leg.dropoffName, leg.dropoffAddress].filter(Boolean).join(', ')}` : '',
+          leg.dropoffPhone ? `Dropoff phone: ${leg.dropoffPhone}` : '',
           leg.provider ? `Provider: ${leg.provider}` : '',
           leg.notes ? `Notes: ${leg.notes}` : '',
         ]
@@ -1114,6 +1127,317 @@ const buildRideGoogleCalendarEventPayload = (ride = {}) => {
   return payload;
 };
 
+const getRideListFileDate = () => formatLocalIsoDate(new Date());
+
+const buildPrintableRidesHtml = (rides = []) => {
+  const sortedRides = sortRides(rides);
+  const rideSections = sortedRides
+    .map((ride) => {
+      const financials = getRideFinancials(ride);
+      const hasFinancials = financials.fare > 0 || financials.fees > 0 || financials.tip > 0 || financials.total > 0;
+      const legs = (ride.legs || [])
+        .map(
+          (leg) => `
+            <section class="leg-card">
+              <div class="leg-heading">
+                <h3>${escapeHtml(leg.leg || 'Leg')}</h3>
+                <span>${escapeHtml(leg.status || ride.status || 'Status unknown')}</span>
+              </div>
+              <div class="time-grid">
+                <div><strong>Pickup</strong><span>${escapeHtml(leg.pickupTime || 'N/A')}</span></div>
+                <div><strong>Pickup Window</strong><span>${escapeHtml(leg.pickupWindow || 'N/A')}</span></div>
+                <div><strong>Appointment / Dropoff</strong><span>${escapeHtml(leg.appointmentTime || 'N/A')}</span></div>
+              </div>
+              <div class="route-grid">
+                <div class="route-card pickup">
+                  <strong>Pick Up</strong>
+                  <span>${escapeHtml(leg.pickupName || 'Location not listed')}</span>
+                  ${leg.pickupAddress ? `<span>${escapeHtml(leg.pickupAddress)}</span>` : ''}
+                  ${leg.pickupPhone ? `<span>Phone: ${escapeHtml(leg.pickupPhone)}</span>` : ''}
+                </div>
+                <div class="route-card dropoff">
+                  <strong>Drop Off</strong>
+                  <span>${escapeHtml(leg.dropoffName || 'Location not listed')}</span>
+                  ${leg.dropoffAddress ? `<span>${escapeHtml(leg.dropoffAddress)}</span>` : ''}
+                  ${leg.dropoffPhone ? `<span>Phone: ${escapeHtml(leg.dropoffPhone)}</span>` : ''}
+                </div>
+              </div>
+              ${leg.provider ? `<p><strong>Leg Provider:</strong> ${escapeHtml(leg.provider)}</p>` : ''}
+              ${leg.confirmationNumber ? `<p><strong>Leg Confirmation #:</strong> ${escapeHtml(leg.confirmationNumber)}</p>` : ''}
+              ${leg.notes ? `<p class="notes"><strong>Leg Notes:</strong> ${escapeHtml(leg.notes)}</p>` : ''}
+            </section>
+          `
+        )
+        .join('');
+
+      return `
+        <article class="ride-card">
+          <div class="ride-heading">
+            <div>
+              <h2>${escapeHtml(formatDateForDisplay(ride.rideDate))}</h2>
+              <p>${escapeHtml(ride.provider || 'Provider not listed')}</p>
+            </div>
+            <span class="status">${escapeHtml(ride.status || 'Status unknown')}</span>
+          </div>
+          <div class="ride-meta">
+            <div><strong>Confirmation #</strong><span>${escapeHtml(ride.confirmationNumber || 'N/A')}</span></div>
+            <div><strong>Rider</strong><span>${escapeHtml(ride.riderName || 'David Hallstrom')}</span></div>
+            <div><strong>Legs</strong><span>${ride.legs?.length || 0}</span></div>
+          </div>
+          ${
+            hasFinancials
+              ? `
+                <div class="financial-grid">
+                  <div><strong>Fare</strong><span>${escapeHtml(formatRideCurrency(financials.fare))}</span></div>
+                  <div><strong>Fees</strong><span>${escapeHtml(formatRideCurrency(financials.fees))}</span></div>
+                  <div><strong>Tip</strong><span>${escapeHtml(formatRideCurrency(financials.tip))}</span></div>
+                  <div><strong>Total</strong><span>${escapeHtml(formatRideCurrency(financials.total))}</span></div>
+                </div>
+              `
+              : ''
+          }
+          <div class="legs">${legs || '<p>No ride legs listed.</p>'}</div>
+          ${ride.notes ? `<p class="ride-notes"><strong>Ride Notes:</strong> ${escapeHtml(ride.notes)}</p>` : ''}
+        </article>
+      `;
+    })
+    .join('');
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Hallstrom Rides List</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; font-family: Cambria, Georgia, serif; color: #0f172a; background: #f8fafc; }
+    .page { max-width: 900px; margin: 0 auto; background: #fff; padding: 36px; border: 1px solid #dbe4f0; border-radius: 22px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }
+    .title { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 3px solid #0f172a; text-align: center; }
+    .title h1 { margin: 0; font-size: 32px; font-weight: 800; }
+    .title p { margin: 8px 0 0; color: #475569; font-size: 15px; }
+    .ride-card { margin-bottom: 18px; padding: 16px; border: 1px solid #dbe4f0; border-radius: 16px; break-inside: avoid; }
+    .ride-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #e2e8f0; }
+    .ride-heading h2 { margin: 0; font-size: 20px; }
+    .ride-heading p { margin: 4px 0 0; color: #475569; font-weight: 700; }
+    .status { padding: 5px 10px; border-radius: 999px; background: #dbeafe; color: #1e3a8a; font-size: 12px; font-weight: 800; white-space: nowrap; }
+    .ride-meta, .financial-grid, .time-grid { display: grid; gap: 10px; }
+    .ride-meta { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }
+    .financial-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 12px; padding: 10px; border-radius: 12px; background: #f1f5f9; }
+    .time-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 10px 0; }
+    .ride-meta div, .financial-grid div, .time-grid div { min-width: 0; }
+    .ride-meta strong, .financial-grid strong, .time-grid strong { display: block; margin-bottom: 3px; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .ride-meta span, .financial-grid span, .time-grid span { display: block; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+    .leg-card { margin-top: 12px; padding: 12px; border-left: 5px solid #2563eb; border-radius: 0 12px 12px 0; background: #f8fafc; break-inside: avoid; }
+    .leg-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .leg-heading h3 { margin: 0; font-size: 16px; }
+    .leg-heading span { color: #475569; font-size: 12px; font-weight: 800; }
+    .route-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .route-card { min-width: 0; padding: 10px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; }
+    .route-card strong, .route-card span { display: block; }
+    .route-card strong { margin-bottom: 5px; font-size: 13px; }
+    .route-card span { margin-top: 3px; font-size: 12.5px; line-height: 1.35; overflow-wrap: anywhere; }
+    .pickup { border-top: 4px solid #16a34a; }
+    .dropoff { border-top: 4px solid #dc2626; }
+    .leg-card p, .ride-notes { margin: 8px 0 0; font-size: 12.5px; line-height: 1.4; white-space: pre-wrap; }
+    .ride-notes { padding: 10px; border-radius: 10px; background: #fff7ed; }
+    .empty { padding: 32px; border: 1px dashed #cbd5e1; border-radius: 14px; color: #64748b; text-align: center; }
+    @media print {
+      body { padding: 0; background: #fff; }
+      .page { max-width: none; padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+      @page { size: Letter; margin: 0.5in; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="title">
+      <h1>Hallstrom Rides List</h1>
+      <p>${sortedRides.length} ride${sortedRides.length === 1 ? '' : 's'}, generated ${getRideListFileDate()}</p>
+    </header>
+    ${rideSections || '<div class="empty">No rides available.</div>'}
+  </main>
+</body>
+</html>`;
+};
+
+const PremiumRidesListView = ({ rides = [], onClose }) => {
+  const sortedRides = useMemo(() => sortRides(rides), [rides]);
+
+  const handlePrint = () => window.print();
+
+  const handleDownload = () => {
+    downloadTextFile(
+      `Hallstrom_Rides_List_${getRideListFileDate()}.html`,
+      buildPrintableRidesHtml(sortedRides),
+      'text/html;charset=utf-8'
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[10000] overflow-y-auto bg-slate-950/70 px-2 py-4 sm:px-4 sm:py-6 print:static print:bg-white print:p-0">
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+
+          .premium-rides-print-root,
+          .premium-rides-print-root * {
+            visibility: visible !important;
+          }
+
+          .premium-rides-print-root {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+          }
+
+          .premium-rides-no-print {
+            display: none !important;
+          }
+
+          @page {
+            size: Letter;
+            margin: 0.5in;
+          }
+        }
+      `}</style>
+
+      <div className="premium-rides-no-print mx-auto mb-4 flex max-w-[900px] items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900 shadow-sm hover:bg-slate-100"
+        >
+          Close
+        </button>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-slate-800"
+          >
+            <Printer className="h-4 w-4" />
+            Print
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-sky-700"
+          >
+            <Download className="h-4 w-4" />
+            Download
+          </button>
+        </div>
+      </div>
+
+      <main className="premium-rides-print-root mx-auto max-w-[900px] rounded-[22px] border border-slate-200 bg-white p-4 font-serif text-slate-900 shadow-2xl sm:p-9 print:max-w-none print:rounded-none print:border-0 print:p-0 print:shadow-none">
+        <header className="mb-6 border-b-[3px] border-slate-900 pb-4 text-center">
+          <h1 className="m-0 text-[28px] font-extrabold leading-tight sm:text-[32px]">Hallstrom Rides List</h1>
+          <p className="mt-2 text-[15px] text-slate-600">
+            {sortedRides.length} ride{sortedRides.length === 1 ? '' : 's'}, generated {getRideListFileDate()}
+          </p>
+        </header>
+
+        {sortedRides.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center text-slate-600">
+            No rides available.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {sortedRides.map((ride) => {
+              const financials = getRideFinancials(ride);
+              const hasFinancials =
+                financials.fare > 0 || financials.fees > 0 || financials.tip > 0 || financials.total > 0;
+
+              return (
+                <article key={ride.id} className="break-inside-avoid rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-3">
+                    <div>
+                      <h2 className="m-0 text-xl font-extrabold">{formatDateForDisplay(ride.rideDate)}</h2>
+                      <p className="mt-1 font-bold text-slate-600">{ride.provider || 'Provider not listed'}</p>
+                    </div>
+                    <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-extrabold text-blue-900">
+                      {ride.status || 'Status unknown'}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 text-[13px] sm:grid-cols-3">
+                    <div><span className="block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Confirmation #</span><strong>{ride.confirmationNumber || 'N/A'}</strong></div>
+                    <div><span className="block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Rider</span><strong>{ride.riderName || 'David Hallstrom'}</strong></div>
+                    <div><span className="block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Legs</span><strong>{ride.legs?.length || 0}</strong></div>
+                  </div>
+
+                  {hasFinancials && (
+                    <div className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-3 text-[13px] sm:grid-cols-4">
+                      <div><span className="block text-[11px] font-extrabold uppercase text-slate-500">Fare</span><strong>{formatRideCurrency(financials.fare)}</strong></div>
+                      <div><span className="block text-[11px] font-extrabold uppercase text-slate-500">Fees</span><strong>{formatRideCurrency(financials.fees)}</strong></div>
+                      <div><span className="block text-[11px] font-extrabold uppercase text-slate-500">Tip</span><strong>{formatRideCurrency(financials.tip)}</strong></div>
+                      <div><span className="block text-[11px] font-extrabold uppercase text-slate-500">Total</span><strong>{formatRideCurrency(financials.total)}</strong></div>
+                    </div>
+                  )}
+
+                  <div className="mt-3 space-y-3">
+                    {(ride.legs || []).length === 0 ? (
+                      <p className="text-sm text-slate-500">No ride legs listed.</p>
+                    ) : (
+                      ride.legs.map((leg) => (
+                        <section key={leg.id} className="break-inside-avoid rounded-r-xl border-l-[5px] border-blue-600 bg-slate-50 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="m-0 text-base font-extrabold">{leg.leg || 'Leg'}</h3>
+                            <span className="text-xs font-extrabold text-slate-600">{leg.status || ride.status || 'Status unknown'}</span>
+                          </div>
+
+                          <div className="mt-2 grid gap-2 text-[13px] sm:grid-cols-3">
+                            <div><span className="block text-[11px] font-extrabold uppercase text-slate-500">Pickup</span><strong>{leg.pickupTime || 'N/A'}</strong></div>
+                            <div><span className="block text-[11px] font-extrabold uppercase text-slate-500">Pickup Window</span><strong>{leg.pickupWindow || 'N/A'}</strong></div>
+                            <div><span className="block text-[11px] font-extrabold uppercase text-slate-500">Appointment / Dropoff</span><strong>{leg.appointmentTime || 'N/A'}</strong></div>
+                          </div>
+
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            <div className="rounded-xl border border-slate-200 border-t-4 border-t-green-600 bg-white p-3 text-[13px]">
+                              <strong className="block">Pick Up</strong>
+                              <span className="mt-1 block font-bold">{leg.pickupName || 'Location not listed'}</span>
+                              {leg.pickupAddress && <span className="mt-1 block text-slate-700">{leg.pickupAddress}</span>}
+                              {leg.pickupPhone && <span className="mt-1 block text-slate-700">Phone: {leg.pickupPhone}</span>}
+                            </div>
+                            <div className="rounded-xl border border-slate-200 border-t-4 border-t-red-600 bg-white p-3 text-[13px]">
+                              <strong className="block">Drop Off</strong>
+                              <span className="mt-1 block font-bold">{leg.dropoffName || 'Location not listed'}</span>
+                              {leg.dropoffAddress && <span className="mt-1 block text-slate-700">{leg.dropoffAddress}</span>}
+                              {leg.dropoffPhone && <span className="mt-1 block text-slate-700">Phone: {leg.dropoffPhone}</span>}
+                            </div>
+                          </div>
+
+                          {leg.provider && <p className="mt-2 text-[13px]"><strong>Leg Provider:</strong> {leg.provider}</p>}
+                          {leg.confirmationNumber && <p className="mt-1 text-[13px]"><strong>Leg Confirmation #:</strong> {leg.confirmationNumber}</p>}
+                          {leg.notes && <p className="mt-2 whitespace-pre-wrap text-[13px]"><strong>Leg Notes:</strong> {leg.notes}</p>}
+                        </section>
+                      ))
+                    )}
+                  </div>
+
+                  {ride.notes && (
+                    <p className="mt-3 whitespace-pre-wrap rounded-xl bg-orange-50 p-3 text-[13px]">
+                      <strong>Ride Notes:</strong> {ride.notes}
+                    </p>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+};
+
 const RidesTab = ({ searchQuery = '' }) => {
   const [rides, setRides] = useState(readStoredRides);
   const [archivedRides, setArchivedRides] = useState(readArchivedRides);
@@ -1125,6 +1449,9 @@ const RidesTab = ({ searchQuery = '' }) => {
   const [calendarAddingRideId, setCalendarAddingRideId] = useState('');
   const [calendarAddedIds, setCalendarAddedIds] = useState(readRideGoogleCalendarAddedIds);
   const [reportRange, setReportRange] = useState(getDefaultRideReportRange);
+  const [isRideImportOpen, setIsRideImportOpen] = useState(false);
+  const [isRideReportOpen, setIsRideReportOpen] = useState(false);
+  const [showPremiumRidesView, setShowPremiumRidesView] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -1530,8 +1857,10 @@ const RidesTab = ({ searchQuery = '' }) => {
           appointmentTime: '',
           pickupName: '',
           pickupAddress: '',
+          pickupPhone: '',
           dropoffName: '',
           dropoffAddress: '',
+          dropoffPhone: '',
           status: 'Confirmed',
           provider: 'LYFT Healthcare Inc',
         },
@@ -1759,84 +2088,7 @@ const RidesTab = ({ searchQuery = '' }) => {
     printWindow.document.close();
   };
 
-  const printRides = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      setStatusMessage('Popup blocked. Allow popups to print rides.');
-      return;
-    }
-
-    const rideSections = filteredRides
-      .map(
-        (ride) => `
-          <section class="ride">
-            <div class="ride-header">
-              <div>
-                <h2>${escapeHtml(formatDateForDisplay(ride.rideDate))}</h2>
-                <p>Confirmation #${escapeHtml(ride.confirmationNumber || 'N/A')} | ${escapeHtml(ride.status || 'Status unknown')} | ${escapeHtml(ride.provider || 'Provider not listed')}</p>
-                <p>Fare: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).fare))} | Fees: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).fees))} | Tip: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).tip))} | Total: ${escapeHtml(formatRideCurrency(getRideFinancials(ride).total))}</p>
-              </div>
-              <div class="rider">${escapeHtml(ride.riderName || '')}</div>
-            </div>
-            ${ride.legs
-              .map(
-                (leg) => `
-                  <div class="leg">
-                    <h3>${escapeHtml(leg.leg)}</h3>
-                    <div class="grid">
-                      <div><strong>Pickup:</strong> ${escapeHtml(leg.pickupTime || 'N/A')}</div>
-                      <div><strong>Window:</strong> ${escapeHtml(leg.pickupWindow || 'N/A')}</div>
-                      <div><strong>Appointment:</strong> ${escapeHtml(leg.appointmentTime || 'N/A')}</div>
-                      <div><strong>Status:</strong> ${escapeHtml(leg.status || ride.status || 'N/A')}</div>
-                    </div>
-                    <p><strong>From:</strong> ${escapeHtml(leg.pickupName || 'N/A')}${leg.pickupAddress ? `, ${escapeHtml(leg.pickupAddress)}` : ''}</p>
-                    <p><strong>To:</strong> ${escapeHtml(leg.dropoffName || 'N/A')}${leg.dropoffAddress ? `, ${escapeHtml(leg.dropoffAddress)}` : ''}</p>
-                    ${leg.notes ? `<p><strong>Notes:</strong> ${escapeHtml(leg.notes)}</p>` : ''}
-                  </div>
-                `
-              )
-              .join('')}
-            ${ride.notes ? `<p class="notes"><strong>Ride Notes:</strong> ${escapeHtml(ride.notes)}</p>` : ''}
-          </section>
-        `
-      )
-      .join('');
-
-    printWindow.document.write(`
-      <!doctype html>
-      <html>
-      <head>
-        <title>Rides</title>
-        <style>
-          body { font-family: Arial, sans-serif; color: #0f172a; margin: 24px; }
-          h1 { margin: 0 0 4px; font-size: 24px; }
-          h2 { margin: 0; font-size: 18px; }
-          h3 { margin: 0 0 8px; font-size: 15px; }
-          .meta { color: #475569; margin-bottom: 20px; }
-          .ride { border: 1px solid #cbd5e1; border-radius: 10px; padding: 16px; margin-bottom: 16px; break-inside: avoid; }
-          .ride-header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 12px; }
-          .ride-header p { margin: 4px 0 0; color: #475569; }
-          .rider { font-weight: 700; white-space: nowrap; }
-          .leg { border-left: 4px solid #2563eb; padding: 10px 0 10px 12px; margin-top: 10px; }
-          .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin-bottom: 8px; }
-          p { margin: 5px 0; line-height: 1.35; }
-          .notes { margin-top: 12px; color: #334155; }
-          @media print {
-            body { margin: 14mm; }
-            button { display: none; }
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Rides</h1>
-        <div class="meta">Printed ${escapeHtml(new Date().toLocaleDateString())} | ${filteredRides.length} ride${filteredRides.length === 1 ? '' : 's'}</div>
-        ${rideSections || '<p>No rides to print.</p>'}
-        <script>window.onload = () => window.print();</script>
-      </body>
-      </html>
-    `);
-    printWindow.document.close();
-  };
+  const printRides = () => setShowPremiumRidesView(true);
 
   useEffect(() => {
     const handlers = {
@@ -1853,7 +2105,63 @@ const RidesTab = ({ searchQuery = '' }) => {
   });
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-sky-50" className="flex flex-col gap-6 bg-sky-50 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-sky-100/70" className="rides-mobile-page flex flex-col gap-1.5 bg-sky-100/70 py-1.5 sm:gap-3 sm:bg-sky-50 sm:py-3">
+      <style>{`
+        .rides-summary-title-mobile {
+          display: none;
+        }
+
+        @media (max-width: 639px) {
+          .rides-mobile-page {
+            font-size: 0.875rem;
+          }
+
+          .rides-summary-grid {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.375rem;
+          }
+
+          .rides-summary-card {
+            min-width: 0;
+            padding: 0.3125rem 0.125rem;
+            border-radius: 0.625rem;
+            text-align: center;
+            box-shadow: none;
+          }
+
+          .rides-summary-title-desktop {
+            display: none;
+          }
+
+          .rides-summary-title-mobile {
+            display: inline;
+          }
+
+          .rides-summary-title {
+            overflow: hidden;
+            font-size: 0.625rem;
+            line-height: 0.75rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .rides-summary-count {
+            margin-top: 0;
+            font-size: 1rem;
+            line-height: 1.125rem;
+          }
+
+          .rides-mobile-page input,
+          .rides-mobile-page select,
+          .rides-mobile-page textarea {
+            font-size: 16px;
+          }
+
+          .rides-mobile-page textarea {
+            line-height: 1.35;
+          }
+        }
+      `}</style>
       <input ref={fileInputRef} type="file" accept=".json" onChange={importRides} className="hidden" />
 
       <TabPageHeader
@@ -1862,163 +2170,207 @@ const RidesTab = ({ searchQuery = '' }) => {
         subtitle="Scan Modivcare and Lyft confirmations or Uber receipts, then manage ride details and calendar status."
         theme="sky"
         message={statusMessage}
+        className="budget-mobile-header"
         actions={
-          <>
-            <button type="button" onClick={addBlankRide} className={`${TAB_HEADER_ACTION_CLASS} bg-slate-950 text-white hover:bg-slate-800`}>
+          <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:gap-2">
+            <button type="button" onClick={addBlankRide} className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-slate-950 text-white hover:bg-slate-800`}>
               <Plus className="h-4 w-4" />
-              Add Ride
+              <span className="sm:hidden">Add</span>
+              <span className="hidden sm:inline">Add Ride</span>
             </button>
-            <button type="button" onClick={printRides} className={`${TAB_HEADER_ACTION_CLASS} bg-blue-600 text-white hover:bg-blue-500`}>
+            <button type="button" onClick={printRides} className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-blue-600 text-white hover:bg-blue-500`}>
               <Printer className="h-4 w-4" />
-              Print Rides
+              <span className="sm:hidden">Print</span>
+              <span className="hidden sm:inline">Print Rides</span>
             </button>
-            <button type="button" onClick={() => setIsArchiveOpen(true)} className={`${TAB_HEADER_ACTION_CLASS} bg-violet-600 text-white hover:bg-violet-500`}>
+            <button type="button" onClick={() => setIsArchiveOpen(true)} className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-violet-600 text-white hover:bg-violet-500`}>
               <Archive className="h-4 w-4" />
-              Archive ({summary.archivedCount})
+              <span className="sm:hidden">Archive {summary.archivedCount}</span>
+              <span className="hidden sm:inline">Archive ({summary.archivedCount})</span>
             </button>
-            <button type="button" onClick={exportRides} className={`${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}>
+            <button type="button" onClick={exportRides} className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm border border-white/30 bg-white/15 text-white hover:bg-white/25`}>
               <Download className="h-4 w-4" />
               Export
             </button>
-            <button type="button" onClick={() => fileInputRef.current?.click()} className={`${TAB_HEADER_ACTION_CLASS} bg-white text-sky-900 hover:bg-sky-50`}>
+            <button type="button" onClick={() => fileInputRef.current?.click()} className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-white text-sky-900 hover:bg-sky-50`}>
               <FileUp className="h-4 w-4" />
               Import
             </button>
-          </>
+          </div>
         }
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" aria-label="Ride summary">
-        <div className="rounded-2xl border border-sky-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-sky-700">Rides</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">{summary.rideCount}</p>
+      <section className="rides-summary-grid grid gap-2 sm:grid-cols-2 lg:grid-cols-5" aria-label="Ride summary">
+        <div className="rides-summary-card rounded-2xl border border-sky-200 bg-white p-4 shadow-sm">
+          <p className="rides-summary-title text-xs font-black uppercase tracking-wide text-sky-700">
+            <span className="rides-summary-title-desktop">Rides</span>
+            <span className="rides-summary-title-mobile">Rides</span>
+          </p>
+          <p className="rides-summary-count mt-1 text-3xl font-black text-slate-950">{summary.rideCount}</p>
         </div>
-        <div className="rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-cyan-700">Legs</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">{summary.legCount}</p>
+        <div className="rides-summary-card rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
+          <p className="rides-summary-title text-xs font-black uppercase tracking-wide text-cyan-700">
+            <span className="rides-summary-title-desktop">Legs</span>
+            <span className="rides-summary-title-mobile">Legs</span>
+          </p>
+          <p className="rides-summary-count mt-1 text-3xl font-black text-slate-950">{summary.legCount}</p>
         </div>
-        <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Confirmed</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">{summary.confirmedCount}</p>
+        <div className="rides-summary-card rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
+          <p className="rides-summary-title text-xs font-black uppercase tracking-wide text-emerald-700">
+            <span className="rides-summary-title-desktop">Confirmed</span>
+            <span className="rides-summary-title-mobile">Set</span>
+          </p>
+          <p className="rides-summary-count mt-1 text-3xl font-black text-slate-950">{summary.confirmedCount}</p>
         </div>
-        <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-amber-700">Request Pickup</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">{summary.requestPickupCount}</p>
+        <div className="rides-summary-card rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+          <p className="rides-summary-title text-xs font-black uppercase tracking-wide text-amber-700">
+            <span className="rides-summary-title-desktop">Request Pickup</span>
+            <span className="rides-summary-title-mobile">Pickup</span>
+          </p>
+          <p className="rides-summary-count mt-1 text-3xl font-black text-slate-950">{summary.requestPickupCount}</p>
         </div>
-        <div className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-wide text-violet-700">Archived</p>
-          <p className="mt-1 text-3xl font-black text-slate-950">{summary.archivedCount}</p>
-        </div>
-      </section>
-
-      <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5 text-blue-700" />
-          <h2 className="text-lg font-black text-slate-900">Import Ride Email or Uber Activity</h2>
-        </div>
-        <textarea
-          value={scanText}
-          onChange={(event) => setScanText(event.target.value)}
-          rows={8}
-          className="mt-4 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          placeholder={"Paste a Modivcare/Lyft confirmation, Uber receipt, or Uber Activity history list here.\n\nExample:\nPincay Dr & Kareem Ct\nJul 3 • 12:55 PM\n$13.74\nHelp"}
-        />
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" onClick={addRideFromScan} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700">
-            Import Ride Text
-          </button>
-          <button type="button" onClick={() => setScanText('')} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
-            Clear
-          </button>
+        <div className="rides-summary-card rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
+          <p className="rides-summary-title text-xs font-black uppercase tracking-wide text-violet-700">
+            <span className="rides-summary-title-desktop">Archived</span>
+            <span className="rides-summary-title-mobile">Past</span>
+          </p>
+          <p className="rides-summary-count mt-1 text-3xl font-black text-slate-950">{summary.archivedCount}</p>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-white to-sky-50 p-5 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-sky-700" />
-              <h2 className="text-lg font-black text-slate-900">Ride Fare and Tip Report</h2>
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
+        <button
+          type="button"
+          onClick={() => setIsRideImportOpen((current) => !current)}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-slate-50 sm:gap-3 sm:px-5 sm:py-3"
+          aria-expanded={isRideImportOpen}
+          aria-controls="ride-import-section"
+        >
+          <span className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 shrink-0 text-blue-700" />
+            <span className="text-base font-black leading-tight text-slate-900 sm:text-lg">Import Ride Email or Uber Activity</span>
+          </span>
+          {isRideImportOpen ? <ChevronDown className="h-5 w-5 shrink-0 text-slate-600" /> : <ChevronRight className="h-5 w-5 shrink-0 text-slate-600" />}
+        </button>
+
+        {isRideImportOpen && (
+          <div id="ride-import-section" className="border-t border-slate-200 p-3 sm:p-5">
+            <textarea
+              value={scanText}
+              onChange={(event) => setScanText(event.target.value)}
+              rows={6}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              placeholder={"Paste a Modivcare/Lyft confirmation, Uber receipt, or Uber Activity history list here.\n\nExample:\nPincay Dr & Kareem Ct\nJul 3 • 12:55 PM\n$13.74\nHelp"}
+            />
+            <div className="mt-2 flex flex-wrap gap-2 sm:mt-3">
+              <button type="button" onClick={addRideFromScan} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700 sm:px-4 sm:py-2 sm:text-sm">
+                Import Ride Text
+              </button>
+              <button type="button" onClick={() => setScanText('')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 sm:px-4 sm:py-2 sm:text-sm">
+                Clear
+              </button>
             </div>
-            <p className="mt-1 text-sm text-slate-600">
-              Includes active and archived rides. Choose a weekly, monthly, all-time, or custom date range.
-            </p>
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => applyRideReportPreset('week')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
-              This Week
-            </button>
-            <button type="button" onClick={() => applyRideReportPreset('month')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
-              This Month
-            </button>
-            <button type="button" onClick={() => applyRideReportPreset('last30')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
-              Last 30 Days
-            </button>
-            <button type="button" onClick={() => applyRideReportPreset('all')} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-black text-sky-800 hover:bg-sky-100">
-              All Rides
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
-          <label className="text-sm font-bold text-slate-700">
-            Start Date
-            <input
-              type="date"
-              value={reportRange.start}
-              onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
-              className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
-            />
-          </label>
-          <label className="text-sm font-bold text-slate-700">
-            End Date
-            <input
-              type="date"
-              value={reportRange.end}
-              onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
-              className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
-            />
-          </label>
-          <button type="button" onClick={printRideExpenseReport} className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 text-sm font-black text-white hover:bg-blue-800">
-            <Printer className="h-4 w-4" />
-            Print Report
-          </button>
-          <button type="button" onClick={exportRideExpenseReport} className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 text-sm font-black text-white hover:bg-emerald-800">
-            <Download className="h-4 w-4" />
-            Export CSV
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Rides</p>
-            <p className="mt-1 text-2xl font-black text-slate-950">{reportSummary.rideCount}</p>
-          </div>
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-            <p className="text-xs font-black uppercase tracking-wide text-blue-700">Fares</p>
-            <p className="mt-1 text-2xl font-black text-blue-950">{formatRideCurrency(reportSummary.fare)}</p>
-          </div>
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <p className="text-xs font-black uppercase tracking-wide text-amber-700">Fees</p>
-            <p className="mt-1 text-2xl font-black text-amber-950">{formatRideCurrency(reportSummary.fees)}</p>
-          </div>
-          <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
-            <p className="text-xs font-black uppercase tracking-wide text-violet-700">Tips</p>
-            <p className="mt-1 text-2xl font-black text-violet-950">{formatRideCurrency(reportSummary.tip)}</p>
-          </div>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-            <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Total</p>
-            <p className="mt-1 text-2xl font-black text-emerald-950">{formatRideCurrency(reportSummary.total)}</p>
-          </div>
-        </div>
+        )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <section className="overflow-hidden rounded-xl border border-sky-200 bg-gradient-to-br from-white to-sky-50 shadow-sm sm:rounded-2xl">
+        <button
+          type="button"
+          onClick={() => setIsRideReportOpen((current) => !current)}
+          className="flex w-full items-start justify-between gap-2 px-3 py-2.5 text-left hover:bg-sky-50 sm:gap-3 sm:px-5 sm:py-3"
+          aria-expanded={isRideReportOpen}
+          aria-controls="ride-fare-report-section"
+        >
+          <span>
+            <span className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-sky-700" />
+              <span className="text-base font-black leading-tight text-slate-900 sm:text-lg">Ride Fare and Tip Report</span>
+            </span>
+            <span className="mt-0.5 block text-xs leading-4 text-slate-600 sm:mt-1 sm:text-sm">
+              Includes active and archived rides. Choose a weekly, monthly, all-time, or custom date range.
+            </span>
+          </span>
+          {isRideReportOpen ? <ChevronDown className="mt-0.5 h-5 w-5 shrink-0 text-slate-600" /> : <ChevronRight className="mt-0.5 h-5 w-5 shrink-0 text-slate-600" />}
+        </button>
+
+        {isRideReportOpen && (
+          <div id="ride-fare-report-section" className="border-t border-sky-200 p-3 sm:p-5">
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
+              <button type="button" onClick={() => applyRideReportPreset('week')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                This Week
+              </button>
+              <button type="button" onClick={() => applyRideReportPreset('month')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                This Month
+              </button>
+              <button type="button" onClick={() => applyRideReportPreset('last30')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                Last 30 Days
+              </button>
+              <button type="button" onClick={() => applyRideReportPreset('all')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                All Rides
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-2 xl:mt-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+              <label className="text-sm font-bold text-slate-700">
+                Start Date
+                <input
+                  type="date"
+                  value={reportRange.start}
+                  onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                />
+              </label>
+              <label className="text-sm font-bold text-slate-700">
+                End Date
+                <input
+                  type="date"
+                  value={reportRange.end}
+                  onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                />
+              </label>
+              <button type="button" onClick={printRideExpenseReport} className="mt-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-blue-700 px-2 text-xs font-black text-white hover:bg-blue-800 sm:h-10 sm:gap-2 sm:px-4 sm:text-sm">
+                <Printer className="h-4 w-4" />
+                Print Report
+              </button>
+              <button type="button" onClick={exportRideExpenseReport} className="mt-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-2 text-xs font-black text-white hover:bg-emerald-800 sm:h-10 sm:gap-2 sm:px-4 sm:text-sm">
+                <Download className="h-4 w-4" />
+                Export CSV
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-3 xl:grid-cols-5">
+              <div className="col-span-2 rounded-xl border border-slate-200 bg-white p-2 sm:col-span-1 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-xs">Rides</p>
+                <p className="mt-1 text-lg font-black text-slate-950 sm:text-2xl">{reportSummary.rideCount}</p>
+              </div>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-blue-700 sm:text-xs">Fares</p>
+                <p className="mt-1 text-lg font-black text-blue-950 sm:text-2xl">{formatRideCurrency(reportSummary.fare)}</p>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-amber-700 sm:text-xs">Fees</p>
+                <p className="mt-1 text-lg font-black text-amber-950 sm:text-2xl">{formatRideCurrency(reportSummary.fees)}</p>
+              </div>
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-violet-700 sm:text-xs">Tips</p>
+                <p className="mt-1 text-lg font-black text-violet-950 sm:text-2xl">{formatRideCurrency(reportSummary.tip)}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:text-xs">Total</p>
+                <p className="mt-1 text-lg font-black text-emerald-950 sm:text-2xl">{formatRideCurrency(reportSummary.total)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
+        <div className="flex flex-row items-center justify-between gap-2 border-b border-slate-200 p-2.5 sm:p-4">
           <div>
-            <h2 className="text-lg font-black text-slate-900">Ride List</h2>
-            <p className="text-sm text-slate-600">
+            <h2 className="text-base font-black text-slate-900 sm:text-lg">Ride List</h2>
+            <p className="text-xs text-slate-600 sm:text-sm">
               {filteredRides.length} ride{filteredRides.length === 1 ? '' : 's'} shown
             </p>
           </div>
@@ -2031,66 +2383,66 @@ const RidesTab = ({ searchQuery = '' }) => {
         </div>
 
         {filteredRides.length === 0 ? (
-          <div className="p-8 text-center text-sm font-semibold text-slate-500">
+          <div className="p-5 text-center text-sm font-semibold text-slate-500 sm:p-8">
             No rides saved yet.
           </div>
         ) : (
           <div className="divide-y divide-slate-200">
             {Object.entries(groupedRides).map(([dateKey, dateRides]) => (
-              <div key={dateKey} className="p-4">
-                <div className="mb-3 flex items-center gap-2 text-slate-900">
-                  <CalendarDays className="h-5 w-5 text-blue-700" />
-                  <h3 className="text-base font-black">{formatDateForDisplay(dateKey)}</h3>
+              <div key={dateKey} className="p-2.5 sm:p-4">
+                <div className="mb-2 flex items-center gap-1.5 text-slate-900 sm:mb-3 sm:gap-2">
+                  <CalendarDays className="h-4 w-4 text-blue-700 sm:h-5 sm:w-5" />
+                  <h3 className="text-sm font-black sm:text-base">{formatDateForDisplay(dateKey)}</h3>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {dateRides.map((ride) => {
                     const isExpanded = expandedRideIds[ride.id] !== false;
                     const pastRide = isPastRide(ride);
                     const rideFinancials = getRideFinancials(ride);
 
                     return (
-                      <article key={ride.id} className="rounded-xl border border-slate-200 bg-slate-50">
-                        <div className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between">
+                      <article key={ride.id} className="rounded-lg border border-slate-200 bg-slate-50 sm:rounded-xl">
+                        <div className="flex flex-col gap-2 p-2.5 sm:p-4 md:flex-row md:items-start md:justify-between">
                           <button
                             type="button"
                             onClick={() => setExpandedRideIds((current) => ({ ...current, [ride.id]: !isExpanded }))}
                             className="text-left"
                           >
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">
+                            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-black text-blue-800 sm:px-3 sm:py-1 sm:text-xs">
                                 Confirmation #{ride.confirmationNumber || 'N/A'}
                               </span>
-                              <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-black text-green-800">
+                              <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-black text-green-800 sm:px-3 sm:py-1 sm:text-xs">
                                 {ride.status || 'Status unknown'}
                               </span>
                               {ride.provider && (
-                                <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-black text-slate-700">
+                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-black text-slate-700 sm:px-3 sm:py-1 sm:text-xs">
                                   {ride.provider}
                                 </span>
                               )}
                               {(rideFinancials.total > 0 || ride.sourceType) && (
-                                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-black text-emerald-800 sm:px-3 sm:py-1 sm:text-xs">
                                   Total {formatRideCurrency(rideFinancials.total)}
                                 </span>
                               )}
                               {rideFinancials.tip > 0 && (
-                                <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">
+                                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-black text-violet-800 sm:px-3 sm:py-1 sm:text-xs">
                                   Tip {formatRideCurrency(rideFinancials.tip)}
                                 </span>
                               )}
                             </div>
-                            <p className="mt-2 text-sm font-bold text-slate-900">
+                            <p className="mt-1.5 text-xs font-bold text-slate-900 sm:mt-2 sm:text-sm">
                               {ride.riderName}, {ride.legs.length} leg{ride.legs.length === 1 ? '' : 's'}
                             </p>
                           </button>
 
-                          <div className="flex flex-wrap gap-2">
+                          <div className="grid w-full grid-cols-2 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:gap-2">
                             <button
                               type="button"
                               onClick={() => addRideToGoogleCalendar(ride)}
                               disabled={calendarAddingRideId === ride.id}
-                              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60 ${
+                              className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm ${
                                 calendarAddedIds.includes(ride.id) || ride.googleCalendarEventId
                                   ? 'bg-blue-700'
                                   : 'bg-blue-600'
@@ -2109,7 +2461,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                             <button
                               type="button"
                               onClick={() => startEditRide(ride)}
-                              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm"
                             >
                               <Pencil className="h-4 w-4" />
                               Edit
@@ -2118,7 +2470,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                             <button
                               type="button"
                               onClick={() => duplicateRide(ride)}
-                              className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-bold text-violet-700 hover:bg-violet-50"
+                              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm"
                             >
                               <Copy className="h-4 w-4" />
                               Copy
@@ -2127,7 +2479,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                             <button
                               type="button"
                               onClick={() => deleteRide(ride.id)}
-                              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-50"
+                              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-2 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm"
                             >
                               <Trash2 className="h-4 w-4" />
                               Delete
@@ -2136,9 +2488,9 @@ const RidesTab = ({ searchQuery = '' }) => {
                         </div>
 
                         {isExpanded && (
-                          <div className="space-y-3 border-t border-slate-200 p-4">
+                          <div className="space-y-2 border-t border-slate-200 p-2.5 sm:space-y-3 sm:p-4">
                             {pastRide && (
-                              <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 sm:flex-row sm:items-center sm:justify-between sm:rounded-xl sm:p-3">
                                 <div>
                                   <p className="text-sm font-black text-amber-950">Past ride</p>
                                   <p className="text-sm font-semibold text-amber-900">Review it, then mark complete to move it to the archive.</p>
@@ -2167,77 +2519,95 @@ const RidesTab = ({ searchQuery = '' }) => {
                               </div>
                             )}
 
-                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                                <p className="text-xs font-black uppercase tracking-wide text-blue-700">Fare</p>
-                                <p className="mt-1 text-lg font-black text-blue-950">{formatRideCurrency(rideFinancials.fare)}</p>
+                            <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
+                              <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 sm:rounded-xl sm:p-3">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-blue-700 sm:text-xs">Fare</p>
+                                <p className="mt-0.5 text-base font-black text-blue-950 sm:mt-1 sm:text-lg">{formatRideCurrency(rideFinancials.fare)}</p>
                               </div>
-                              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                                <p className="text-xs font-black uppercase tracking-wide text-amber-700">Fees</p>
-                                <p className="mt-1 text-lg font-black text-amber-950">{formatRideCurrency(rideFinancials.fees)}</p>
+                              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 sm:rounded-xl sm:p-3">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-amber-700 sm:text-xs">Fees</p>
+                                <p className="mt-0.5 text-base font-black text-amber-950 sm:mt-1 sm:text-lg">{formatRideCurrency(rideFinancials.fees)}</p>
                               </div>
-                              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
-                                <p className="text-xs font-black uppercase tracking-wide text-violet-700">Tip</p>
-                                <p className="mt-1 text-lg font-black text-violet-950">{formatRideCurrency(rideFinancials.tip)}</p>
+                              <div className="rounded-lg border border-violet-200 bg-violet-50 p-2 sm:rounded-xl sm:p-3">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-violet-700 sm:text-xs">Tip</p>
+                                <p className="mt-0.5 text-base font-black text-violet-950 sm:mt-1 sm:text-lg">{formatRideCurrency(rideFinancials.tip)}</p>
                               </div>
-                              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                                <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Total</p>
-                                <p className="mt-1 text-lg font-black text-emerald-950">{formatRideCurrency(rideFinancials.total)}</p>
+                              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 sm:rounded-xl sm:p-3">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:text-xs">Total</p>
+                                <p className="mt-0.5 text-base font-black text-emerald-950 sm:mt-1 sm:text-lg">{formatRideCurrency(rideFinancials.total)}</p>
                               </div>
                             </div>
 
                             {ride.legs.map((leg) => (
-                              <div key={leg.id} className="rounded-xl border border-slate-200 bg-white p-4">
-                                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                  <h4 className="text-base font-black text-slate-900">{leg.leg}</h4>
-                                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">
+                              <div key={leg.id} className="rounded-lg border border-slate-200 bg-white p-2.5 sm:rounded-xl sm:p-4">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 sm:mb-3">
+                                  <h4 className="text-sm font-black text-slate-900 sm:text-base">{leg.leg}</h4>
+                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-700 sm:px-3 sm:py-1 sm:text-xs">
                                     {leg.status || ride.status || 'Status unknown'}
                                   </span>
                                 </div>
 
-                                <div className="grid gap-3 md:grid-cols-3">
-                                  <div className="rounded-lg bg-blue-50 p-3">
+                                <div className="grid grid-cols-2 gap-2 md:grid-cols-3 md:gap-3">
+                                  <div className="rounded-lg bg-blue-50 p-2 sm:p-3">
                                     <div className="flex items-center gap-2 text-xs font-black uppercase text-blue-700">
                                       <Clock className="h-4 w-4" />
                                       Pickup
                                     </div>
-                                    <p className="mt-1 font-bold text-slate-900">{leg.pickupTime || 'N/A'}</p>
-                                    {leg.pickupWindow && <p className="text-sm text-slate-600">Window: {leg.pickupWindow}</p>}
+                                    <p className="mt-0.5 text-sm font-bold text-slate-900 sm:mt-1 sm:text-base">{leg.pickupTime || 'N/A'}</p>
+                                    {leg.pickupWindow && <p className="text-xs text-slate-600 sm:text-sm">Window: {leg.pickupWindow}</p>}
                                   </div>
 
-                                  <div className="rounded-lg bg-purple-50 p-3">
+                                  <div className="rounded-lg bg-purple-50 p-2 sm:p-3">
                                     <div className="text-xs font-black uppercase text-purple-700">Appointment</div>
-                                    <p className="mt-1 font-bold text-slate-900">{leg.appointmentTime || 'N/A'}</p>
+                                    <p className="mt-0.5 text-sm font-bold text-slate-900 sm:mt-1 sm:text-base">{leg.appointmentTime || 'N/A'}</p>
                                   </div>
 
-                                  <div className="rounded-lg bg-green-50 p-3">
+                                  <div className="col-span-2 rounded-lg bg-green-50 p-2 md:col-span-1 sm:p-3">
                                     <div className="text-xs font-black uppercase text-green-700">Provider</div>
-                                    <p className="mt-1 font-bold text-slate-900">{leg.provider || ride.provider || 'N/A'}</p>
+                                    <p className="mt-0.5 text-sm font-bold text-slate-900 sm:mt-1 sm:text-base">{leg.provider || ride.provider || 'N/A'}</p>
                                   </div>
                                 </div>
 
-                                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                                  <div className="rounded-lg border border-slate-200 p-3">
+                                <div className="mt-2 grid gap-2 sm:mt-4 sm:gap-3 md:grid-cols-2">
+                                  <div className="rounded-lg border border-slate-200 p-2 sm:p-3">
                                     <div className="flex items-center gap-2 text-xs font-black uppercase text-slate-600">
                                       <MapPin className="h-4 w-4" />
                                       Pick Up
                                     </div>
-                                    <p className="mt-1 font-bold text-slate-900">{leg.pickupName || 'N/A'}</p>
-                                    <p className="text-sm text-slate-600">{leg.pickupAddress || 'Address not listed'}</p>
+                                    <p className="mt-0.5 text-sm font-bold text-slate-900 sm:mt-1 sm:text-base">{leg.pickupName || 'N/A'}</p>
+                                    <p className="text-xs leading-4 text-slate-600 sm:text-sm">{leg.pickupAddress || 'Address not listed'}</p>
+                                    {leg.pickupPhone && (
+                                      <a
+                                        href={`tel:${leg.pickupPhone}`}
+                                        className="mt-1 inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 hover:text-blue-800 hover:underline sm:mt-2 sm:text-sm"
+                                      >
+                                        <Phone className="h-3.5 w-3.5" />
+                                        {leg.pickupPhone}
+                                      </a>
+                                    )}
                                   </div>
 
-                                  <div className="rounded-lg border border-slate-200 p-3">
+                                  <div className="rounded-lg border border-slate-200 p-2 sm:p-3">
                                     <div className="flex items-center gap-2 text-xs font-black uppercase text-slate-600">
                                       <MapPin className="h-4 w-4" />
                                       Drop Off
                                     </div>
-                                    <p className="mt-1 font-bold text-slate-900">{leg.dropoffName || 'N/A'}</p>
-                                    <p className="text-sm text-slate-600">{leg.dropoffAddress || 'Address not listed'}</p>
+                                    <p className="mt-0.5 text-sm font-bold text-slate-900 sm:mt-1 sm:text-base">{leg.dropoffName || 'N/A'}</p>
+                                    <p className="text-xs leading-4 text-slate-600 sm:text-sm">{leg.dropoffAddress || 'Address not listed'}</p>
+                                    {leg.dropoffPhone && (
+                                      <a
+                                        href={`tel:${leg.dropoffPhone}`}
+                                        className="mt-1 inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 hover:text-blue-800 hover:underline sm:mt-2 sm:text-sm"
+                                      >
+                                        <Phone className="h-3.5 w-3.5" />
+                                        {leg.dropoffPhone}
+                                      </a>
+                                    )}
                                   </div>
                                 </div>
 
                                 {leg.notes && (
-                                  <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+                                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">
                                     {leg.notes}
                                   </p>
                                 )}
@@ -2264,23 +2634,16 @@ const RidesTab = ({ searchQuery = '' }) => {
             aria-label="Close Ride Editor"
           />
           <aside className="absolute right-0 top-0 flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5 sm:px-5 sm:py-4">
               <div>
-                <h2 className="text-xl font-black text-slate-900">Edit Ride</h2>
-                <p className="text-sm text-slate-600">Update ride details, leg times, locations, provider, and notes.</p>
+                <h2 className="text-lg font-black text-slate-900 sm:text-xl">Edit Ride</h2>
+                <p className="text-xs leading-4 text-slate-600 sm:text-sm">Update ride details, leg times, locations, phone numbers, provider, and notes.</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setEditingRide(null)}
-                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
-                aria-label="Close Ride Editor"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <CloseScreenButton onClick={() => setEditingRide(null)} />
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5">
-              <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-5">
+              <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
                 <label className="text-sm font-bold text-slate-700">
                   Ride Date
                   <input
@@ -2393,35 +2756,35 @@ const RidesTab = ({ searchQuery = '' }) => {
                 </label>
               </div>
 
-              <div className="mt-6 flex items-center justify-between gap-3">
-                <h3 className="text-lg font-black text-slate-900">Ride Legs</h3>
+              <div className="mt-4 flex items-center justify-between gap-2 sm:mt-6 sm:gap-3">
+                <h3 className="text-base font-black text-slate-900 sm:text-lg">Ride Legs</h3>
                 <button
                   type="button"
                   onClick={addLegToEditingRide}
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-slate-800 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm"
                 >
                   <Plus className="h-4 w-4" />
                   Add Leg
                 </button>
               </div>
 
-              <div className="mt-3 space-y-4">
+              <div className="mt-2 space-y-3 sm:mt-3 sm:space-y-4">
                 {editingRide.legs.map((leg, index) => (
-                  <div key={leg.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
+                  <div key={leg.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 sm:rounded-xl sm:p-4">
+                    <div className="mb-2 flex items-center justify-between gap-2 sm:mb-3 sm:gap-3">
                       <h4 className="text-base font-black text-slate-900">Leg {index + 1}</h4>
                       <button
                         type="button"
                         onClick={() => deleteLegFromEditingRide(leg.id)}
                         disabled={editingRide.legs.length <= 1}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm"
                       >
                         <Trash2 className="h-4 w-4" />
                         Delete Leg
                       </button>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                    <div className="grid gap-3 sm:gap-4 md:grid-cols-3">
                       <label className="text-sm font-bold text-slate-700">
                         Leg Label
                         <input
@@ -2522,6 +2885,34 @@ const RidesTab = ({ searchQuery = '' }) => {
                         />
                       </label>
 
+                      <div className="grid gap-3 sm:gap-4 md:col-span-3 md:grid-cols-2">
+                        <label className="text-sm font-bold text-slate-700">
+                          Pick Up Phone Number
+                          <input
+                            type="tel"
+                            inputMode="tel"
+                            autoComplete="tel"
+                            value={leg.pickupPhone || ''}
+                            onChange={(event) => updateEditingLegField(leg.id, 'pickupPhone', formatPhoneInput(event.target.value))}
+                            placeholder="(213) 555-1234"
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                          />
+                        </label>
+
+                        <label className="text-sm font-bold text-slate-700">
+                          Drop Off Phone Number
+                          <input
+                            type="tel"
+                            inputMode="tel"
+                            autoComplete="tel"
+                            value={leg.dropoffPhone || ''}
+                            onChange={(event) => updateEditingLegField(leg.id, 'dropoffPhone', formatPhoneInput(event.target.value))}
+                            placeholder="(213) 555-1234"
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                          />
+                        </label>
+                      </div>
+
                       <label className="md:col-span-3 text-sm font-bold text-slate-700">
                         Leg Notes
                         <textarea
@@ -2536,7 +2927,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                 ))}
               </div>
 
-              <label className="mt-5 block text-sm font-bold text-slate-700">
+              <label className="mt-3 block text-sm font-bold text-slate-700 sm:mt-5">
                 Original Scan Text
                 <textarea
                   value={editingRide.sourceText || ''}
@@ -2547,7 +2938,7 @@ const RidesTab = ({ searchQuery = '' }) => {
               </label>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-3 py-2.5 sm:px-5 sm:py-4">
               <button
                 type="button"
                 onClick={() => setEditingRide(null)}
@@ -2577,30 +2968,23 @@ const RidesTab = ({ searchQuery = '' }) => {
             aria-label="Close Rides Archive"
           />
           <aside className="absolute right-0 top-0 flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5 sm:px-5 sm:py-4">
               <div>
-                <h2 className="text-xl font-black text-slate-900">Rides Archive</h2>
-                <p className="text-sm text-slate-600">{archivedRides.length} completed ride{archivedRides.length === 1 ? '' : 's'}</p>
+                <h2 className="text-lg font-black text-slate-900 sm:text-xl">Rides Archive</h2>
+                <p className="text-xs text-slate-600 sm:text-sm">{archivedRides.length} completed ride{archivedRides.length === 1 ? '' : 's'}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsArchiveOpen(false)}
-                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
-                aria-label="Close Rides Archive"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <CloseScreenButton onClick={() => setIsArchiveOpen(false)} />
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-5">
               {archivedRides.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm font-semibold text-slate-500">
+                <div className="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm font-semibold text-slate-500 sm:p-8">
                   No completed rides archived yet.
                 </div>
               ) : (
                 <div className="space-y-3">
                   {sortRides(archivedRides).map((ride) => (
-                    <article key={ride.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <article key={ride.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -2657,6 +3041,13 @@ const RidesTab = ({ searchQuery = '' }) => {
             </div>
           </aside>
         </div>
+      )}
+
+      {showPremiumRidesView && (
+        <PremiumRidesListView
+          rides={filteredRides}
+          onClose={() => setShowPremiumRidesView(false)}
+        />
       )}
     </PageContainer>
   );

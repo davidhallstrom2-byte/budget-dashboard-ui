@@ -1,5 +1,6 @@
 // C:\Users\david\Local Sites\main-dashboard\app\public\budget-dashboard-fs\ui\src\components\receipts\ReceiptScanner.jsx
 import React, { useEffect, useRef, useState } from "react";
+import CloseScreenButton from "../common/CloseScreenButton.jsx";
 
 /**
  * ReceiptScanner
@@ -86,15 +87,7 @@ export default function ReceiptScanner({ open, onClose, onDataExtracted }) {
       <div className="relative z-10 w-[min(94vw,700px)] rounded-xl bg-white p-5 shadow-2xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Receipt Scanner</h2>
-          <button
-            type="button"
-            onClick={() => (busy ? null : onClose())}
-            className="rounded-md p-2 text-gray-500 hover:bg-gray-100"
-            title="Close"
-            disabled={busy}
-          >
-            ✕
-          </button>
+          <CloseScreenButton onClick={onClose} disabled={busy} />
         </div>
 
         <p className="mb-4 text-sm text-gray-600">
