@@ -15,6 +15,7 @@ import {
   Download,
   Eraser,
   Edit3,
+  ExternalLink,
   FileUp,
   GripVertical,
   History,
@@ -59,6 +60,8 @@ const OVERTIME_HOUR_THRESHOLD = 8;
 const DOUBLE_TIME_HOUR_THRESHOLD = 12;
 const OVERTIME_RATE_MULTIPLIER = 1.5;
 const DOUBLE_TIME_RATE_MULTIPLIER = 2;
+const COAT_AND_TIE_HOURLY_PREMIUM = 2;
+const DEFAULT_VISIBLE_SHIFT_COUNT = 5;
 
 const CSC_COMPANY = {
   name: 'Contemporary Services Corporation',
@@ -72,7 +75,30 @@ const CSC_COMPANY = {
 
 const WISH_PORTAL_URL = 'https://ess.schedulingsite.com/login';
 
+const ADDED_VENUE_OPTIONS = [
+  'Novo Theater',
+  'Shrine Auditorium',
+  'Rose Bowl',
+  'Hollywood Bowl',
+  'Intuit Dome',
+  'Long Beach Amphitheater',
+  'Long Beach Convention Center',
+  'The Roxy',
+];
+
+const VENUE_EVENT_CALENDAR_URLS = {
+  'Novo Theater': 'https://www.thenovodtla.com/events',
+  'Shrine Auditorium': 'https://www.shrineauditorium.com/calendar/',
+  'Rose Bowl': 'https://www.rosebowlstadium.com/events/calendar/list',
+  'Hollywood Bowl': 'https://www.hollywoodbowl.com/events/performances',
+  'Intuit Dome': 'https://www.intuitdome.com/events/event-schedule',
+  'Long Beach Amphitheater': 'https://fmbamp.com/',
+  'Long Beach Convention Center': 'https://www.longbeachcc.com/calendar/',
+  'The Roxy': 'https://www.theroxy.com/shows/',
+};
+
 const SHIFT_STATUS_OPTIONS = ['Scheduled', 'Approved', 'Cancelled', 'Done'];
+const UNIFORM_OPTIONS = ['', 'All black uniform', 'All black / white shirt', 'Coat & Tie'];
 
 const getShiftStatusColorClass = (status) => {
   if (status === 'Done') return 'bg-green-600 hover:bg-green-700';
@@ -143,13 +169,19 @@ const normalizeCscUniformType = (value = '') => {
   if (!text) return '';
 
   if (
+    /\ball[-\s]?black\s*(?:\/|with)\s*(?:a\s+)?white\s+shirt\b/i.test(text)
+  ) {
+    return 'All black / white shirt';
+  }
+
+  if (
     /\bcoat\s*(?:&|and)\s*tie\b/i.test(text) ||
     /\bsuit\s*(?:&|and)\s*tie\b/i.test(text) ||
     /\bdress\s+shirt\b/i.test(text) ||
     /\bdress\s+pants\b/i.test(text) ||
     /\bblack\s+suit\b/i.test(text)
   ) {
-    return 'Coat & tie';
+    return 'Coat & Tie';
   }
 
   if (
@@ -347,7 +379,7 @@ const cleanCscShiftNotes = (value = '', uniformSource = '') => {
   ]);
 
   const cleanedLines = text
-    .replace(/\bUniform\s*:\s*(?:All\s+black\s+uniform|Coat\s*&\s*tie)\.?\s*/gi, '')
+    .replace(/\bUniform\s*:\s*(?:All\s+black\s+uniform|All\s+black\s*\/\s*white\s+shirt|Coat\s*&\s*tie)\.?\s*/gi, '')
     .replace(/^\s*Special\s+Notes\s*:?\s*/i, '')
     .replace(/\s+([,.])/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
@@ -676,10 +708,32 @@ const getShiftHours = (shift) => {
   return Math.round((diff / (1000 * 60 * 60)) * 100) / 100;
 };
 
+const getShiftHourlyPremium = (shift) =>
+  normalizeCscUniformType(shift?.uniform || '') === 'Coat & Tie'
+    ? COAT_AND_TIE_HOURLY_PREMIUM
+    : 0;
+
+const getShiftEffectiveHourlyRate = (shift) => {
+  const baseRate = Number.parseFloat(shift?.hourlyRate);
+  if (!Number.isFinite(baseRate) || baseRate <= 0) return 0;
+
+  return baseRate + getShiftHourlyPremium(shift);
+};
+
+const getShiftHourlyRateLabel = (shift) => {
+  const baseRate = Number.parseFloat(shift?.hourlyRate);
+  const premium = getShiftHourlyPremium(shift);
+
+  if (!Number.isFinite(baseRate) || baseRate <= 0) return formatCurrency(0);
+  if (!premium) return formatCurrency(baseRate);
+
+  return `${formatCurrency(baseRate + premium)} (${formatCurrency(baseRate)} base + ${formatCurrency(premium)} Coat & Tie)`;
+};
+
 const getEstimatedPay = (shift) => {
   if (shift?.shiftStatus === 'Cancelled') return 0;
 
-  const rate = Number.parseFloat(shift.hourlyRate);
+  const rate = getShiftEffectiveHourlyRate(shift);
   if (!Number.isFinite(rate) || rate <= 0) return 0;
 
   const hours = getShiftHours(shift);
@@ -1872,8 +1926,9 @@ const buildPremiumScheduleHtml = (shifts, summary) => {
               <tr><th>Job Name</th><td>${escapeHtml(shift.jobName || 'Job name not entered')}</td></tr>
               ${shift.shiftName ? `<tr><th>Shift Name</th><td>${escapeHtml(shift.shiftName)}</td></tr>` : ''}
               ${shift.roleName ? `<tr><th>Role Name</th><td>${escapeHtml(shift.roleName)}</td></tr>` : ''}
+              <tr><th>Uniform</th><td>${escapeHtml(shift.uniform || 'Not entered')}</td></tr>
               <tr><th>Hours</th><td>${getShiftHours(shift).toFixed(1)}</td></tr>
-              <tr><th>Hourly Rate</th><td>${escapeHtml(formatCurrency(Number(shift.hourlyRate) || 0))}</td></tr>
+              <tr><th>Hourly Rate</th><td>${escapeHtml(getShiftHourlyRateLabel(shift))}</td></tr>
               <tr><th>Estimated Pay</th><td>${escapeHtml(formatCurrency(getEstimatedPay(shift)))}</td></tr>
               <tr><th>Paid Status</th><td>${escapeHtml(getShiftPaymentStatusLabel(shift))}${shift.shiftStatus !== 'Cancelled' && shift.paymentDate ? `, ${escapeHtml(formatShortDate(shift.paymentDate))}` : ''}</td></tr>
               ${shift.parking ? `<tr><th>Parking</th><td>${escapeHtml(shift.parking)}</td></tr>` : ''}
@@ -2025,7 +2080,7 @@ const getWeekRange = (dateValue) => {
   const date = parseLocalDate(dateValue);
   if (!date) return null;
 
-  const dayOffset = (date.getDay() + 6) % 7;
+  const dayOffset = (date.getDay() + 1) % 7;
   const startDate = new Date(date);
   startDate.setDate(date.getDate() - dayOffset);
 
@@ -2147,11 +2202,12 @@ const buildShiftCalendarEventPayload = (shift = {}) => {
     `CSC shift status: ${shift.shiftStatus || 'Scheduled'}`,
     `Paid status: ${getShiftPaymentStatusLabel(shift)}`,
     `Hours: ${getShiftHours(shift).toFixed(1)}`,
-    `Hourly rate: ${formatCurrency(Number(shift.hourlyRate) || 0)}`,
+    `Hourly rate: ${getShiftHourlyRateLabel(shift)}`,
     `Estimated pay: ${formatCurrency(getEstimatedPay(shift))}`,
     shift.jobName ? `Job: ${shift.jobName}` : '',
     shift.shiftName ? `Shift Name: ${shift.shiftName}` : '',
     shift.roleName ? `Role Name: ${shift.roleName}` : '',
+    shift.uniform ? `Uniform: ${shift.uniform}` : '',
     shift.parking ? `Parking: ${shift.parking}` : '',
     shift.supervisor ? `Supervisor: ${shift.supervisor}` : '',
     shift.notes ? `Notes: ${shift.notes}` : '',
@@ -2178,10 +2234,12 @@ const buildShiftCalendarEventPayload = (shift = {}) => {
 const CscShiftsTab = ({ searchQuery = '' }) => {
   const [shifts, setShifts] = useState(() => loadSavedShifts());
   const [localSearch, setLocalSearch] = useState('');
-  const [venueFilter, setVenueFilter] = useState('All');
+  const [excludedVenues, setExcludedVenues] = useState([]);
+  const [showVenueFilter, setShowVenueFilter] = useState(false);
+  const [monthFilter, setMonthFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [paidFilter, setPaidFilter] = useState('All');
-  const [selectedMonth, setSelectedMonth] = useState('All');
+  const [showMonthOverview, setShowMonthOverview] = useState(false);
   const [monthRangeMode, setMonthRangeMode] = useState('focus');
   const [saveMessage, setSaveMessage] = useState('');
   const [showAddDrawer, setShowAddDrawer] = useState(false);
@@ -2199,6 +2257,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [newShift, setNewShift] = useState(() => createBlankShift());
   const [editingShiftId, setEditingShiftId] = useState(null);
   const [showActiveOnly, setShowActiveOnly] = useState(true);
+  const [visibleShiftLimit, setVisibleShiftLimit] = useState(DEFAULT_VISIBLE_SHIFT_COUNT);
   const [isShiftTableCollapsed, setIsShiftTableCollapsed] = useState(false);
   const [selectedDetailShiftId, setSelectedDetailShiftId] = useState(null);
   const [detailReturnContext, setDetailReturnContext] = useState(null);
@@ -2208,7 +2267,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [calendarAddingShiftId, setCalendarAddingShiftId] = useState('');
   const [paychecks, setPaychecks] = useState(() => readStoredPaychecks());
   const [selectedPaidMonthKey, setSelectedPaidMonthKey] = useState('');
+  const [selectedWeekKey, setSelectedWeekKey] = useState('');
   const toolbarImportInputRef = useRef(null);
+  const venueFilterRef = useRef(null);
+  const shiftBrowserRef = useRef(null);
 
   useEffect(() => {
     let rawDraft = '';
@@ -2282,10 +2344,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       }
 
       setLocalSearch('');
-      setVenueFilter('All');
+      setExcludedVenues([]);
+      setMonthFilter('All');
       setStatusFilter('All');
       setPaidFilter('All');
-      setSelectedMonth('All');
       setShowActiveOnly(false);
       setIsShiftTableCollapsed(false);
       setDetailReturnContext(returnContext);
@@ -2423,14 +2485,43 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     navigateToAppTab('paychecks');
   };
 
-  const handleShowFullShiftList = () => {
-    setSelectedMonth('All');
-    setVenueFilter('All');
-    setStatusFilter('All');
-    setPaidFilter('All');
-    setLocalSearch('');
-    setShowActiveOnly(false);
+  const handleToggleShiftListLength = () => {
+    setVisibleShiftLimit((current) =>
+      current >= filteredShifts.length ? DEFAULT_VISIBLE_SHIFT_COUNT : Number.MAX_SAFE_INTEGER
+    );
     setIsShiftTableCollapsed(false);
+  };
+
+  const handleShowMoreShifts = () => {
+    setVisibleShiftLimit((current) =>
+      Math.min(current + DEFAULT_VISIBLE_SHIFT_COUNT, filteredShifts.length)
+    );
+    setIsShiftTableCollapsed(false);
+  };
+
+  const handleBackToShiftListTop = () => {
+    shiftBrowserRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleExpandAllShifts = () => {
+    setVisibleShiftLimit(Number.MAX_SAFE_INTEGER);
+    setIsShiftTableCollapsed(false);
+  };
+
+  const handleExpandAllActiveShifts = () => {
+    setShowActiveOnly(true);
+    setStatusFilter('All');
+    setVisibleShiftLimit(Number.MAX_SAFE_INTEGER);
+    setIsShiftTableCollapsed(false);
+  };
+
+  const handleToggleShiftTable = () => {
+    if (isShiftTableCollapsed) {
+      handleExpandAllShifts();
+      return;
+    }
+
+    setIsShiftTableCollapsed(true);
   };
 
   const toggleShiftNotes = (id) => {
@@ -2467,6 +2558,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
         if (updates.shiftStatus) {
           nextShift.shiftStatus = normalizeShiftStatus(updates.shiftStatus);
+        }
+
+        if (updates.shiftStatus === 'Done' && normalizeShiftStatus(shift.shiftStatus) !== 'Done') {
+          nextShift.paidStatus = 'Unpaid';
+          nextShift.paymentDate = '';
         }
 
         if (updates.shiftStatus === 'Scheduled' || updates.shiftStatus === 'Approved' || updates.shiftStatus === 'Confirmed' || updates.shiftStatus === 'Cancelled') {
@@ -2602,7 +2698,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
     updateShift(shift.id, {
       shiftStatus: isDone ? 'Scheduled' : 'Done',
-      ...(isDone ? { paidStatus: 'Unpaid', paymentDate: '' } : {}),
+      paidStatus: 'Unpaid',
+      paymentDate: '',
     });
 
     setSaveMessage(isDone ? 'CSC shift changed back to scheduled.' : 'CSC shift marked done.');
@@ -2740,7 +2837,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           type="button"
           onClick={() => handleToggleActivePaidStatus(shift)}
           className={`inline-flex h-8 items-center justify-center rounded-md px-2.5 text-xs font-extrabold text-white ${
-            shift.paidStatus === 'Paid' ? 'bg-slate-700 hover:bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-700'
+            shift.paidStatus === 'Paid' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
           }`}
           title={shift.paidStatus === 'Paid' ? 'Mark shift unpaid' : 'Mark shift paid'}
           aria-label={shift.paidStatus === 'Paid' ? 'Mark shift unpaid' : 'Mark shift paid'}
@@ -2779,7 +2876,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           type="button"
           onClick={() => handleToggleArchivedPaidStatus(shift)}
           className={`inline-flex h-9 items-center justify-center rounded-lg px-3 text-sm font-extrabold text-white ${
-            shift.paidStatus === 'Paid' ? 'bg-slate-700 hover:bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-700'
+            shift.paidStatus === 'Paid' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
           }`}
           title={shift.paidStatus === 'Paid' ? 'Mark archived shift unpaid' : 'Mark archived shift paid'}
           aria-label={shift.paidStatus === 'Paid' ? 'Mark archived shift unpaid' : 'Mark archived shift paid'}
@@ -2862,15 +2959,60 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     .toLowerCase();
 
   const venueOptions = useMemo(() => {
-    const venues = Array.from(new Set(shifts.map((shift) => shift.venue).filter(Boolean))).sort();
+    const venues = Array.from(
+      new Set([
+        ...ADDED_VENUE_OPTIONS,
+        ...shifts.map((shift) => shift.venue).filter(Boolean),
+      ])
+    ).sort((firstVenue, secondVenue) => firstVenue.localeCompare(secondVenue));
     return ['All', ...venues];
   }, [shifts]);
 
-  const monthOptions = useMemo(() => {
-    const months = Array.from(new Set(shifts.map((shift) => getMonthKey(shift.startDate)))).sort();
-    return ['All', ...months];
-  }, [shifts]);
+  const venueNames = useMemo(
+    () => venueOptions.filter((venue) => venue !== 'All'),
+    [venueOptions]
+  );
+  const excludedVenueSet = useMemo(() => new Set(excludedVenues), [excludedVenues]);
+  const selectedVenueCount = venueNames.length - excludedVenues.length;
+  const allVenuesSelected = excludedVenues.length === 0;
+  const someVenuesSelected = selectedVenueCount > 0 && !allVenuesSelected;
+  const venueFilterLabel = allVenuesSelected
+    ? 'All venues'
+    : selectedVenueCount === 0
+      ? 'No venues'
+      : `${selectedVenueCount} of ${venueNames.length} venues`;
 
+  const toggleVenue = (venue) => {
+    setExcludedVenues((current) =>
+      current.includes(venue)
+        ? current.filter((item) => item !== venue)
+        : [...current, venue]
+    );
+  };
+
+  const handleStatusFilterChange = (nextStatus) => {
+    setStatusFilter(nextStatus);
+    setShowActiveOnly(nextStatus === 'All');
+  };
+
+  useEffect(() => {
+    if (!showVenueFilter) return undefined;
+
+    const closeOnOutsideClick = (event) => {
+      if (!venueFilterRef.current?.contains(event.target)) setShowVenueFilter(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setShowVenueFilter(false);
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [showVenueFilter]);
 
   useEffect(() => {
     const openAddShift = () => {
@@ -2901,16 +3043,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     };
   }, [shifts, archivedShifts]);
 
-  const filteredShifts = useMemo(() => {
+  const shiftsMatchingNonMonthFilters = useMemo(() => {
     return shifts.filter((shift) => {
       const isActiveShift = !['Done', 'Cancelled'].includes(shift.shiftStatus);
       const activeMatches = !showActiveOnly || isActiveShift;
-      const venueMatches = venueFilter === 'All' || shift.venue === venueFilter;
+      const venueMatches = !excludedVenueSet.has(shift.venue);
       const statusMatches = statusFilter === 'All' || shift.shiftStatus === statusFilter;
       const paidMatches = paidFilter === 'All' || shift.paidStatus === paidFilter;
-      const monthMatches = selectedMonth === 'All' || getMonthKey(shift.startDate) === selectedMonth;
-
-      if (!activeMatches || !venueMatches || !statusMatches || !paidMatches || !monthMatches) return false;
+      if (!activeMatches || !venueMatches || !statusMatches || !paidMatches) return false;
 
       if (!combinedSearch) return true;
 
@@ -2940,7 +3080,79 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
       return text.includes(combinedSearch);
     });
-  }, [combinedSearch, paidFilter, selectedMonth, shifts, showActiveOnly, statusFilter, venueFilter]);
+  }, [combinedSearch, excludedVenueSet, paidFilter, shifts, showActiveOnly, statusFilter]);
+
+  const monthOptions = useMemo(() => {
+    const counts = new Map();
+
+    shiftsMatchingNonMonthFilters.forEach((shift) => {
+      const monthKey = getMonthKey(shift.startDate);
+      if (monthKey === 'No date') return;
+      counts.set(monthKey, (counts.get(monthKey) || 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+      .map(([monthKey, count]) => ({
+        monthKey,
+        count,
+        label: getMonthLabel(monthKey),
+      }))
+      .sort((first, second) => first.monthKey.localeCompare(second.monthKey));
+  }, [shiftsMatchingNonMonthFilters]);
+
+  const monthlyShiftGroups = useMemo(() => {
+    const groups = new Map();
+
+    shiftsMatchingNonMonthFilters.forEach((shift) => {
+      const monthKey = getMonthKey(shift.startDate);
+      if (monthKey === 'No date') return;
+
+      const current = groups.get(monthKey) || {
+        monthKey,
+        label: getMonthLabel(monthKey),
+        shifts: [],
+        venueCounts: new Map(),
+      };
+      const venue = shift.venue || 'Venue not entered';
+
+      current.shifts.push(shift);
+      current.venueCounts.set(venue, (current.venueCounts.get(venue) || 0) + 1);
+      groups.set(monthKey, current);
+    });
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        venueCounts: Array.from(group.venueCounts.entries()).sort((first, second) =>
+          first[0].localeCompare(second[0])
+        ),
+      }))
+      .sort((first, second) => first.monthKey.localeCompare(second.monthKey));
+  }, [shiftsMatchingNonMonthFilters]);
+
+  const filteredShifts = useMemo(
+    () =>
+      shiftsMatchingNonMonthFilters.filter(
+        (shift) => monthFilter === 'All' || getMonthKey(shift.startDate) === monthFilter
+      ),
+    [monthFilter, shiftsMatchingNonMonthFilters]
+  );
+
+  const handleViewMonth = (monthKey) => {
+    setMonthFilter(monthKey);
+    setShowMonthOverview(false);
+    setVisibleShiftLimit(Number.MAX_SAFE_INTEGER);
+    setIsShiftTableCollapsed(false);
+  };
+
+  const displayedShifts = useMemo(
+    () => filteredShifts.slice(0, visibleShiftLimit),
+    [filteredShifts, visibleShiftLimit]
+  );
+
+  useEffect(() => {
+    setVisibleShiftLimit(DEFAULT_VISIBLE_SHIFT_COUNT);
+  }, [excludedVenues, localSearch, monthFilter, paidFilter, searchQuery, statusFilter]);
 
   const filteredArchivedShifts = useMemo(() => {
     const query = archiveSearch.trim().toLowerCase();
@@ -3087,12 +3299,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           workedShiftCount: 0,
           scheduledHours: 0,
           workedHours: 0,
+          workedShifts: [],
         };
 
         currentWeek.shiftCount += 1;
         currentWeek.workedShiftCount += shift.shiftStatus === 'Done' ? 1 : 0;
         currentWeek.scheduledHours += hours;
         currentWeek.workedHours += workedHours;
+        if (shift.shiftStatus === 'Done') {
+          currentWeek.workedShifts.push(shift);
+        }
         weeklyGroups.set(weekRange.weekKey, currentWeek);
       }
 
@@ -3117,8 +3333,29 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       annualGroups.set(yearKey, currentYear);
     });
 
-    const weekly = Array.from(weeklyGroups.values())
-      .sort((a, b) => b.weekKey.localeCompare(a.weekKey));
+    const today = new Date();
+    const todayKey = toLocalDateKey(today);
+    const currentWeekRange = getWeekRange(todayKey);
+    const currentWeekKey = currentWeekRange?.weekKey;
+
+    if (currentWeekRange && currentWeekKey && !weeklyGroups.has(currentWeekKey)) {
+      weeklyGroups.set(currentWeekKey, {
+        weekKey: currentWeekKey,
+        startDate: currentWeekRange.startDate,
+        endDate: currentWeekRange.endDate,
+        shiftCount: 0,
+        workedShiftCount: 0,
+        scheduledHours: 0,
+        workedHours: 0,
+        workedShifts: [],
+      });
+    }
+
+    const weekly = Array.from(weeklyGroups.values()).sort((a, b) => {
+      if (a.weekKey === currentWeekKey) return -1;
+      if (b.weekKey === currentWeekKey) return 1;
+      return b.weekKey.localeCompare(a.weekKey);
+    });
     const monthly = monthlySummary
       .filter((month) => month.monthKey !== 'No date' && month.payableRecords > 0)
       .slice()
@@ -3135,9 +3372,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       }))
       .sort((a, b) => b.yearKey.localeCompare(a.yearKey));
 
-    const today = new Date();
-    const todayKey = toLocalDateKey(today);
-    const currentWeekKey = getWeekRange(todayKey)?.weekKey;
     const currentMonthKey = getMonthKey(todayKey);
     const currentYearKey = String(today.getFullYear());
     const currentWeek = weekly.find((week) => week.weekKey === currentWeekKey);
@@ -3150,6 +3384,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       weekly,
       monthly,
       annual,
+      currentWeekKey,
+      currentWeekLabel: currentWeekRange
+        ? formatWeekRange(currentWeekRange.startDate, currentWeekRange.endDate)
+        : '',
       currentWeekWorkedHours: currentWeek?.workedHours || 0,
       currentWeekScheduledHours: currentWeek?.scheduledHours || 0,
       currentMonthWorkedHours: currentMonth?.workedHours || 0,
@@ -3169,6 +3407,26 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       scheduledMonthCount: scheduledMonths.length,
     };
   }, [archivedShifts, monthlySummary, shifts]);
+
+  const selectedWorkedWeek = useMemo(() => {
+    if (!selectedWeekKey) return null;
+
+    const week = hoursAnalytics.weekly.find((item) => item.weekKey === selectedWeekKey);
+    if (!week) return null;
+
+    const workedShifts = [...(week.workedShifts || [])].sort((a, b) =>
+      `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`)
+    );
+
+    return {
+      ...week,
+      label: formatWeekRange(week.startDate, week.endDate),
+      workedShifts,
+      activeCount: workedShifts.filter((shift) => shift.recordSource === 'active').length,
+      archivedCount: workedShifts.filter((shift) => shift.recordSource === 'archived').length,
+      earnedPay: workedShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
+    };
+  }, [hoursAnalytics.weekly, selectedWeekKey]);
 
   const visibleMonthlySummary = useMemo(() => {
     const previousMonthKey = getMonthKeyWithOffset(-1);
@@ -3244,7 +3502,49 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     [shifts]
   );
 
-  const visibleShiftCount = filteredShifts.length;
+  const visibleShiftCount = displayedShifts.length;
+  const allShiftRowsVisible = visibleShiftCount >= filteredShifts.length;
+  const renderShiftListPagingControls = () => {
+    const remainingShiftCount = Math.max(0, filteredShifts.length - visibleShiftCount);
+    const nextShiftCount = Math.min(DEFAULT_VISIBLE_SHIFT_COUNT, remainingShiftCount);
+
+    return (
+      <div className="grid w-full max-w-md grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={
+            allShiftRowsVisible
+              ? () => setVisibleShiftLimit(DEFAULT_VISIBLE_SHIFT_COUNT)
+              : handleShowMoreShifts
+          }
+          style={{ backgroundColor: '#5b21b6', color: '#ffffff' }}
+          className="inline-flex h-11 min-w-0 items-center justify-center gap-2 rounded-xl border border-violet-900 px-3 text-sm font-extrabold text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:ring-offset-2"
+          aria-expanded={visibleShiftCount > DEFAULT_VISIBLE_SHIFT_COUNT}
+          aria-label={
+            allShiftRowsVisible
+              ? `Show only the first ${DEFAULT_VISIBLE_SHIFT_COUNT} shifts`
+              : `Show the next ${nextShiftCount} shifts`
+          }
+        >
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 transition-transform ${allShiftRowsVisible ? 'rotate-180' : ''}`}
+          />
+          <span>{allShiftRowsVisible ? 'Show Less' : 'Show More'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleBackToShiftListTop}
+          style={{ backgroundColor: '#1e3a8a', color: '#ffffff' }}
+          className="inline-flex h-11 min-w-0 items-center justify-center gap-2 rounded-xl border border-blue-950 px-3 text-sm font-extrabold text-white shadow-sm transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+          aria-label="Back to the top of Scheduled Shifts"
+        >
+          <ChevronDown className="h-4 w-4 shrink-0 rotate-180" />
+          <span>Back to Top</span>
+        </button>
+      </div>
+    );
+  };
 
   const handleManualSafetySnapshot = () => {
     const saved = writeCscSafetySnapshot('Manual CSC safety snapshot', shifts, archivedShifts);
@@ -3391,6 +3691,33 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
   const handlePrintPremiumView = () => {
     window.print();
+  };
+
+  const handlePrintSection = (elementId, printTitle) => {
+    const printTarget = document.getElementById(elementId);
+    if (!printTarget) return;
+
+    const previousTitle = document.title;
+    let cleanedUp = false;
+
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      printTarget.classList.remove('csc-print-target');
+      document.body.classList.remove('csc-section-printing');
+      document.title = previousTitle;
+      window.removeEventListener('afterprint', cleanup);
+    };
+
+    printTarget.classList.add('csc-print-target');
+    document.body.classList.add('csc-section-printing');
+    document.title = printTitle;
+    window.addEventListener('afterprint', cleanup, { once: true });
+
+    window.requestAnimationFrame(() => {
+      window.print();
+      window.setTimeout(cleanup, 1000);
+    });
   };
 
   const handleDownloadPremiumView = () => {
@@ -3563,6 +3890,159 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     );
   };
 
+  const renderShiftDetailActions = (shift) => {
+    const linkedRide = getLinkedRideForShift(shift);
+    const matchingPaycheckCount = getPaychecksMatchingShift(shift, paychecks).length;
+    const calendarAdded = Boolean(shift.googleCalendarEventId || shift.googleCalendarEventLink);
+    const calendarBusy = calendarAddingShiftId === shift.id;
+
+    return (
+      <div className="w-full">
+        <div className="grid gap-3 lg:grid-cols-[minmax(180px,0.8fr)_minmax(0,2fr)_minmax(220px,1.1fr)]">
+          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+              Shift Status
+            </p>
+            <select
+              value={shift.shiftStatus}
+              onChange={(event) => updateShift(shift.id, { shiftStatus: event.target.value })}
+              className={`h-10 w-full rounded-lg px-3 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-yellow-300 ${getShiftStatusColorClass(shift.shiftStatus)}`}
+              title="Update shift status"
+              aria-label="Update shift status"
+            >
+              {SHIFT_STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status} style={getShiftStatusOptionStyle(status)}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+              Shift Actions
+            </p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              <button
+                type="button"
+                onClick={() => handleOpenEditShift(shift)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-700 px-3 text-xs font-extrabold text-white hover:bg-slate-800"
+                aria-label="Edit shift"
+                title="Edit shift"
+              >
+                <Edit3 className="h-4 w-4" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMoveShift(shift.id)}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-amber-600 px-3 text-xs font-extrabold text-white hover:bg-amber-700"
+                title="Change shift venue"
+                aria-label="Change shift venue"
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddShiftToCalendar(shift)}
+                disabled={calendarBusy}
+                className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-extrabold text-white disabled:cursor-wait ${
+                  calendarAdded
+                    ? 'bg-green-700 ring-2 ring-green-200 hover:bg-green-800'
+                    : calendarBusy
+                      ? 'bg-emerald-400'
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+                aria-label={calendarAdded ? 'Open this shift in Google Calendar' : 'Add shift to Google Calendar'}
+                title={calendarAdded ? 'Open in Google Calendar' : calendarBusy ? 'Adding to Google Calendar' : 'Add to Google Calendar'}
+              >
+                {calendarAdded ? <CheckCircle2 className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
+                Calendar
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePlanOrOpenRide(shift)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-sky-700 px-3 text-xs font-extrabold text-white hover:bg-sky-800"
+                title={linkedRide ? 'Open linked ride' : 'Plan a ride for this shift'}
+                aria-label={linkedRide ? 'Open linked ride' : 'Plan a ride for this shift'}
+              >
+                <Car className="h-4 w-4" />
+                {linkedRide ? 'Ride' : 'Plan Ride'}
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenPaychecks}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-amber-700 px-3 text-xs font-extrabold text-white hover:bg-amber-800"
+                title="Open paychecks"
+                aria-label="Open paychecks"
+              >
+                <DollarSign className="h-4 w-4" />
+                Pay ({matchingPaycheckCount})
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+              Record Actions
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => handleArchiveShift(shift.id)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-2 text-xs font-extrabold text-white hover:bg-purple-700"
+                aria-label="Archive shift"
+                title="Archive shift"
+              >
+                <Archive className="h-4 w-4" />
+                Archive
+              </button>
+              <button
+                type="button"
+                onClick={() => handleClearShiftNotes(shift.id)}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-400 px-2 text-xs font-extrabold text-white hover:bg-slate-500"
+                title="Clear shift notes"
+                aria-label="Clear shift notes"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteShift(shift.id)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-2 text-xs font-extrabold text-white hover:bg-red-700"
+                aria-label="Delete shift"
+                title="Delete shift"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </div>
+          </section>
+        </div>
+
+        {movingShiftId === shift.id && (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+            <label className="block text-[11px] font-extrabold uppercase tracking-wide text-amber-900">
+              Move to Venue
+            </label>
+            <select
+              value={shift.venue || ''}
+              onChange={(event) => moveShiftToVenue(shift.id, event.target.value)}
+              title="Select a new shift venue"
+              className="mt-2 h-10 w-full rounded-lg border border-amber-300 bg-white px-3 text-sm font-semibold text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            >
+              {venueOptions.filter((venue) => venue !== 'All').map((venue) => (
+                <option key={venue} value={venue}>
+                  {venue}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderMobileShiftCard = (shift) => (
     <article key={shift.id} className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
       <div className="border-b border-amber-300 bg-amber-200 px-3 py-3">
@@ -3588,6 +4068,22 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           {shift.jobName ? <p className="break-words"><span className="font-black text-slate-900">Job:</span> {shift.jobName}</p> : null}
           {shift.shiftName ? <p className="break-words"><span className="font-black text-slate-900">Shift Name:</span> {shift.shiftName}</p> : null}
           {shift.roleName ? <p className="break-words"><span className="font-black text-slate-900">Role Name:</span> {shift.roleName}</p> : null}
+          <label className="grid gap-1">
+            <span className="font-black text-slate-900">Uniform:</span>
+            <select
+              value={shift.uniform || ''}
+              onChange={(event) => updateShift(shift.id, { uniform: event.target.value })}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-bold text-slate-900 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+              title="Update uniform"
+              aria-label="Update uniform"
+            >
+              {UNIFORM_OPTIONS.map((uniform) => (
+                <option key={uniform || 'not-entered'} value={uniform}>
+                  {uniform || 'Not entered'}
+                </option>
+              ))}
+            </select>
+          </label>
         </section>
 
         <section className="grid grid-cols-2 gap-2">
@@ -3604,7 +4100,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
             <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Hours / Rate</p>
             <p className="mt-1 text-sm font-black text-slate-950">{getShiftHours(shift).toFixed(1)} hrs</p>
-            <p className="text-xs font-bold text-emerald-800">{formatCurrency(Number(shift.hourlyRate) || 0)} per hour</p>
+            <p className="text-xs font-bold text-emerald-800">{getShiftHourlyRateLabel(shift)} per hour</p>
           </div>
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
             <p className="text-[10px] font-black uppercase tracking-wide text-amber-700">Estimated Pay</p>
@@ -3648,6 +4144,143 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
   return (
     <PageContainer surfaceClassName="min-h-screen bg-amber-50">
+      <style>{`
+        .csc-shift-filter-grid {
+          display: grid;
+          width: 100%;
+          grid-template-columns:
+            minmax(0, 1.22fr)
+            minmax(0, 1.08fr)
+            minmax(0, 0.82fr)
+            minmax(0, 1fr)
+            minmax(0, 1.35fr);
+          align-items: stretch;
+          gap: 0.5rem;
+        }
+
+        .csc-shift-filter-venue {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .csc-shift-filter-month {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .csc-shift-filter-status {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .csc-shift-filter-month-button {
+          width: 100%;
+          min-width: 0;
+          justify-content: center;
+        }
+
+        .csc-shift-filter-search {
+          width: 100%;
+          min-width: 0;
+          flex: none;
+        }
+
+        .csc-shift-filter-search input {
+          width: 100%;
+          min-width: 0;
+        }
+
+        @media (max-width: 639px) {
+          .csc-shift-browser {
+            padding: 0.625rem;
+            border-radius: 1rem;
+          }
+
+          .csc-shift-filter-grid {
+            display: grid;
+            width: 100%;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.375rem;
+          }
+
+          .csc-shift-filter-control {
+            width: 100%;
+            min-width: 0;
+            height: 2.25rem;
+            padding-left: 0.5rem;
+            padding-right: 1.5rem;
+            font-size: 0.6875rem;
+          }
+
+          .csc-shift-filter-venue,
+          .csc-shift-filter-month,
+          .csc-shift-filter-status {
+            width: 100%;
+            min-width: 0;
+          }
+
+          .csc-shift-filter-month-button {
+            width: 2.25rem;
+            min-width: 2.25rem;
+            height: 2.25rem;
+            justify-content: center;
+            padding: 0;
+          }
+
+          .csc-shift-month-label {
+            display: none;
+          }
+
+          .csc-shift-filter-search {
+            grid-column: 2 / -1;
+            width: 100%;
+            min-width: 0;
+            flex: none;
+          }
+
+          .csc-shift-filter-search input {
+            width: 100%;
+            height: 2.25rem;
+          }
+        }
+
+        @media print {
+          @page { margin: 0.45in; }
+          body.csc-section-printing * { visibility: hidden !important; }
+          body.csc-section-printing .csc-print-target,
+          body.csc-section-printing .csc-print-target * { visibility: visible !important; }
+          body.csc-section-printing .csc-print-target {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+          }
+          body.csc-section-printing .csc-print-target .csc-print-scroll {
+            flex: none !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          body.csc-section-printing .csc-print-target article {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          body.csc-section-printing .csc-no-print,
+          body.csc-section-printing .csc-no-print *,
+          body.csc-section-printing .csc-print-target button,
+          body.csc-section-printing .csc-print-target input,
+          body.csc-section-printing .csc-print-target select,
+          body.csc-section-printing .csc-print-target textarea {
+            display: none !important;
+          }
+        }
+      `}</style>
       <div className="flex flex-col gap-3 bg-amber-50 py-3 sm:gap-6 sm:py-6">
         <TabPageHeader
           icon={BriefcaseBusiness}
@@ -3701,7 +4334,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           }
         />
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section
+          ref={shiftBrowserRef}
+          className="csc-shift-browser scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
           <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <h2 className="text-xl font-extrabold text-slate-950">Scheduled Shifts</h2>
@@ -3713,13 +4349,32 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={handleShowFullShiftList}
-                title="Show full CSC shift list"
-                aria-label="Show full CSC shift list"
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-black px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+                onClick={handleToggleShiftListLength}
+                disabled={filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT}
+                title={
+                  filteredShifts.length > DEFAULT_VISIBLE_SHIFT_COUNT
+                    ? allShiftRowsVisible
+                      ? `Collapse to ${DEFAULT_VISIBLE_SHIFT_COUNT} shifts`
+                      : `Show all ${filteredShifts.length} shifts`
+                    : undefined
+                }
+                aria-label={
+                  filteredShifts.length > DEFAULT_VISIBLE_SHIFT_COUNT
+                    ? allShiftRowsVisible
+                      ? `Collapse to ${DEFAULT_VISIBLE_SHIFT_COUNT} shifts`
+                      : `Show all ${filteredShifts.length} shifts`
+                    : 'All matching shifts are already visible'
+                }
+                aria-expanded={allShiftRowsVisible}
+                aria-hidden={filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT}
+                className={`inline-flex h-10 w-40 shrink-0 items-center justify-center gap-2 rounded-lg bg-black px-3 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                  filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT ? 'invisible pointer-events-none' : ''
+                }`}
               >
-                <ListChecks className="h-4 w-4" />
-                <span>Show Full List</span>
+                <ListChecks className="h-4 w-4 shrink-0" />
+                <span className="truncate">
+                  {allShiftRowsVisible ? `Collapse to ${DEFAULT_VISIBLE_SHIFT_COUNT}` : `Show All ${filteredShifts.length}`}
+                </span>
               </button>
               <button
                 type="button"
@@ -3735,7 +4390,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </button>
               <button
                 type="button"
-                onClick={() => setShowActiveOnly((current) => !current)}
+                onClick={() => {
+                  const nextShowActiveOnly = !showActiveOnly;
+                  setShowActiveOnly(nextShowActiveOnly);
+                  if (nextShowActiveOnly) setStatusFilter('All');
+                }}
                 title={showActiveOnly ? 'Show All' : 'Show Active'}
                 aria-label={showActiveOnly ? 'Show all CSC shifts' : 'Show only active CSC shifts'}
                 aria-pressed={showActiveOnly}
@@ -3756,21 +4415,233 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </button>
               <button
                 type="button"
-                onClick={() => setIsShiftTableCollapsed(false)}
+                onClick={handleExpandAllShifts}
                 title="Expand All"
-                aria-label="Expand CSC shifts table"
+                aria-label={`Expand all ${filteredShifts.length} CSC shifts`}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-600 text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
               >
                 <ChevronRight className="h-5 w-5" />
               </button>
-              <div className="rounded-full bg-blue-700 px-3 py-2 text-xs font-extrabold text-white shadow-sm">
+              <button
+                type="button"
+                onClick={handleExpandAllActiveShifts}
+                title={`Expand all ${activeShiftCount} active CSC shifts`}
+                aria-label={`Expand all ${activeShiftCount} active CSC shifts`}
+                className="rounded-full bg-blue-700 px-3 py-2 text-xs font-extrabold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+              >
                 Active {activeShiftCount}
-              </div>
-              <div className="rounded-full bg-slate-100 px-3 py-2 text-xs font-extrabold text-slate-700">
-                Showing {visibleShiftCount}
+              </button>
+              <div className="inline-flex w-32 justify-center rounded-full bg-slate-100 px-3 py-2 text-xs font-extrabold tabular-nums text-slate-700">
+                Showing {visibleShiftCount} of {filteredShifts.length}
               </div>
             </div>
           </div>
+
+          <div className="csc-shift-filter-grid mb-4 flex flex-wrap gap-2">
+            <div ref={venueFilterRef} className="csc-shift-filter-venue relative">
+              <button
+                type="button"
+                onClick={() => setShowVenueFilter((current) => !current)}
+                aria-haspopup="true"
+                aria-expanded={showVenueFilter}
+                className="csc-shift-filter-control flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-blue-700 bg-blue-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+              >
+                <span className="truncate">{venueFilterLabel}</span>
+                <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showVenueFilter ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showVenueFilter ? (
+                <div className="absolute left-0 top-full z-50 mt-1 w-[20rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-violet-200 bg-white shadow-xl">
+                  <label className="flex cursor-pointer items-center gap-3 border-b border-violet-100 bg-violet-50 px-3 py-2.5 font-extrabold text-violet-950 hover:bg-violet-100">
+                    <input
+                      ref={(input) => {
+                        if (input) input.indeterminate = someVenuesSelected;
+                      }}
+                      type="checkbox"
+                      checked={allVenuesSelected}
+                      onChange={(event) => setExcludedVenues(event.target.checked ? [] : venueNames)}
+                      className="h-4 w-4 rounded border-violet-300 text-violet-700 focus:ring-violet-500"
+                    />
+                    <span>All venues</span>
+                  </label>
+                  <div className="max-h-72 overflow-y-auto py-1">
+                    {venueNames.map((venue) => {
+                      const eventCalendarUrl = VENUE_EVENT_CALENDAR_URLS[venue];
+
+                      return (
+                        <div
+                          key={venue}
+                          className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-violet-950 hover:bg-violet-50"
+                        >
+                          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={!excludedVenueSet.has(venue)}
+                              onChange={() => toggleVenue(venue)}
+                              className="h-4 w-4 shrink-0 rounded border-violet-300 text-violet-700 focus:ring-violet-500"
+                            />
+                            <span className="min-w-0 break-words">{venue}</span>
+                          </label>
+                          {eventCalendarUrl ? (
+                            <a
+                              href={eventCalendarUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-violet-200 bg-white px-2 py-1 text-[11px] font-extrabold text-violet-800 no-underline shadow-sm hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                              aria-label={`Open ${venue} event calendar`}
+                              title={`Open ${venue} event calendar`}
+                            >
+                              Events
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-between border-t border-violet-100 bg-slate-50 px-3 py-2">
+                    <span className="text-xs font-bold text-slate-600">{selectedVenueCount} selected</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowVenueFilter(false)}
+                      className="rounded-md bg-violet-700 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-violet-800"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <select
+              value={monthFilter}
+              onChange={(event) => setMonthFilter(event.target.value)}
+              className="csc-shift-filter-control csc-shift-filter-month h-10 rounded-lg border border-indigo-700 bg-indigo-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-indigo-800 focus:border-indigo-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            >
+              <option value="All">All months</option>
+              {monthOptions.map((month) => (
+                <option key={month.monthKey} value={month.monthKey}>
+                  {month.label} ({month.count})
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(event) => handleStatusFilterChange(event.target.value)}
+              className="csc-shift-filter-control csc-shift-filter-status h-10 rounded-lg border border-violet-700 bg-violet-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-violet-800 focus:border-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+            >
+              <option value="All">All statuses</option>
+              {SHIFT_STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setShowMonthOverview((current) => !current)}
+              aria-expanded={showMonthOverview}
+              aria-controls="csc-shifts-month-overview"
+              aria-label={showMonthOverview ? 'Hide shift month overview' : 'View shifts by month'}
+              title={showMonthOverview ? 'Hide month overview' : 'View shifts by month'}
+              className={`csc-shift-filter-month-button inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-extrabold transition ${
+                showMonthOverview
+                  ? 'border-fuchsia-800 bg-fuchsia-800 text-white shadow-sm hover:bg-fuchsia-900'
+                  : 'border-fuchsia-700 bg-fuchsia-700 text-white shadow-sm hover:bg-fuchsia-800'
+              }`}
+            >
+              <CalendarDays className="h-4 w-4" />
+              <span className="csc-shift-month-label">{showMonthOverview ? 'Hide Months' : 'View by Month'}</span>
+            </button>
+
+            <label className="csc-shift-filter-search relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={localSearch}
+                onChange={(event) => setLocalSearch(event.target.value)}
+                placeholder="Search shifts"
+                className="h-10 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm"
+              />
+            </label>
+          </div>
+
+          {showMonthOverview ? (
+            <div id="csc-shifts-month-overview" className="mb-5 rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 p-4 shadow-inner">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-violet-950">Shifts by Month</h3>
+                  <p className="text-sm font-medium text-slate-600">
+                    {allVenuesSelected
+                      ? 'Showing all venues.'
+                      : `Showing ${selectedVenueCount} of ${venueNames.length} venues.`}{' '}
+                    Choose a month to filter the Scheduled Shifts list below.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMonthFilter('All')}
+                  className={`inline-flex w-fit items-center rounded-lg px-3 py-2 text-sm font-extrabold ${
+                    monthFilter === 'All'
+                      ? 'bg-violet-700 text-white'
+                      : 'border border-violet-300 bg-white text-violet-800 hover:bg-violet-50'
+                  }`}
+                >
+                  All Months
+                </button>
+              </div>
+
+              {monthlyShiftGroups.length ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {monthlyShiftGroups.map((group) => (
+                    <button
+                      key={group.monthKey}
+                      type="button"
+                      onClick={() => handleViewMonth(group.monthKey)}
+                      className={`rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                        monthFilter === group.monthKey
+                          ? 'border-violet-600 bg-violet-700 text-white shadow-md'
+                          : 'border-violet-200 bg-white text-slate-950 hover:border-violet-400'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-base font-black">{group.label}</p>
+                          <p className={`mt-1 text-sm font-bold ${monthFilter === group.monthKey ? 'text-violet-100' : 'text-slate-600'}`}>
+                            {group.shifts.length} shift{group.shifts.length === 1 ? '' : 's'}
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-black ${
+                          monthFilter === group.monthKey ? 'bg-white/20 text-white' : 'bg-violet-100 text-violet-900'
+                        }`}>
+                          View
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {group.venueCounts.map(([venue, count]) => (
+                          <span
+                            key={venue}
+                            className={`rounded-full px-2 py-1 text-[11px] font-bold ${
+                              monthFilter === group.monthKey
+                                ? 'bg-white/15 text-white'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {venue}: {count}
+                          </span>
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-violet-300 bg-white/70 p-6 text-center text-sm font-bold text-slate-600">
+                  No months match the current venue, status, or search filters.
+                </div>
+              )}
+            </div>
+          ) : null}
 
           <>
 
@@ -3780,7 +4651,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 <GripVertical className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" />
                 <button
                   type="button"
-                  onClick={() => setIsShiftTableCollapsed((current) => !current)}
+                  onClick={handleToggleShiftTable}
                   className="rounded p-1 text-white transition-colors hover:bg-slate-800"
                   aria-label={isShiftTableCollapsed ? 'Expand CSC Shifts' : 'Collapse CSC Shifts'}
                   title={isShiftTableCollapsed ? 'Expand CSC Shifts' : 'Collapse CSC Shifts'}
@@ -3790,13 +4661,18 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-wrap">
                   <BriefcaseBusiness className="h-5 w-5 shrink-0 text-yellow-300" />
                   <h3 className="whitespace-nowrap text-base font-semibold text-white sm:text-lg">CSC Shifts</h3>
-                  <span
+                  <button
+                    type="button"
+                    onClick={handleExpandAllActiveShifts}
                     className="inline-flex shrink-0 items-center rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-black text-white shadow-sm sm:px-3 sm:py-1 sm:text-xs sm:uppercase sm:tracking-wide"
-                    title={`${activeShiftCount} active CSC shifts`}
+                    title={`Expand all ${activeShiftCount} active CSC shifts`}
+                    aria-label={`Expand all ${activeShiftCount} active CSC shifts`}
                   >
                     Active {activeShiftCount}
+                  </button>
+                  <span className="hidden w-32 shrink-0 text-xs font-semibold tabular-nums text-slate-400 sm:inline-block">
+                    Showing {visibleShiftCount} of {filteredShifts.length}
                   </span>
-                  <span className="hidden text-xs font-semibold text-slate-400 sm:inline">Showing {visibleShiftCount}</span>
                 </div>
               </div>
 
@@ -3836,7 +4712,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             {!isShiftTableCollapsed ? (
               <>
           {premiumView ? (            <div className="grid gap-4 xl:grid-cols-2">
-              {filteredShifts.map((shift) => (
+              {displayedShifts.map((shift) => (
                 <article key={shift.id} className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
@@ -3874,6 +4750,19 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <select
+                      value={shift.uniform || ''}
+                      onChange={(event) => updateShift(shift.id, { uniform: event.target.value })}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                      title="Update uniform"
+                      aria-label="Update uniform"
+                    >
+                      {UNIFORM_OPTIONS.map((uniform) => (
+                        <option key={uniform || 'not-entered'} value={uniform}>
+                          {uniform || 'Not entered'}
+                        </option>
+                      ))}
+                    </select>
                     <select
                       value={shift.shiftStatus}
                       onChange={(event) => updateShift(shift.id, { shiftStatus: event.target.value })}
@@ -3936,11 +4825,21 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   </div>
                 </article>
               ))}
+              {filteredShifts.length > DEFAULT_VISIBLE_SHIFT_COUNT ? (
+                <div className="flex justify-center xl:col-span-2">
+                  {renderShiftListPagingControls()}
+                </div>
+              ) : null}
             </div>
           ) : (
           <>
           <div className="grid gap-3 p-2 sm:hidden">
-            {filteredShifts.map((shift) => renderMobileShiftCard(shift))}
+            {displayedShifts.map((shift) => renderMobileShiftCard(shift))}
+            {filteredShifts.length > DEFAULT_VISIBLE_SHIFT_COUNT ? (
+              <div className="flex justify-center px-2 pb-2 pt-1">
+                {renderShiftListPagingControls()}
+              </div>
+            ) : null}
           </div>
           <div className="hidden overflow-x-auto rounded-xl border border-slate-200 sm:block">
             <table className="min-w-[1000px] table-fixed divide-y divide-slate-200 text-left text-sm">
@@ -3961,7 +4860,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {filteredShifts.map((shift) => (
+                {displayedShifts.map((shift) => (
                   <tr key={shift.id} className="hover:bg-yellow-50/60">
                     <td className="px-3 py-3 align-top">
                       <div className="font-bold text-slate-950">{shift.venue}</div>
@@ -3991,10 +4890,26 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <div className="max-w-full overflow-hidden whitespace-normal break-words font-semibold leading-snug">{shift.event}</div>
                       <div className="mt-2 grid max-w-full grid-cols-2 gap-x-3 gap-y-1 overflow-hidden text-xs text-slate-600">
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Hours:</span> {getShiftHours(shift).toFixed(1)}</div>
-                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Rate:</span> {formatCurrency(Number(shift.hourlyRate) || 0)}</div>
+                        <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Rate:</span> {getShiftHourlyRateLabel(shift)}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Est. Pay:</span> {formatCurrency(getEstimatedPay(shift))}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Status:</span> {shift.shiftStatus}</div>
                         <div className="min-w-0 break-words"><span className="font-bold text-slate-700">Paid:</span> {getShiftPaymentStatusLabel(shift)}</div>
+                        <label className="col-span-2 grid min-w-0 gap-1">
+                          <span className="font-bold text-slate-700">Uniform:</span>
+                          <select
+                            value={shift.uniform || ''}
+                            onChange={(event) => updateShift(shift.id, { uniform: event.target.value })}
+                            className="min-w-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-bold text-slate-900 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                            title="Update uniform"
+                            aria-label="Update uniform"
+                          >
+                            {UNIFORM_OPTIONS.map((uniform) => (
+                              <option key={uniform || 'not-entered'} value={uniform}>
+                                {uniform || 'Not entered'}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                         {shift.googleCalendarEventId || shift.googleCalendarEventLink ? (
                           <div className="min-w-0 break-words text-green-700">
                             <span className="font-bold">Calendar:</span> Added
@@ -4035,6 +4950,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     </td>
                   </tr>
                 ))}
+                {filteredShifts.length > DEFAULT_VISIBLE_SHIFT_COUNT ? (
+                  <tr>
+                    <td colSpan={5} className="bg-slate-50 px-4 py-4 text-center">
+                      <div className="flex justify-center">
+                        {renderShiftListPagingControls()}
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -4105,13 +5029,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           <div className="mb-3">
             <h2 className="text-lg font-extrabold text-black">Hours Worked Summary</h2>
             <p className="text-xs text-black">
-              Worked hours include shifts marked Done. Weeks run Monday through Sunday. Scheduled hours exclude cancelled shifts.
+              Worked hours include shifts marked Done. Weeks run Saturday through Friday. Scheduled hours exclude cancelled shifts.
             </p>
           </div>
 
           <div className="grid gap-3 text-black sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-black">
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Week</p>
+              <p className="mt-0.5 text-[11px] font-bold text-blue-900">
+                {hoursAnalytics.currentWeekLabel}
+              </p>
               <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.currentWeekWorkedHours.toFixed(1)} hrs</p>
               <p className="mt-1 text-xs font-bold text-black">
                 Scheduled: {hoursAnalytics.currentWeekScheduledHours.toFixed(1)}
@@ -4170,9 +5097,29 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         </td>
                       </tr>
                     ) : hoursAnalytics.weekly.map((week) => (
-                      <tr key={week.weekKey} className="bg-white">
+                      <tr
+                        key={week.weekKey}
+                        className={
+                          week.weekKey === hoursAnalytics.currentWeekKey
+                            ? 'bg-blue-50'
+                            : 'bg-white'
+                        }
+                      >
                         <td className="px-2 py-2 font-bold text-black">
-                          {formatWeekRange(week.startDate, week.endDate)}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedWeekKey(week.weekKey)}
+                            className="-mx-1 inline-flex items-center rounded px-1 py-0.5 text-left font-bold text-black no-underline transition-colors hover:bg-amber-200 focus-visible:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                            aria-label={`Show shifts worked for ${formatWeekRange(week.startDate, week.endDate)}`}
+                            title="Show shifts worked this week"
+                          >
+                            {formatWeekRange(week.startDate, week.endDate)}
+                            {week.weekKey === hoursAnalytics.currentWeekKey ? (
+                              <span className="ml-1.5 rounded-full bg-blue-700 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-white">
+                                Current
+                              </span>
+                            ) : null}
+                          </button>
                         </td>
                         <td className="border-l border-slate-100 px-2 py-2 text-right font-bold text-black">
                           {week.scheduledHours.toFixed(1)}
@@ -4261,29 +5208,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </label>
               <button
                 type="button"
-                onClick={() => {
-                  setMonthRangeMode('historical');
-                  setSelectedMonth('All');
-                }}
+                onClick={() => setMonthRangeMode('historical')}
                 title="Show historical all-time monthly records"
                 aria-label="Show historical all-time monthly records"
                 className="inline-flex items-center gap-1.5 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800"
               >
                 <History className="h-4 w-4" />
                 Historical All-Time
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedMonth('All')}
-                title="Show all months in the shift table"
-                aria-label="Show all CSC shift months in the shift table"
-                className={`rounded-full px-3 py-1.5 text-xs font-extrabold shadow-sm transition ${
-                  selectedMonth === 'All'
-                    ? 'bg-black text-white'
-                    : 'border border-slate-300 bg-white text-slate-800 hover:bg-slate-100'
-                }`}
-              >
-                All Months
               </button>
               <div className="text-xs font-bold text-slate-700">{monthlySummaryDateLabel}</div>
             </div>
@@ -4298,14 +5229,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <button
                 key={month.monthKey}
                 type="button"
-                onClick={() => {
-                  setSelectedMonth(month.monthKey);
-                  setSelectedPaidMonthKey(month.monthKey);
-                }}
-                title={`Show CSC shifts for ${month.label}`}
-                aria-label={`Show CSC shifts for ${month.label}`}
+                onClick={() => setSelectedPaidMonthKey(month.monthKey)}
+                title={`Open monthly pay details for ${month.label}`}
+                aria-label={`Open monthly pay details for ${month.label}`}
                 className={`rounded-xl border p-3 text-left shadow-sm transition hover:shadow-md ${
-                  selectedMonth === month.monthKey || selectedPaidMonthKey === month.monthKey
+                  selectedPaidMonthKey === month.monthKey
                     ? 'border-yellow-400 bg-yellow-50 text-yellow-950'
                     : 'border-slate-200 bg-slate-50 text-slate-900'
                 }`}
@@ -4544,12 +5472,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           </div>
                         )}
                         <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
+                          <div className="font-extrabold text-slate-700">Uniform</div>
+                          <div>{shift.uniform || 'Not entered'}</div>
+                        </div>
+                        <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
                           <div className="font-extrabold text-slate-700">Hours</div>
                           <div>{getShiftHours(shift).toFixed(1)}</div>
                         </div>
                         <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
                           <div className="font-extrabold text-slate-700">Hourly Rate</div>
-                          <div>{formatCurrency(Number(shift.hourlyRate) || 0)}</div>
+                          <div>{getShiftHourlyRateLabel(shift)}</div>
                         </div>
                         <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
                           <div className="font-extrabold text-slate-700">Estimated Pay</div>
@@ -4589,9 +5521,143 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </div>
         )}
 
+        {selectedWorkedWeek && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="worked-week-title"
+          >
+            <div
+              id="csc-worked-week-print"
+              className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                <div>
+                  <h2 id="worked-week-title" className="text-xl font-extrabold text-slate-950">
+                    Shifts Worked, {selectedWorkedWeek.label}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Only shifts marked Done are included.
+                  </p>
+                </div>
+                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintSection('csc-worked-week-print', `CSC Shifts Worked - ${selectedWorkedWeek.label}`)}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    aria-label={`Print shifts worked for ${selectedWorkedWeek.label}`}
+                    title={`Print shifts worked for ${selectedWorkedWeek.label}`}
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print
+                  </button>
+                  <CloseScreenButton onClick={() => setSelectedWeekKey('')} />
+                </div>
+              </div>
+
+              <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Worked Shifts</p>
+                    <p className="mt-1 text-xl font-extrabold text-slate-950">
+                      {selectedWorkedWeek.workedShiftCount} out of {selectedWorkedWeek.shiftCount}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Worked Hours</p>
+                    <p className="mt-1 text-xl font-extrabold text-slate-950">{selectedWorkedWeek.workedHours.toFixed(1)}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Estimated Earned Pay</p>
+                    <p className="mt-1 text-xl font-extrabold text-emerald-700">{formatCurrency(selectedWorkedWeek.earnedPay)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="csc-print-scroll flex-1 overflow-y-auto p-5">
+                {selectedWorkedWeek.workedShifts.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                    <p className="text-sm font-bold text-slate-700">No shifts were marked Done for this week.</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {selectedWorkedWeek.workedShifts.map((shift) => (
+                      <article
+                        key={`${shift.recordSource}-${shift.id}`}
+                        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="truncate text-lg font-extrabold text-slate-950">{shift.venue || 'CSC Shift'}</h3>
+                            <p className="mt-0.5 text-sm font-bold text-slate-700">{shift.event || 'Event not entered'}</p>
+                            <p className="mt-0.5 text-xs font-semibold text-slate-500">{shift.jobName || 'Job name not entered'}</p>
+                          </div>
+                          <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
+                            <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-green-800">
+                              Done
+                            </span>
+                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-700">
+                              {shift.recordSource === 'archived' ? 'Archived' : 'Active'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-2 text-sm text-slate-700">
+                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                            <span className="font-extrabold text-slate-950">Start</span>
+                            <span>{formatDate(shift.startDate)} {formatTime(shift.startTime)}</span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                            <span className="font-extrabold text-slate-950">Finish</span>
+                            <span>{formatDate(shift.finishDate)} {formatTime(shift.finishTime)}</span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                            <span className="font-extrabold text-slate-950">Hours</span>
+                            <span>{getShiftHours(shift).toFixed(1)}</span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                            <span className="font-extrabold text-slate-950">Uniform</span>
+                            <span>{shift.uniform || 'Not entered'}</span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                            <span className="font-extrabold text-slate-950">Est. Pay</span>
+                            <span>{formatCurrency(getEstimatedPay(shift))}</span>
+                          </div>
+                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                            <span className="font-extrabold text-slate-950">Paid Status</span>
+                            <span>{getShiftPaymentStatusLabel(shift)}</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedWeekKey('');
+                              handleOpenShiftDetails(shift);
+                            }}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-800 hover:bg-cyan-100"
+                          >
+                            <PanelRightOpen className="h-4 w-4" />
+                            Details
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {selectedPaidMonth && (
           <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-3">
-            <div className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div
+              id="csc-monthly-shifts-print"
+              className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+            >
               <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
                 <div>
                   <h2 className="text-lg font-extrabold text-slate-950">CSC Shifts - {selectedPaidMonth.label}</h2>
@@ -4599,7 +5665,19 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     {selectedPaidMonth.paidShifts.length} shifts, {selectedPaidMonth.paidCount} paid, {selectedPaidMonth.owedCount} still owed, {selectedPaidMonth.activeCount} active, {selectedPaidMonth.archivedCount} archived.
                   </p>
                 </div>
-                <CloseScreenButton onClick={() => setSelectedPaidMonthKey('')} />
+                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintSection('csc-monthly-shifts-print', `CSC Shifts - ${selectedPaidMonth.label}`)}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    aria-label={`Print CSC shifts for ${selectedPaidMonth.label}`}
+                    title={`Print CSC shifts for ${selectedPaidMonth.label}`}
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print
+                  </button>
+                  <CloseScreenButton onClick={() => setSelectedPaidMonthKey('')} />
+                </div>
               </div>
 
               <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -4623,7 +5701,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="csc-print-scroll flex-1 overflow-y-auto p-4">
                 {selectedPaidMonth.paidShifts.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-center text-xs font-semibold text-slate-600">
                     No CSC shifts are saved for {selectedPaidMonth.label}.
@@ -4756,16 +5834,31 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
         {selectedDetailShift && (
           <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4">
-            <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div
+              id="csc-shift-details-print"
+              className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            >
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <div>
                   <h2 className="text-xl font-extrabold text-slate-950">CSC Shift Details</h2>
                   <p className="text-sm text-slate-600">Full shift record with restore, edit, archive, and delete actions.</p>
                 </div>
-                <CloseScreenButton onClick={handleCloseShiftDetails} />
+                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintSection('csc-shift-details-print', `CSC Shift Details - ${selectedDetailShift.venue || 'Shift'}`)}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    aria-label="Print CSC shift details"
+                    title="Print CSC shift details"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print
+                  </button>
+                  <CloseScreenButton onClick={handleCloseShiftDetails} />
+                </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5">
+              <div className="csc-print-scroll flex-1 overflow-y-auto p-5">
                 <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-5">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
@@ -4803,7 +5896,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <p className="text-xs font-extrabold uppercase text-slate-500">Pay</p>
-                    <p className="mt-1 font-bold text-slate-950">{getShiftHours(selectedDetailShift).toFixed(1)} hours at {formatCurrency(Number(selectedDetailShift.hourlyRate) || 0)}</p>
+                    <p className="mt-1 font-bold text-slate-950">{getShiftHours(selectedDetailShift).toFixed(1)} hours at {getShiftHourlyRateLabel(selectedDetailShift)}</p>
                     <p className="text-sm font-bold text-emerald-700">Estimated Pay: {formatCurrency(getEstimatedPay(selectedDetailShift))}</p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -4832,7 +5925,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </div>
               </div>
 
-              <div className="border-t border-slate-200 bg-slate-50 p-4">
+              <div className="csc-no-print border-t border-slate-200 bg-slate-50 p-4">
                 {selectedDetailShiftIsArchived ? (
                   <div className="grid gap-3">
                     {selectedDetailShift.shiftStatus !== 'Cancelled'
@@ -4862,7 +5955,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     </div>
                   </div>
                 ) : (
-                  renderShiftActions(selectedDetailShift)
+                  renderShiftDetailActions(selectedDetailShift)
                 )}
               </div>
             </div>
@@ -4871,17 +5964,32 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
         {showArchiveDrawer && (
           <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4">
-            <div className="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div
+              id="csc-shift-archive-print"
+              className="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            >
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
                 <div>
                   <h2 className="text-xl font-extrabold text-slate-950">CSC Shift Archive</h2>
                   <p className="text-sm text-slate-600">Restore archived shifts or permanently delete old records.</p>
                 </div>
-                <CloseScreenButton onClick={() => setShowArchiveDrawer(false)} />
+                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintSection('csc-shift-archive-print', 'CSC Shift Archive')}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    aria-label="Print CSC shift archive"
+                    title="Print CSC shift archive"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print
+                  </button>
+                  <CloseScreenButton onClick={() => setShowArchiveDrawer(false)} />
+                </div>
               </div>
 
               <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
-                <div className="grid gap-3 lg:grid-cols-[1fr_220px_auto]">
+                <div className="csc-no-print grid gap-3 lg:grid-cols-[1fr_220px_auto]">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
@@ -4920,7 +6028,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </p>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5">
+              <div className="csc-print-scroll flex-1 overflow-y-auto p-5">
                 {filteredArchivedShifts.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-600">
                     No archived CSC shifts match the current filters.
@@ -5025,7 +6133,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     value={shiftEmailText}
                     onChange={(event) => {
                       setShiftEmailText(event.target.value);
-                      setScannedShift(null);
+                      setScannedShifts([]);
                     }}
                     rows={9}
                     placeholder={'Courtesy Shift Reminder & Important Info\n\nSchedule for : David Gregory Hallstrom II\nVenue: SoFi Stadium and Hollywood Park Shift No: 2 Shift: Vertical - Elevator and Escalator - TC Scheduled Start Time: 6/21/2026 5:30:00 AM Scheduled Finish: 6/21/2026 4:30:00 PM\n\nDNS ROSALIA N1\tThe Forum\t1ST RAMPS\tSecurity Guard\t6/29/2026 4:00:00 PM\t6/29/2026 11:30:00 PM\tENTRY POINT ADDRESS: 3600 Pincay Dr, Inglewood, CA, 90305 Parking will be at SoFi lot D.\tSIGN-IN IS NEXT TO THE BIG WHITE HOUSE ON THE SOUTHEAST CORNER OF THE PROPERTY.\tAll Black Everything.'}
@@ -5045,7 +6153,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     type="button"
                     onClick={() => {
                       setShiftEmailText('');
-                      setScannedShift(null);
+                      setScannedShifts([]);
                     }}
                     className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
                   >
@@ -5213,6 +6321,21 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     onChange={(event) => setNewShift((current) => ({ ...current, hourlyRate: event.target.value }))}
                     className="rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
                   />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  Uniform
+                  <select
+                    value={newShift.uniform || ''}
+                    onChange={(event) => setNewShift((current) => ({ ...current, uniform: event.target.value }))}
+                    className="rounded-lg border border-slate-300 px-3 py-2 font-normal focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                  >
+                    {UNIFORM_OPTIONS.map((uniform) => (
+                      <option key={uniform || 'not-entered'} value={uniform}>
+                        {uniform || 'Not entered'}
+                      </option>
+                    ))}
+                  </select>
                 </label>
 
                 <label className="grid gap-1 text-sm font-bold text-slate-700 md:col-span-2">

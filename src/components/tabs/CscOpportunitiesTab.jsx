@@ -46,6 +46,13 @@ const INTUIT_DOME_EVENTS_URL = 'https://www.intuitdome.com/events/event-schedule
 const ROSE_BOWL_EVENTS_URL = 'https://www.rosebowlstadium.com/events/calendar/list';
 const HOLLYWOOD_BOWL_EVENTS_URL =
   'https://www.hollywoodbowl.com/events/performances?Venue=Hollywood+Bowl&Season=upcoming';
+const SHRINE_EVENTS_URL = 'https://www.shrineauditorium.com/calendar/';
+const NOVO_THEATER_EVENTS_URL = 'https://www.thenovodtla.com/events';
+const LONG_BEACH_AMPHITHEATER_EVENTS_URL = 'https://fmbamp.com/events-tickets/';
+const LONG_BEACH_CONVENTION_CENTER_EVENTS_URL =
+  'https://www.lbentertainmentcenter.com/events/';
+const ROXY_EVENTS_URL = 'https://www.theroxy.com/shows/';
+const YOUTUBE_THEATER_EVENTS_URL = 'https://www.youtubetheater.com/events';
 const DEFAULT_HOURLY_RATE = '19.50';
 
 const EDITABLE_STATUS_OPTIONS = [
@@ -133,8 +140,15 @@ const VENUE_DEFINITIONS = [
     ],
     address: '665 W Jefferson Blvd, Los Angeles, CA 90007',
     logoPath: '/budget-dashboard-fs/venue-logos/shrine-auditorium.png',
-    sourceUrl: '',
+    sourceUrl: SHRINE_EVENTS_URL,
     schedulerPhone: '310-320-7223',
+  },
+  {
+    venue: 'Novo Theater',
+    aliases: ['novo theater', 'the novo', 'novo', 'the novo theater'],
+    address: '800 W Olympic Blvd, Los Angeles, CA 90015',
+    logoPath: '/budget-dashboard-fs/venue-logos/novo-theater.png',
+    sourceUrl: NOVO_THEATER_EVENTS_URL,
   },
   {
     venue: 'Intuit Dome',
@@ -155,6 +169,46 @@ const VENUE_DEFINITIONS = [
     schedulerName: 'Karen',
     schedulerPhone: '310-320-7223',
     schedulerExtension: '28102',
+  },
+  {
+    venue: 'Long Beach Amphitheater',
+    aliases: [
+      'long beach amphitheater',
+      'long beach amphitheatre',
+      'f&m bank amphitheater',
+      'f and m bank amphitheater',
+      'f m bank amphitheater',
+    ],
+    address: '',
+    logoPath: '/budget-dashboard-fs/venue-logos/long-beach-amphitheater.png',
+    sourceUrl: LONG_BEACH_AMPHITHEATER_EVENTS_URL,
+  },
+  {
+    venue: 'Long Beach Convention Center',
+    aliases: [
+      'long beach convention center',
+      'long beach convention & entertainment center',
+      'long beach convention and entertainment center',
+      'long beach entertainment center',
+      'convention center long beach',
+    ],
+    address: '300 E Ocean Blvd, Long Beach, CA 90802',
+    logoPath: '/budget-dashboard-fs/venue-logos/long-beach-convention-center.png',
+    sourceUrl: LONG_BEACH_CONVENTION_CENTER_EVENTS_URL,
+  },
+  {
+    venue: 'The Roxy',
+    aliases: ['the roxy', 'roxy theatre', 'roxy theater', 'the roxy theatre', 'the roxy theater'],
+    address: '9009 W Sunset Blvd, West Hollywood, CA 90069',
+    logoPath: '/budget-dashboard-fs/venue-logos/the-roxy.png',
+    sourceUrl: ROXY_EVENTS_URL,
+  },
+  {
+    venue: 'YouTube Theater',
+    aliases: ['youtube theater', 'youtube theatre'],
+    address: '1011 Stadium Dr, Inglewood, CA 90305',
+    logoPath: '/budget-dashboard-fs/venue-logos/youtube-theater.png',
+    sourceUrl: YOUTUBE_THEATER_EVENTS_URL,
   },
 ];
 
@@ -1251,7 +1305,7 @@ const isShrineScannerNoiseLine = (value = '') => {
   );
 };
 
-const parseShrineEvents = (text = '', sourceUrl = '') => {
+const parseShrineEvents = (text = '', sourceUrl = SHRINE_EVENTS_URL) => {
   const lines = String(text || '')
     .replace(/\u00a0/g, ' ')
     .replace(/\r/g, '\n')
@@ -1273,7 +1327,7 @@ const parseShrineEvents = (text = '', sourceUrl = '') => {
           eventDate: inlineEvent.eventDate,
           eventTime: inlineEvent.eventTime,
           sourceText: inlineEvent.sourceText,
-          eventUrl: sourceUrl || '',
+          eventUrl: sourceUrl || SHRINE_EVENTS_URL,
           status: 'New',
         })
       );
@@ -1322,7 +1376,7 @@ const parseShrineEvents = (text = '', sourceUrl = '') => {
         eventDate: dateDetails.eventDate,
         eventTime,
         sourceText: [lines[index], eventTime ? formatTime(eventTime) : '', eventLine].filter(Boolean).join('\n'),
-        eventUrl: sourceUrl || '',
+        eventUrl: sourceUrl || SHRINE_EVENTS_URL,
         status: 'New',
       })
     );
@@ -1331,6 +1385,614 @@ const parseShrineEvents = (text = '', sourceUrl = '') => {
   const byKey = new Map();
   parsed.forEach((item) => byKey.set(opportunityKey(item), item));
   return Array.from(byKey.values());
+};
+
+const getVenueScannerLines = (text = '') =>
+  String(text || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\r/g, '\n')
+    .split(/\n+/)
+    .map(sanitizeScannedLine)
+    .filter(Boolean);
+
+const parseVenueScannerTime = (value = '') => {
+  const cleaned = sanitizeScannedLine(value).replace(/\./g, '').trim();
+  const match = cleaned.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+
+  if (!match) return '';
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || 0);
+  const meridiem = match[3].toUpperCase();
+
+  if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return '';
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+  if (meridiem === 'PM' && hours !== 12) hours += 12;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
+const createVenueScannerDate = (monthName = '', dayValue = '', yearValue = '') => {
+  const month = SHRINE_MONTH_INDEX[String(monthName || '').replace(/\./g, '').toLowerCase()];
+  const day = Number(dayValue);
+  const year = Number(yearValue);
+
+  if (!month || !day || day > 31 || !year) return '';
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
+const inferVenueScannerYear = (monthName = '', explicitYear = '') => {
+  const parsedExplicitYear = Number(explicitYear || 0);
+  if (parsedExplicitYear) return parsedExplicitYear;
+
+  const month = SHRINE_MONTH_INDEX[String(monthName || '').replace(/\./g, '').toLowerCase()];
+  const now = new Date();
+  if (!month) return now.getFullYear();
+  return month < now.getMonth() + 1 ? now.getFullYear() + 1 : now.getFullYear();
+};
+
+const dedupeScannedOpportunities = (items = []) => {
+  const byKey = new Map();
+  items.forEach((item) => byKey.set(opportunityKey(item), item));
+  return Array.from(byKey.values());
+};
+
+const parseNovoDateTimeLine = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  const match = cleaned.match(
+    /^(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(20\d{2})(?:\s+(?:Show|Doors?)\s*:?\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
+  );
+
+  if (!match) return null;
+
+  const eventDate = createVenueScannerDate(match[1], match[2], match[3]);
+  if (!eventDate) return null;
+
+  return {
+    eventDate,
+    eventTime: parseVenueScannerTime(match[4] || ''),
+  };
+};
+
+const isNovoScannerNoiseLine = (value = '') => {
+  const cleaned = sanitizeScannedLine(value);
+  const normalized = normalizeText(cleaned);
+
+  if (!normalized) return true;
+  if (/^(with|featuring)\b/i.test(cleaned)) return true;
+  if (/\bpresents?:?$/i.test(cleaned)) return true;
+  if (/\btour(?:\s+\d{4})?$/i.test(cleaned)) return true;
+
+  return /^(calendar of events|calendar|events|upcoming shows|view all|buy tickets|load more events|ticketed by axs com|the novo|calendar partners suppliers|box office|about the novo|venue info|careers|extras|contact us)$/.test(
+    normalized
+  );
+};
+
+const parseNovoEvents = (text = '', sourceUrl = NOVO_THEATER_EVENTS_URL) => {
+  const lines = getVenueScannerLines(text);
+  const parsed = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const dateDetails = parseNovoDateTimeLine(lines[index]);
+    if (!dateDetails) continue;
+
+    let blockStart = index - 1;
+
+    while (
+      blockStart >= 0 &&
+      !parseNovoDateTimeLine(lines[blockStart]) &&
+      !/^buy tickets$/i.test(lines[blockStart])
+    ) {
+      blockStart -= 1;
+    }
+
+    const titleCandidates = lines
+      .slice(blockStart + 1, index)
+      .filter((line) => !isNovoScannerNoiseLine(line) && !/^https?:\/\//i.test(line));
+    const eventName = titleCandidates[titleCandidates.length - 1] || '';
+
+    if (!eventName) continue;
+
+    parsed.push(
+      createBlankOpportunity({
+        eventName,
+        venue: 'Novo Theater',
+        eventDate: dateDetails.eventDate,
+        eventTime: dateDetails.eventTime,
+        sourceText: [...lines.slice(blockStart + 1, index), lines[index]].join('\n'),
+        eventUrl: sourceUrl || NOVO_THEATER_EVENTS_URL,
+        status: 'New',
+      })
+    );
+  }
+
+  return dedupeScannedOpportunities(parsed);
+};
+
+const parseLongBeachAmphitheaterDateLine = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  const detailedMatch = cleaned.match(
+    /^([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(20\d{2})(?:\s*[•·|–—-]\s*(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?\s+)?(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
+  );
+
+  if (detailedMatch) {
+    const eventDate = createVenueScannerDate(
+      detailedMatch[1],
+      detailedMatch[2],
+      detailedMatch[3]
+    );
+
+    if (!eventDate) return null;
+
+    return {
+      eventDate,
+      eventTime: parseVenueScannerTime(detailedMatch[4] || ''),
+      isDetailed: true,
+    };
+  }
+
+  const shortMatch = cleaned.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,\s*(20\d{2}))?$/i);
+  if (!shortMatch) return null;
+
+  const year = inferVenueScannerYear(shortMatch[1], shortMatch[3]);
+  const eventDate = createVenueScannerDate(shortMatch[1], shortMatch[2], year);
+  if (!eventDate) return null;
+
+  return {
+    eventDate,
+    eventTime: '',
+    isDetailed: false,
+  };
+};
+
+const parseLongBeachAmphitheaterDateAt = (lines = [], index = 0) => {
+  const inlineDate = parseLongBeachAmphitheaterDateLine(lines[index]);
+
+  if (inlineDate) {
+    return {
+      ...inlineDate,
+      lineCount: 1,
+    };
+  }
+
+  const monthLine = sanitizeScannedLine(lines[index]);
+  const monthMatch = monthLine.match(
+    /^(Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\.?$/i
+  );
+  const dayLine = sanitizeScannedLine(lines[index + 1]);
+  const dayMatch = dayLine.match(/^(\d{1,2})(?:,?\s*(20\d{2}))?$/);
+
+  if (!monthMatch || !dayMatch) return null;
+
+  const year = inferVenueScannerYear(monthMatch[1], dayMatch[2]);
+  const eventDate = createVenueScannerDate(monthMatch[1], dayMatch[1], year);
+  if (!eventDate) return null;
+
+  return {
+    eventDate,
+    eventTime: '',
+    isDetailed: false,
+    lineCount: 2,
+  };
+};
+
+const parseLongBeachAmphitheaterTimeLine = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  if (
+    !/^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?\s+)?\d{1,2}(?::\d{2})?\s*(?:AM|PM)$/i.test(
+      cleaned
+    )
+  ) {
+    return '';
+  }
+
+  return parseVenueScannerTime(cleaned);
+};
+
+const isLongBeachAmphitheaterScannerNoiseLine = (value = '') => {
+  const cleaned = sanitizeScannedLine(value);
+  const normalized = normalizeText(cleaned);
+
+  if (!normalized) return true;
+  if (/^(with|featuring)\b/i.test(cleaned)) return true;
+  if (/^image\b/i.test(cleaned)) return true;
+  if (parseLongBeachAmphitheaterTimeLine(cleaned)) return true;
+
+  return /^(events tickets|events and tickets|featured events|upcoming events|all events|buy tickets|premium|buy tickets premium|parking|venue info|f m bank amphitheater|search|sign up|private events|premium experiences|about us|partner with us|contact us|careers)$/.test(
+    normalized
+  );
+};
+
+const parseLongBeachAmphitheaterEvents = (
+  text = '',
+  sourceUrl = LONG_BEACH_AMPHITHEATER_EVENTS_URL
+) => {
+  const lines = getVenueScannerLines(text);
+  const parsed = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const dateDetails = parseLongBeachAmphitheaterDateAt(lines, index);
+    if (!dateDetails) continue;
+
+    const contentStartIndex = index + dateDetails.lineCount;
+    let nextDateIndex = lines.length;
+    for (let cursor = contentStartIndex; cursor < lines.length; cursor += 1) {
+      if (parseLongBeachAmphitheaterDateAt(lines, cursor)) {
+        nextDateIndex = cursor;
+        break;
+      }
+    }
+
+    let eventName = '';
+    let eventTime = dateDetails.eventTime;
+    let sourceLines = [];
+
+    if (dateDetails.isDetailed) {
+      let blockStart = index - 1;
+      while (
+        blockStart >= 0 &&
+        !parseLongBeachAmphitheaterDateLine(lines[blockStart]) &&
+        !/^(?:buy tickets|buy tickets premium)$/i.test(lines[blockStart])
+      ) {
+        blockStart -= 1;
+      }
+
+      const candidates = lines
+        .slice(blockStart + 1, index)
+        .filter(
+          (line) =>
+            !isLongBeachAmphitheaterScannerNoiseLine(line) && !/^https?:\/\//i.test(line)
+        );
+      eventName = candidates[candidates.length - 1] || '';
+      sourceLines = [...lines.slice(blockStart + 1, index), lines[index]];
+    } else {
+      const blockLines = lines.slice(contentStartIndex, nextDateIndex);
+      eventName =
+        blockLines.find(
+          (line) =>
+            !isLongBeachAmphitheaterScannerNoiseLine(line) &&
+            !parseLongBeachAmphitheaterDateLine(line) &&
+            !/^https?:\/\//i.test(line)
+        ) || '';
+      eventTime =
+        blockLines.map(parseLongBeachAmphitheaterTimeLine).find(Boolean) || eventTime;
+      const uniqueBlockLines = blockLines.filter(
+        (line, lineIndex) =>
+          lineIndex === 0 ||
+          normalizeText(line) !== normalizeText(blockLines[lineIndex - 1])
+      );
+      sourceLines = [
+        ...lines.slice(index, contentStartIndex),
+        ...uniqueBlockLines,
+      ];
+    }
+
+    if (!eventName) continue;
+
+    const supportingActs = sourceLines.filter((line) =>
+      /^(with|featuring)\b/i.test(sanitizeScannedLine(line))
+    );
+
+    parsed.push(
+      createBlankOpportunity({
+        eventName,
+        venue: 'Long Beach Amphitheater',
+        eventDate: dateDetails.eventDate,
+        eventTime,
+        sourceText: sourceLines.join('\n'),
+        eventUrl: sourceUrl || LONG_BEACH_AMPHITHEATER_EVENTS_URL,
+        status: 'New',
+        notes: supportingActs.join('\n'),
+      })
+    );
+  }
+
+  return dedupeScannedOpportunities(parsed);
+};
+
+const parseLongBeachConventionCenterDateLine = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  const match = cleaned.match(
+    /^(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)?\.?,?\s*([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:\s*(?:-|–|—|to)\s*(?:[A-Za-z]{3,9}\.?\s+)?\d{1,2})?(?:,?\s*(20\d{2}))?(?:\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM))(?:\s*(?:-|–|—)\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM))?)?$/i
+  );
+
+  if (!match) return null;
+
+  const year = inferVenueScannerYear(match[1], match[3]);
+  const eventDate = createVenueScannerDate(match[1], match[2], year);
+  if (!eventDate) return null;
+
+  return {
+    eventDate,
+    eventTime: parseVenueScannerTime(match[4] || ''),
+  };
+};
+
+const isLongBeachConventionCenterScannerNoiseLine = (value = '') => {
+  const cleaned = sanitizeScannedLine(value);
+  const normalized = normalizeText(cleaned);
+
+  if (!normalized) return true;
+  if (/^https?:\/\//i.test(cleaned)) return true;
+  if (/^(exhibit hall|grand ballroom|prom \d|terrace theater|long beach arena)\b/i.test(cleaned)) {
+    return true;
+  }
+
+  return /^(upcoming events|view calendar|events|buy tickets|register|free event|more info|venue|venue convention center|convention center|long beach convention center|long beach convention entertainment center|concert event updates sign up|saved|search)$/.test(
+    normalized
+  );
+};
+
+const parseLongBeachConventionCenterEvents = (
+  text = '',
+  sourceUrl = LONG_BEACH_CONVENTION_CENTER_EVENTS_URL
+) => {
+  const lines = getVenueScannerLines(text);
+  const parsed = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const dateDetails = parseLongBeachConventionCenterDateLine(lines[index]);
+    if (!dateDetails) continue;
+
+    let blockStart = index - 1;
+    while (
+      blockStart >= 0 &&
+      !parseLongBeachConventionCenterDateLine(lines[blockStart]) &&
+      !/^more info$/i.test(lines[blockStart])
+    ) {
+      blockStart -= 1;
+    }
+
+    let nextDateIndex = lines.length;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (parseLongBeachConventionCenterDateLine(lines[cursor])) {
+        nextDateIndex = cursor;
+        break;
+      }
+    }
+
+    const priorCandidates = lines
+      .slice(blockStart + 1, index)
+      .filter(
+        (line) =>
+          !isLongBeachConventionCenterScannerNoiseLine(line) && !/^https?:\/\//i.test(line)
+      );
+    const followingCandidates = lines
+      .slice(index + 1, nextDateIndex)
+      .filter(
+        (line) =>
+          !isLongBeachConventionCenterScannerNoiseLine(line) &&
+          !parseLongBeachConventionCenterDateLine(line) &&
+          !/^https?:\/\//i.test(line)
+      );
+    const eventName = priorCandidates[0] || followingCandidates[0] || '';
+
+    if (!eventName) continue;
+
+    parsed.push(
+      createBlankOpportunity({
+        eventName,
+        venue: 'Long Beach Convention Center',
+        eventDate: dateDetails.eventDate,
+        eventTime: dateDetails.eventTime,
+        sourceText: [
+          ...lines.slice(blockStart + 1, index),
+          lines[index],
+          ...lines.slice(index + 1, nextDateIndex),
+        ].join('\n'),
+        eventUrl: sourceUrl || LONG_BEACH_CONVENTION_CENTER_EVENTS_URL,
+        status: 'New',
+      })
+    );
+  }
+
+  return dedupeScannedOpportunities(parsed);
+};
+
+const parseRoxyDateLine = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  const match = cleaned.match(
+    /^(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(20\d{2})(?:\s+(?:(?:Show|Doors?)\s*:?\s*)?(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
+  );
+
+  if (!match) return null;
+
+  const eventDate = createVenueScannerDate(match[1], match[2], match[3]);
+  if (!eventDate) return null;
+
+  return {
+    eventDate,
+    eventTime: parseVenueScannerTime(match[4] || ''),
+  };
+};
+
+const parseRoxyTimeLine = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  if (!/^(?:show|doors?)\s*:?\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)$/i.test(cleaned)) {
+    return '';
+  }
+  return parseVenueScannerTime(cleaned);
+};
+
+const isRoxyScannerNoiseLine = (value = '') => {
+  const cleaned = sanitizeScannedLine(value);
+  const normalized = normalizeText(cleaned);
+
+  if (!normalized) return true;
+  if (/^(with|featuring)\b/i.test(cleaned)) return true;
+  if (/\bpresents?:?$/i.test(cleaned)) return true;
+  if (parseRoxyTimeLine(cleaned)) return true;
+
+  return /^(shows|show|buy tickets|ticket info|faq|venue info|directions|prohibited items|history|contact us|newsletter|where to stay|rental info|search|goldenvoice|the roxy)$/.test(
+    normalized
+  );
+};
+
+const parseRoxyEvents = (text = '', sourceUrl = ROXY_EVENTS_URL) => {
+  const lines = getVenueScannerLines(text);
+  const parsed = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const dateDetails = parseRoxyDateLine(lines[index]);
+    if (!dateDetails) continue;
+
+    let blockStart = index - 1;
+    while (
+      blockStart >= 0 &&
+      !parseRoxyDateLine(lines[blockStart]) &&
+      !/^buy tickets$/i.test(lines[blockStart])
+    ) {
+      blockStart -= 1;
+    }
+
+    let nextDateIndex = lines.length;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (parseRoxyDateLine(lines[cursor])) {
+        nextDateIndex = cursor;
+        break;
+      }
+    }
+
+    const titleCandidates = lines
+      .slice(blockStart + 1, index)
+      .filter((line) => !isRoxyScannerNoiseLine(line) && !/^https?:\/\//i.test(line));
+    const eventName = titleCandidates[titleCandidates.length - 1] || '';
+    const eventTime =
+      dateDetails.eventTime ||
+      lines.slice(index + 1, nextDateIndex).map(parseRoxyTimeLine).find(Boolean) ||
+      '';
+
+    if (!eventName) continue;
+
+    parsed.push(
+      createBlankOpportunity({
+        eventName,
+        venue: 'The Roxy',
+        eventDate: dateDetails.eventDate,
+        eventTime,
+        sourceText: [
+          ...lines.slice(blockStart + 1, index),
+          lines[index],
+          ...lines.slice(index + 1, nextDateIndex),
+        ].join('\n'),
+        eventUrl: sourceUrl || ROXY_EVENTS_URL,
+        status: 'New',
+      })
+    );
+  }
+
+  return dedupeScannedOpportunities(parsed);
+};
+
+const parseYouTubeTheaterDateLine = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  const datedEventMatch = cleaned.match(
+    /^(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(20\d{2})(?:\s*\/\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
+  );
+
+  if (datedEventMatch) {
+    const eventDate = createVenueScannerDate(
+      datedEventMatch[1],
+      datedEventMatch[2],
+      datedEventMatch[3]
+    );
+    if (!eventDate) return null;
+
+    return {
+      eventDate,
+      eventTime: parseVenueScannerTime(datedEventMatch[4] || ''),
+    };
+  }
+
+  const dateRangeMatch = cleaned.match(
+    /^([A-Za-z]{3,9})\.?\s+(\d{1,2})\s*(?:-|–|—|to)\s*(?:[A-Za-z]{3,9}\.?\s+)?\d{1,2},\s*(20\d{2})$/i
+  );
+
+  if (!dateRangeMatch) return null;
+
+  const eventDate = createVenueScannerDate(
+    dateRangeMatch[1],
+    dateRangeMatch[2],
+    dateRangeMatch[3]
+  );
+  if (!eventDate) return null;
+
+  return {
+    eventDate,
+    eventTime: '',
+  };
+};
+
+const parseYouTubeTheaterEventStart = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  if (!/^event starts?\s+/i.test(cleaned)) return '';
+  return parseVenueScannerTime(cleaned);
+};
+
+const isYouTubeTheaterScannerNoiseLine = (value = '') => {
+  const cleaned = sanitizeScannedLine(value);
+  const normalized = normalizeText(cleaned);
+
+  if (!normalized) return true;
+  if (/^(with|featuring)\b/i.test(cleaned)) return true;
+  if (/\btour(?:\s+\d{4})?$/i.test(cleaned)) return true;
+  if (/\bpresents?:?$/i.test(cleaned)) return true;
+  if (/^doors open:/i.test(cleaned)) return true;
+  if (parseYouTubeTheaterEventStart(cleaned)) return true;
+
+  return /^(all upcoming events|all categories|comedy|concerts|list grid calendar|buy tickets|more info|buy tickets more info|premium|parking|premium parking|parking map|rideshare information|more events|youtube theater|contact us)$/.test(
+    normalized
+  );
+};
+
+const parseYouTubeTheaterEvents = (
+  text = '',
+  sourceUrl = YOUTUBE_THEATER_EVENTS_URL
+) => {
+  const lines = getVenueScannerLines(text);
+  const parsed = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const dateDetails = parseYouTubeTheaterDateLine(lines[index]);
+    if (!dateDetails) continue;
+
+    let nextDateIndex = lines.length;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (parseYouTubeTheaterDateLine(lines[cursor])) {
+        nextDateIndex = cursor;
+        break;
+      }
+    }
+
+    const blockLines = lines.slice(index + 1, nextDateIndex);
+    const eventName =
+      blockLines.find(
+        (line) =>
+          !isYouTubeTheaterScannerNoiseLine(line) &&
+          !parseYouTubeTheaterDateLine(line) &&
+          !/^https?:\/\//i.test(line)
+      ) || '';
+    const eventTime =
+      dateDetails.eventTime ||
+      blockLines.map(parseYouTubeTheaterEventStart).find(Boolean) ||
+      '';
+
+    if (!eventName) continue;
+
+    parsed.push(
+      createBlankOpportunity({
+        eventName,
+        venue: 'YouTube Theater',
+        eventDate: dateDetails.eventDate,
+        eventTime,
+        sourceText: [lines[index], ...blockLines].join('\n'),
+        eventUrl: sourceUrl || YOUTUBE_THEATER_EVENTS_URL,
+        status: 'New',
+      })
+    );
+  }
+
+  return dedupeScannedOpportunities(parsed);
 };
 
 const parseVenueEvents = (text = '', selectedVenue = '', sourceUrl = '') => {
@@ -1357,7 +2019,33 @@ const parseVenueEvents = (text = '', selectedVenue = '', sourceUrl = '') => {
   }
 
   if (venue === 'The Shrine') {
-    return parseShrineEvents(text, sourceUrl || '');
+    return parseShrineEvents(text, sourceUrl || SHRINE_EVENTS_URL);
+  }
+
+  if (venue === 'Novo Theater') {
+    return parseNovoEvents(text, sourceUrl || NOVO_THEATER_EVENTS_URL);
+  }
+
+  if (venue === 'Long Beach Amphitheater') {
+    return parseLongBeachAmphitheaterEvents(
+      text,
+      sourceUrl || LONG_BEACH_AMPHITHEATER_EVENTS_URL
+    );
+  }
+
+  if (venue === 'Long Beach Convention Center') {
+    return parseLongBeachConventionCenterEvents(
+      text,
+      sourceUrl || LONG_BEACH_CONVENTION_CENTER_EVENTS_URL
+    );
+  }
+
+  if (venue === 'The Roxy') {
+    return parseRoxyEvents(text, sourceUrl || ROXY_EVENTS_URL);
+  }
+
+  if (venue === 'YouTube Theater') {
+    return parseYouTubeTheaterEvents(text, sourceUrl || YOUTUBE_THEATER_EVENTS_URL);
   }
 
   return [];
@@ -1473,6 +2161,101 @@ const buildSameDateConflictGroups = (opportunities = []) => {
     })
     .filter(Boolean)
     .sort((first, second) => first.eventDate.localeCompare(second.eventDate));
+};
+
+const DEFAULT_OPPORTUNITY_DURATION_MINUTES = 4 * 60;
+
+const buildLocalDateTime = (date = '', time = '') => {
+  const normalizedDate = String(date || '').trim();
+  const normalizedTime = String(time || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate) || !/^\d{2}:\d{2}$/.test(normalizedTime)) {
+    return null;
+  }
+
+  const value = new Date(`${normalizedDate}T${normalizedTime}:00`);
+  return Number.isNaN(value.getTime()) ? null : value;
+};
+
+const getOpportunityTimeWindow = (opportunity = {}) => {
+  const start = buildLocalDateTime(opportunity.eventDate, opportunity.eventTime);
+  if (!start) return null;
+
+  let end = opportunity.expectedEndTime
+    ? buildLocalDateTime(opportunity.eventDate, opportunity.expectedEndTime)
+    : null;
+
+  if (end && end <= start) {
+    end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+  }
+
+  if (!end) {
+    end = new Date(start.getTime() + DEFAULT_OPPORTUNITY_DURATION_MINUTES * 60 * 1000);
+  }
+
+  return { start, end };
+};
+
+const getCscShiftTimeWindow = (shift = {}) => {
+  const start = buildLocalDateTime(shift.startDate, shift.startTime);
+  if (!start || !shift.finishTime) return null;
+
+  const finishDate = shift.finishDate || shift.startDate;
+  let end = buildLocalDateTime(finishDate, shift.finishTime);
+  if (!end) return null;
+
+  if (end <= start) {
+    end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+  }
+
+  return { start, end };
+};
+
+const isSameOpportunityShift = (opportunity = {}, shift = {}) => {
+  if (
+    (opportunity.linkedCscShiftId && opportunity.linkedCscShiftId === shift.id) ||
+    (opportunity.id &&
+      (shift.createdFromOpportunityId === opportunity.id || shift.linkedOpportunityId === opportunity.id))
+  ) {
+    return true;
+  }
+
+  if (
+    opportunity.eventDate !== shift.startDate ||
+    canonicalVenueName(opportunity.venue) !== canonicalVenueName(shift.venue)
+  ) {
+    return false;
+  }
+
+  const eventSimilarity = Math.max(
+    getSimilarityScore(opportunity.eventName, shift.event),
+    getSimilarityScore(opportunity.eventName, shift.jobName),
+    getSimilarityScore(opportunity.eventName, shift.shiftName)
+  );
+
+  return eventSimilarity >= 0.5;
+};
+
+const getScheduledShiftConflicts = (opportunity = {}, allShifts = []) => {
+  if (!isOpportunityActiveForDateConflict(opportunity)) return [];
+
+  const opportunityWindow = getOpportunityTimeWindow(opportunity);
+  if (!opportunityWindow) return [];
+
+  return allShifts
+    .filter((shift) => {
+      if (isCancelledShiftStatus(shift.shiftStatus)) return false;
+      if (isSameOpportunityShift(opportunity, shift)) return false;
+
+      const shiftWindow = getCscShiftTimeWindow(shift);
+      if (!shiftWindow) return false;
+
+      return opportunityWindow.start < shiftWindow.end && shiftWindow.start < opportunityWindow.end;
+    })
+    .sort((first, second) =>
+      `${first.startDate || ''}|${first.startTime || ''}|${canonicalVenueName(first.venue)}`.localeCompare(
+        `${second.startDate || ''}|${second.startTime || ''}|${canonicalVenueName(second.venue)}`
+      )
+    );
 };
 
 const getStatusClass = (status) => {
@@ -1806,6 +2589,58 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
     return map;
   }, [sameDateConflictGroups]);
+
+  const scheduledShiftConflictMap = useMemo(() => {
+    const map = new Map();
+
+    opportunities.forEach((opportunity) => {
+      const resolvedOpportunity = {
+        ...opportunity,
+        status: getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus),
+      };
+      const conflicts = getScheduledShiftConflicts(resolvedOpportunity, allCscShiftsForStatus);
+      if (conflicts.length) map.set(opportunity.id, conflicts);
+    });
+
+    return map;
+  }, [allCscShiftsForStatus, opportunities]);
+
+  const scheduledShiftConflictGroups = useMemo(() => {
+    const byDate = new Map();
+
+    opportunities.forEach((opportunity) => {
+      const conflicts = scheduledShiftConflictMap.get(opportunity.id) || [];
+      if (!conflicts.length || !opportunity.eventDate) return;
+
+      const current = byDate.get(opportunity.eventDate) || [];
+      current.push({
+        opportunity: {
+          ...opportunity,
+          status: getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus),
+        },
+        conflicts,
+      });
+      byDate.set(opportunity.eventDate, current);
+    });
+
+    return Array.from(byDate.entries())
+      .map(([eventDate, items]) => ({
+        eventDate,
+        items: items.sort((first, second) =>
+          `${first.opportunity.eventTime || '99:99'}|${canonicalVenueName(first.opportunity.venue)}`.localeCompare(
+            `${second.opportunity.eventTime || '99:99'}|${canonicalVenueName(second.opportunity.venue)}`
+          )
+        ),
+      }))
+      .sort((first, second) => first.eventDate.localeCompare(second.eventDate));
+  }, [allCscShiftsForStatus, opportunities, scheduledShiftConflictMap]);
+
+  const conflictDateCount = useMemo(() => {
+    const dates = new Set();
+    sameDateConflictGroups.forEach((group) => dates.add(group.eventDate));
+    scheduledShiftConflictGroups.forEach((group) => dates.add(group.eventDate));
+    return dates.size;
+  }, [sameDateConflictGroups, scheduledShiftConflictGroups]);
 
   const confirmSameDateConflict = (candidate, actionLabel) => {
     const conflicts = getSameDateVenueConflicts(opportunities, candidate);
@@ -2333,7 +3168,10 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       return isActiveOpportunityStatus(resolvedStatus) && Boolean(opportunity.eventDate) && opportunity.eventDate >= todayIso();
     }
     if (summaryFilter === 'conflicts') {
-      return isActiveOpportunityStatus(resolvedStatus) && sameDateConflictMap.has(opportunity.id);
+      return (
+        isActiveOpportunityStatus(resolvedStatus) &&
+        (sameDateConflictMap.has(opportunity.id) || scheduledShiftConflictMap.has(opportunity.id))
+      );
     }
     return true;
   };
@@ -2376,6 +3214,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       if (excludedVenueSet.has(canonicalVenueName(opportunity.venue))) return;
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return;
+      if (summaryFilter !== 'conflicts' && scheduledShiftConflictMap.has(opportunity.id)) return;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return;
 
       if (combinedSearch) {
@@ -2412,6 +3251,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     summaryFilter,
     excludedVenueSet,
     sameDateConflictMap,
+    scheduledShiftConflictMap,
   ]);
 
   const opportunitiesMatchingNonMonthFilters = useMemo(() => {
@@ -2421,6 +3261,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       if (excludedVenueSet.has(canonicalVenueName(opportunity.venue))) return false;
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return false;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return false;
+      if (summaryFilter !== 'conflicts' && scheduledShiftConflictMap.has(opportunity.id)) return false;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return false;
       if (!combinedSearch) return true;
 
@@ -2448,6 +3289,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     summaryFilter,
     excludedVenueSet,
     sameDateConflictMap,
+    scheduledShiftConflictMap,
   ]);
 
   const monthlyOpportunityGroups = useMemo(() => {
@@ -2509,10 +3351,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
   const activeOpportunities = useMemo(
     () =>
-      opportunities.filter((item) =>
-        isActiveOpportunityStatus(getResolvedOpportunityStatus(item, allCscShiftsForStatus))
+      opportunities.filter(
+        (item) =>
+          isActiveOpportunityStatus(getResolvedOpportunityStatus(item, allCscShiftsForStatus)) &&
+          !scheduledShiftConflictMap.has(item.id)
       ),
-    [allCscShiftsForStatus, opportunities]
+    [allCscShiftsForStatus, opportunities, scheduledShiftConflictMap]
   );
 
   const upcomingOpportunities = useMemo(
@@ -2530,6 +3374,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const resolvedStatus = getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus);
     const linkedTask = readStoredTodoTasks().find((task) => task.id === opportunity.linkedTodoTaskId) || null;
     const dateConflicts = sameDateConflictMap.get(opportunity.id) || [];
+    const scheduledShiftConflicts = scheduledShiftConflictMap.get(opportunity.id) || [];
     const notesValue = notesDrafts[opportunity.id] ?? opportunity.notes ?? '';
     const notesChanged = notesValue !== (opportunity.notes ?? '');
     const notesExpanded = expandedNoteIds.has(opportunity.id);
@@ -2553,6 +3398,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   <span className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-100 px-2.5 py-1 text-xs font-extrabold text-red-900">
                     <CircleAlert className="h-3.5 w-3.5" />
                     Date Conflict ({dateConflicts.length})
+                  </span>
+                ) : null}
+                {scheduledShiftConflicts.length ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-700 px-2.5 py-1 text-xs font-extrabold text-white">
+                    <CircleAlert className="h-3.5 w-3.5" />
+                    CSC Shift Conflict ({scheduledShiftConflicts.length})
                   </span>
                 ) : null}
               </div>
@@ -2656,6 +3507,33 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             </div>
           </aside>
         </div>
+
+        {scheduledShiftConflicts.length ? (
+          <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-50 p-3">
+            <div className="flex items-center gap-2 text-red-950">
+              <CircleAlert className="h-5 w-5 shrink-0" />
+              <p className="text-sm font-black">Conflicts with a scheduled CSC shift</p>
+            </div>
+            <div className="mt-2 grid gap-1.5">
+              {scheduledShiftConflicts.map((shift) => (
+                <div
+                  key={shift.id}
+                  className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-950"
+                >
+                  <p className="font-normal">
+                    <span className="font-extrabold">Conflicts with: {canonicalVenueName(shift.venue) || 'CSC shift'}</span>
+                    {shift.event || shift.jobName || shift.shiftName ? `, ${shift.event || shift.jobName || shift.shiftName}` : ''}
+                  </p>
+                  <p className="mt-0.5 text-xs font-bold text-red-800">
+                    {formatDate(shift.startDate)}
+                    {shift.startTime ? `, ${formatTime(shift.startTime)}` : ''}
+                    {shift.finishTime ? ` to ${formatTime(shift.finishTime)}` : ''}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {dateConflicts.length ? (
           <div className="mt-4 rounded-xl border-2 border-red-300 bg-red-50 p-3">
@@ -3188,39 +4066,66 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             onClick={() => applySummaryFilter('conflicts')}
             aria-pressed={summaryFilter === 'conflicts'}
             aria-expanded={showConflictSection}
-            aria-controls="same-date-venue-conflicts"
-            title="Show same-date venue conflicts"
+            aria-controls="csc-opportunity-conflicts"
+            title="Show opportunity conflicts"
             className={summaryCardClassName('conflicts', 'border-red-300 bg-red-50 text-red-950')}
           >
             <p className="csc-summary-title text-sm font-bold">
               <span className="csc-summary-title-desktop">Conflict Dates</span>
               <span className="csc-summary-title-mobile">Conflicts</span>
             </p>
-            <p className="csc-summary-count mt-1 text-3xl font-black">{sameDateConflictGroups.length}</p>
+            <p className="csc-summary-count mt-1 text-3xl font-black">{conflictDateCount}</p>
             <p className="csc-summary-hint mt-1 text-xs font-bold text-red-800">
               {summaryFilter === 'conflicts' ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
         </section>
 
-        {sameDateConflictGroups.length && showConflictSection ? (
+        {conflictDateCount && showConflictSection ? (
           <section
-            id="same-date-venue-conflicts"
+            id="csc-opportunity-conflicts"
             className="rounded-2xl border-2 border-red-300 bg-red-50 p-5 shadow-sm"
           >
             <div className="flex items-start gap-3">
               <CircleAlert className="mt-0.5 h-6 w-6 shrink-0 text-red-700" />
               <div>
-                <h2 className="text-xl font-black text-red-950">Same-Date Venue Conflicts</h2>
+                <h2 className="text-xl font-black text-red-950">Opportunity Conflicts</h2>
                 <p className="text-sm font-semibold text-red-800">
-                  These dates have active opportunities at more than one venue. Cancelled opportunities are excluded.
+                  Scheduled-shift conflicts stay out of the active list and return automatically if the shift is cancelled or removed.
                 </p>
               </div>
             </div>
             <div className="mt-4 max-h-80 space-y-3 overflow-y-auto pr-1">
-              {sameDateConflictGroups.map((group) => (
-                <div key={group.eventDate} className="rounded-xl border border-red-200 bg-white p-3">
+              {scheduledShiftConflictGroups.map((group) => (
+                <div key={`shift-${group.eventDate}`} className="rounded-xl border border-red-300 bg-white p-3">
                   <p className="font-black text-red-950">{formatDate(group.eventDate)}</p>
+                  <div className="mt-2 grid gap-2">
+                    {group.items.map(({ opportunity, conflicts }) => (
+                      <div key={opportunity.id} className="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                        <p className="text-sm font-normal text-slate-950">
+                          <span className="font-extrabold">{opportunity.venue}:</span>{' '}
+                          <FormattedEventName value={opportunity.eventName} />
+                          {opportunity.eventTime ? ` at ${formatTime(opportunity.eventTime)}` : ''}
+                        </p>
+                        {conflicts.map((shift) => (
+                          <p key={shift.id} className="mt-1 text-xs font-bold text-red-800">
+                            Conflicts with: {canonicalVenueName(shift.venue) || 'CSC shift'}
+                            {shift.event || shift.jobName || shift.shiftName
+                              ? `, ${shift.event || shift.jobName || shift.shiftName}`
+                              : ''}
+                            {shift.startTime ? `, ${formatTime(shift.startTime)}` : ''}
+                            {shift.finishTime ? ` to ${formatTime(shift.finishTime)}` : ''}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {sameDateConflictGroups.map((group) => (
+                <div key={`venue-${group.eventDate}`} className="rounded-xl border border-red-200 bg-white p-3">
+                  <p className="font-black text-red-950">{formatDate(group.eventDate)}</p>
+                  <p className="mt-0.5 text-xs font-bold text-red-700">Active opportunities at multiple venues</p>
                   <div className="mt-2 grid gap-1.5">
                     {group.opportunities.map((opportunity) => (
                       <div
@@ -3647,7 +4552,13 @@ export {
   parseIntuitDomeEvents,
   parseHollywoodBowlEvents,
   parseShrineEvents,
+  parseNovoEvents,
+  parseLongBeachAmphitheaterEvents,
+  parseLongBeachConventionCenterEvents,
+  parseRoxyEvents,
+  parseYouTubeTheaterEvents,
   parseVenueEvents,
   findMatchingCscShift,
+  getScheduledShiftConflicts,
 };
 export default CscOpportunitiesTab;
