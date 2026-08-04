@@ -453,6 +453,8 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
   const [error, setError] = useState('');
   const [report, setReport] = useState(null);
   const [reviewRows, setReviewRows] = useState([]);
+  const [sourceFile, setSourceFile] = useState(null);
+  const [saveOriginalReport, setSaveOriginalReport] = useState(false);
   const fileInputRef = useRef(null);
 
   const existingAccounts = useMemo(() => getExistingAccounts(state), [state]);
@@ -474,6 +476,8 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
     setError('');
     setReport(null);
     setReviewRows([]);
+    setSourceFile(null);
+    setSaveOriginalReport(false);
     onClose();
   };
 
@@ -523,6 +527,7 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
 
     setProcessing(true);
     setError('');
+    setSourceFile(file);
     try {
       let text = '';
       if (file.type === 'text/plain' || /\.txt$/i.test(file.name)) {
@@ -544,6 +549,8 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
 
       prepareReview(parseCreditReportText(text, bureauOverride));
     } catch (fileError) {
+      setSourceFile(null);
+      setSaveOriginalReport(false);
       setError(fileError.message || 'The selected file could not be processed.');
     } finally {
       setProcessing(false);
@@ -556,7 +563,7 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
     setReviewRows((current) => current.map((row) => (row.id === id ? { ...row, ...updates } : row)));
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     const selectedRows = reviewRows.filter((row) => row.selected);
     if (!selectedRows.length) {
       setError('Select at least one account to import.');
@@ -582,12 +589,29 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
       };
     });
 
-    onImport(operations, {
-      bureau: report.bureau,
-      reportDate: report.reportDate,
-      accountCount: selectedRows.length,
-    });
-    resetAndClose();
+    setProcessing(true);
+    setError('');
+    setProgress(saveOriginalReport && sourceFile ? 'Saving original credit report' : 'Importing selected accounts');
+
+    try {
+      await onImport(
+        operations,
+        {
+          bureau: report.bureau,
+          reportDate: report.reportDate,
+          accountCount: selectedRows.length,
+        },
+        {
+          file: sourceFile,
+          saveOriginal: Boolean(saveOriginalReport && sourceFile),
+        }
+      );
+      resetAndClose();
+    } catch (importError) {
+      setError(importError?.message || 'The credit report could not be imported.');
+      setProcessing(false);
+      setProgress('');
+    }
   };
 
   return (
@@ -610,7 +634,7 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
               <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
                   <div className="flex items-center gap-2 font-black"><ShieldCheck className="h-5 w-5" />Local privacy protections</div>
-                  <p className="mt-2">The report is processed in your browser. The original file and raw text are not added to budget data. Full account numbers, SSNs, and birth dates are not imported.</p>
+                  <p className="mt-2">The report is processed in your browser. The original file is saved only when you select Save Original Report. Raw OCR text is never added to budget data. Full account numbers, SSNs, and birth dates are not imported.</p>
                 </div>
                 <label className="text-sm font-bold text-slate-700">
                   Credit Bureau
@@ -637,6 +661,20 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
                   <button type="button" onClick={() => fileInputRef.current?.click()} disabled={processing} className="mt-5 rounded-lg bg-indigo-700 px-5 py-2 font-black text-white hover:bg-indigo-800 disabled:opacity-50">Choose PDF, TXT, or Image</button>
                   <input ref={fileInputRef} type="file" accept=".pdf,.txt,image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => handleFile(event.target.files?.[0])} />
                   <p className="mt-3 text-xs font-semibold text-slate-500">Maximum file size: 50 MB</p>
+                  {sourceFile && (
+                    <label className="mx-auto mt-4 flex max-w-sm items-start gap-3 rounded-lg border border-indigo-200 bg-white p-3 text-left">
+                      <input
+                        type="checkbox"
+                        checked={saveOriginalReport}
+                        onChange={(event) => setSaveOriginalReport(event.target.checked)}
+                        className="mt-0.5 h-4 w-4"
+                      />
+                      <span>
+                        <span className="block text-sm font-black text-slate-900">Save Original Report</span>
+                        <span className="mt-0.5 block text-xs font-semibold text-slate-600">{sourceFile.name}</span>
+                      </span>
+                    </label>
+                  )}
                 </div>
               </div>
 
@@ -650,7 +688,20 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
                   <p className="font-black text-slate-950">{report.accounts.length} account{report.accounts.length === 1 ? '' : 's'} detected</p>
                   <p className="text-sm text-slate-600">Bureau: {report.bureau}{report.reportDate ? ` · Report date: ${report.reportDate}` : ''}</p>
                 </div>
-                <button type="button" onClick={() => { setReport(null); setReviewRows([]); setError(''); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Scan Different Report</button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {sourceFile && (
+                    <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-950">
+                      <input
+                        type="checkbox"
+                        checked={saveOriginalReport}
+                        onChange={(event) => setSaveOriginalReport(event.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      Save Original Report
+                    </label>
+                  )}
+                  <button type="button" onClick={() => { setReport(null); setReviewRows([]); setError(''); setSourceFile(null); setSaveOriginalReport(false); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Scan Different Report</button>
+                </div>
               </div>
 
               {report.warnings.map((warning, index) => <div key={`${warning}-${index}`} className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />{warning}</div>)}
@@ -719,7 +770,7 @@ export default function CreditReportScanner({ isOpen, onClose, state, onImport }
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
           <button type="button" onClick={resetAndClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">Cancel</button>
           {report && (
-            <button type="button" onClick={handleImport} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2 text-sm font-black text-white hover:bg-emerald-800">
+            <button type="button" onClick={handleImport} disabled={processing} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2 text-sm font-black text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60">
               <CheckCircle2 className="h-4 w-4" />Import {reviewRows.filter((row) => row.selected).length} Selected Account{reviewRows.filter((row) => row.selected).length === 1 ? '' : 's'}
             </button>
           )}

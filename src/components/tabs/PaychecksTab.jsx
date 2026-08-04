@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -9,6 +9,7 @@ import {
   Eye,
   Pencil,
   Plus,
+  Printer,
   ScanLine,
   Trash2,
   X,
@@ -17,11 +18,25 @@ import PageContainer from "../common/PageContainer";
 import TabPageHeader from "../common/TabPageHeader.jsx";
 
 const PAYCHECK_STORAGE_KEY = "paychecksTab.paychecks.v1";
+const CSC_SHIFT_STORAGE_KEY = "cscShifts.v1";
+const CSC_SHIFT_ARCHIVE_STORAGE_KEY = "cscShifts.archived.v1";
 const PAYCHECK_UPLOAD_ENDPOINT = "/budget-dashboard-fs/upload-paycheck-file.php";
 const PAYCHECK_UPLOAD_LOCALWP_HTTP_ENDPOINT = "http://main-dashboard.local/budget-dashboard-fs/upload-paycheck-file.php";
 const PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT = "https://main-dashboard.local/budget-dashboard-fs/upload-paycheck-file.php";
 // Browser file previews use the LocalWP endpoint directly so navigation keeps its filename query.
 const MAX_PAYCHECK_SCAN_TEXT_LENGTH = 16000;
+const CSC_PAY_RATE_SCHEDULE = [
+  {
+    effectiveFrom: "0000-01-01",
+    effectiveThrough: "2026-06-21",
+    regularRate: 18.04,
+  },
+  {
+    effectiveFrom: "2026-06-22",
+    effectiveThrough: "9999-12-31",
+    regularRate: 19.5,
+  },
+];
 const KNOWN_PAYCHECK_ATTACHMENT_RECOVERY = {
   "7333153": {
     id: "file-recovered-check-7333153",
@@ -30,6 +45,45 @@ const KNOWN_PAYCHECK_ATTACHMENT_RECOVERY = {
     mimeType: "application/pdf",
     uploadedAt: "2026-07-04T00:00:00.000Z",
   },
+};
+const VERIFIED_CSC_PAYSTUB_EARNINGS = {
+  "7333153": [
+    { id: "7333153-1", type: "Regular", rate: "18.04", hours: "8.00", workLine: "00136817700530", workDate: "2026-05-30", amount: "144.32" },
+  ],
+  "7335104": [
+    { id: "7335104-1", type: "Regular", rate: "18.04", hours: "8.00", workLine: "00136929170612", workDate: "2026-06-12", amount: "144.32" },
+    { id: "7335104-2", type: "Overtime", rate: "27.06", hours: "3.50", workLine: "00136929170612", workDate: "2026-06-12", amount: "94.71" },
+    { id: "7335104-3", type: "Regular", rate: "18.04", hours: "6.50", workLine: "00136976220611", workDate: "2026-06-11", amount: "117.26" },
+    { id: "7335104-4", type: "Regular", rate: "18.04", hours: "4.00", workLine: "00137066960609", workDate: "2026-06-09", amount: "72.16" },
+  ],
+  "7337371": [
+    { id: "7337371-1", type: "Regular", rate: "18.04", hours: "8.00", workLine: "00136929620615", workDate: "2026-06-15", amount: "144.32" },
+    { id: "7337371-2", type: "Overtime", rate: "27.06", hours: "2.75", workLine: "00136929620615", workDate: "2026-06-15", amount: "74.42" },
+  ],
+  "7339495": [
+    { id: "7339495-1", type: "Regular", rate: "18.04", hours: "8.00", workLine: "00136929850621", workDate: "2026-06-21", amount: "144.32" },
+    { id: "7339495-2", type: "Overtime", rate: "27.06", hours: "1.75", workLine: "00136929850621", workDate: "2026-06-21", amount: "47.36" },
+    { id: "7339495-3", type: "Regular", rate: "19.50", hours: "8.00", workLine: "00136929860625", workDate: "2026-06-25", amount: "156.00" },
+    { id: "7339495-4", type: "Overtime", rate: "29.25", hours: "3.25", workLine: "00136929860625", workDate: "2026-06-25", amount: "95.06" },
+  ],
+  "7341625": [
+    { id: "7341625-1", type: "Regular", rate: "19.50", hours: "7.00", workLine: "00136563340629", workDate: "2026-06-29", amount: "136.50" },
+    { id: "7341625-2", type: "Overtime", rate: "29.25", hours: "2.50", workLine: "00136929870628", workDate: "2026-06-28", amount: "73.13" },
+    { id: "7341625-3", type: "Regular", rate: "19.50", hours: "8.00", workLine: "00136929870628", workDate: "2026-06-28", amount: "156.00" },
+    { id: "7341625-4", type: "Regular", rate: "19.50", hours: "8.00", workLine: "00136929880702", workDate: "2026-07-02", amount: "156.00" },
+    { id: "7341625-5", type: "Overtime", rate: "29.25", hours: "1.25", workLine: "00136929880702", workDate: "2026-07-02", amount: "36.56" },
+  ],
+  "7343608": [
+    { id: "7343608-1", type: "Regular", rate: "19.50", hours: "5.75", workLine: "00136860490708", workDate: "2026-07-08", amount: "112.13" },
+    { id: "7343608-2", type: "Overtime", rate: "29.25", hours: "1.00", workLine: "00136929890710", workDate: "2026-07-10", amount: "29.25" },
+    { id: "7343608-3", type: "Regular", rate: "19.50", hours: "8.00", workLine: "00136929890710", workDate: "2026-07-10", amount: "156.00" },
+    { id: "7343608-4", type: "Regular", rate: "19.50", hours: "6.00", workLine: "00137016880707", workDate: "2026-07-07", amount: "117.00" },
+    { id: "7343608-5", type: "Overtime", rate: "29.25", hours: "6.00", workLine: "00137037930704", workDate: "2026-07-04", amount: "175.50" },
+  ],
+  "7346705": [
+    { id: "7346705-1", type: "Regular", rate: "19.50", hours: "6.00", workLine: "00136588480718", workDate: "2026-07-18", amount: "117.00" },
+    { id: "7346705-2", type: "CA Break Premium", rate: "19.50", hours: "1.00", workLine: "00136588480718", workDate: "2026-07-18", amount: "19.50" },
+  ],
 };
 
 const DEFAULT_PAYCHECK = {
@@ -185,13 +239,28 @@ const formatCompactDate = (value = "") => {
   return `${Number(month)}/${Number(day)}/${String(year).slice(-2)}`;
 };
 
+const shiftIsoDate = (value = "", days = 0) => {
+  const iso = formatDateForInput(value);
+  if (!iso) return "";
+
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + days);
+
+  return [
+    String(date.getFullYear()).padStart(4, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+};
+
 const formatCompactPayPeriod = (startValue = "", endValue = "") => {
-  const startIso = formatDateForInput(startValue);
-  const endIso = formatDateForInput(endValue);
+  let startIso = formatDateForInput(startValue);
+  let endIso = formatDateForInput(endValue);
 
   if (!startIso && !endIso) return "";
-  if (!startIso) return formatCompactDate(endIso);
-  if (!endIso) return formatCompactDate(startIso);
+  if (!startIso) startIso = shiftIsoDate(endIso, -6);
+  if (!endIso) endIso = shiftIsoDate(startIso, 6);
 
   const [startYear, startMonth, startDay] = startIso.split("-");
   const [endYear, endMonth, endDay] = endIso.split("-");
@@ -203,6 +272,171 @@ const formatCompactPayPeriod = (startValue = "", endValue = "") => {
 
   return `${startDate}/${String(startYear).slice(-2)}-${endDateWithYear}`;
 };
+
+const resolvePayPeriodRange = (startValue = "", endValue = "") => {
+  let startDate = formatDateForInput(startValue);
+  let endDate = formatDateForInput(endValue);
+
+  if (!startDate && !endDate) return null;
+  if (!startDate) startDate = shiftIsoDate(endDate, -6);
+  if (!endDate) endDate = shiftIsoDate(startDate, 6);
+
+  return {
+    startDate,
+    endDate,
+    label: `${formatCompactDate(startDate)} - ${formatCompactDate(endDate)}`,
+  };
+};
+
+const readStoredCscShiftArray = (storageKey) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const normalizeCscShiftStatus = (value = "") => {
+  const status = String(value || "").trim();
+
+  if (["Done", "Paid", "Complete", "Completed"].includes(status)) return "Done";
+  if (status === "Cancelled") return "Cancelled";
+  return "Scheduled";
+};
+
+const formatCscShiftDate = (value = "") => {
+  const iso = formatDateForInput(value);
+  if (!iso) return "";
+
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const formatCscShiftTime = (value = "") => {
+  const [hours, minutes] = String(value || "").split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return "";
+
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+};
+
+const formatCscCurrency = (value) =>
+  (Number(value) || 0).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
+
+const getCscShiftHours = (shift = {}) => {
+  const start = new Date(`${shift.startDate}T${shift.startTime}:00`);
+  const finish = new Date(`${shift.finishDate || shift.startDate}T${shift.finishTime}:00`);
+  const difference = finish.getTime() - start.getTime();
+
+  if (!Number.isFinite(difference) || difference <= 0) return 0;
+  return Math.round((difference / (1000 * 60 * 60)) * 100) / 100;
+};
+
+const getCscShiftEstimatedPay = (shift = {}) => {
+  if (normalizeCscShiftStatus(shift.shiftStatus) === "Cancelled") return 0;
+
+  const parsedRate = Number.parseFloat(shift.hourlyRate);
+  const hourlyRate =
+    Number.isFinite(parsedRate) && parsedRate > 0 && ![15.5, 20.5].includes(parsedRate)
+      ? parsedRate
+      : 19.5;
+  const hours = getCscShiftHours(shift);
+  const regularHours = Math.min(hours, 8);
+  const overtimeHours = Math.min(Math.max(hours - 8, 0), 4);
+  const doubleTimeHours = Math.max(hours - 12, 0);
+
+  return Math.round(
+    (regularHours * hourlyRate +
+      overtimeHours * hourlyRate * 1.5 +
+      doubleTimeHours * hourlyRate * 2) *
+      100
+  ) / 100;
+};
+
+const deriveCscUniform = (shift = {}) => {
+  if (shift.uniform) return shift.uniform;
+
+  const roleName = String(shift.roleName || "").toLowerCase();
+  const venue = String(shift.venue || "").toLowerCase();
+
+  if (/\bc\s*&\s*t\b|coat\s*(?:and|&)\s*tie/.test(roleName)) return "Coat & Tie";
+  if (roleName.includes("security")) {
+    return venue.includes("rose bowl") || venue.includes("hollywood bowl")
+      ? "All black / white shirt"
+      : "All black uniform";
+  }
+
+  return "Not entered";
+};
+
+const normalizeCscShiftIdentityText = (value = "") =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const shouldShowDistinctCscJobName = (shift = {}) => {
+  const jobName = normalizeCscShiftIdentityText(shift.jobName);
+  const eventName = normalizeCscShiftIdentityText(shift.event);
+  return Boolean(jobName) && (!eventName || jobName !== eventName);
+};
+
+const buildWorkedPayPeriodSummary = (paycheck = {}) => {
+  const range = resolvePayPeriodRange(paycheck.payPeriodStart, paycheck.payPeriodEnd);
+  if (!range) return null;
+
+  const shiftsById = new Map();
+  readStoredCscShiftArray(CSC_SHIFT_STORAGE_KEY).forEach((shift, index) => {
+    const id = String(shift?.id || `active-${index}`);
+    shiftsById.set(id, { ...shift, id, recordSource: "active" });
+  });
+  readStoredCscShiftArray(CSC_SHIFT_ARCHIVE_STORAGE_KEY).forEach((shift, index) => {
+    const id = String(shift?.id || `archived-${index}`);
+    shiftsById.set(id, { ...shift, id, recordSource: "archived" });
+  });
+
+  const payableShifts = Array.from(shiftsById.values())
+    .filter((shift) => {
+      const shiftDate = formatDateForInput(shift.startDate);
+      return (
+        shiftDate &&
+        shiftDate >= range.startDate &&
+        shiftDate <= range.endDate &&
+        normalizeCscShiftStatus(shift.shiftStatus) !== "Cancelled"
+      );
+    })
+    .sort((first, second) =>
+      `${first.startDate}T${first.startTime}`.localeCompare(`${second.startDate}T${second.startTime}`)
+    );
+  const workedShifts = payableShifts.filter(
+    (shift) => normalizeCscShiftStatus(shift.shiftStatus) === "Done"
+  );
+
+  return {
+    ...range,
+    paycheckId: paycheck.id,
+    checkNumber: paycheck.checkNumber || "",
+    shiftCount: payableShifts.length,
+    workedShiftCount: workedShifts.length,
+    workedHours: workedShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0),
+    earnedPay: workedShifts.reduce((sum, shift) => sum + getCscShiftEstimatedPay(shift), 0),
+    workedShifts,
+  };
+};
+
+const formatEarningsTypeLabel = (value = "Earnings") =>
+  `${String(value || "Earnings").trim().replace(/:+$/, "")}:`;
 
 const createId = () => `paycheck-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -275,7 +509,7 @@ const normalizePaycheckAttachment = (attachment = null) => {
     source.name ||
     findUrlParameter(["originalName", "original_name", "original_file_name"]);
 
-  if (!savedName && !url && !viewUrl && !downloadUrl) return null;
+  if (!savedName && !originalName && !url && !viewUrl && !downloadUrl) return null;
 
   return {
     id: source.id || source.fileId || source.file_id || createId(),
@@ -343,6 +577,7 @@ const normalizeEarningsLine = (line = {}) => ({
   rate: formatRate(line.rate),
   hours: formatRate(line.hours),
   workLine: String(line.workLine || "").trim(),
+  workDate: formatDateForInput(line.workDate),
   amount: formatMoney(line.amount),
 });
 
@@ -350,6 +585,15 @@ const normalizeEarningsLines = (lines = []) =>
   Array.isArray(lines)
     ? lines.map(normalizeEarningsLine).filter((line) => line.type || line.rate || line.hours || line.amount)
     : [];
+
+const isBreakPremiumEarningsLine = (line = {}) =>
+  /\b(?:CA\s+)?Break\s+Pre(?:mium)?\b/i.test(String(line.type || ""));
+
+const getWorkedEarningsHours = (lines = []) =>
+  normalizeEarningsLines(lines).reduce(
+    (sum, line) => sum + (isBreakPremiumEarningsLine(line) ? 0 : money(line.hours) || 0),
+    0
+  );
 
 const formatWorkLineDate = (value = "") => {
   const text = String(value || "").trim();
@@ -412,6 +656,80 @@ const getWorkLineDates = (lines = []) =>
         .filter(Boolean)
     )
   );
+
+const getWorkLineIsoDate = (lineOrValue = "", paycheck = {}) => {
+  const line =
+    lineOrValue && typeof lineOrValue === "object"
+      ? lineOrValue
+      : { workLine: lineOrValue };
+  const savedWorkDate = formatDateForInput(line.workDate);
+  if (savedWorkDate) return savedWorkDate;
+
+  const displayDate = formatWorkLineDate(line.workLine);
+  if (displayDate) return formatDateForInput(displayDate);
+
+  const compactMonthDay = String(line.workLine || "").match(
+    /(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/
+  );
+  if (!compactMonthDay) return "";
+
+  const periodStart = formatDateForInput(paycheck.payPeriodStart);
+  const periodEnd = formatDateForInput(paycheck.payPeriodEnd);
+  const years = Array.from(
+    new Set(
+      [periodStart, periodEnd]
+        .filter(Boolean)
+        .map((date) => date.slice(0, 4))
+    )
+  );
+
+  for (const year of years) {
+    const candidate = `${year}-${compactMonthDay[1]}-${compactMonthDay[2]}`;
+    if ((!periodStart || candidate >= periodStart) && (!periodEnd || candidate <= periodEnd)) {
+      return candidate;
+    }
+  }
+
+  return years.length
+    ? `${years[years.length - 1]}-${compactMonthDay[1]}-${compactMonthDay[2]}`
+    : "";
+};
+
+const getEarningsLineWorkDateDisplay = (line = {}, paycheck = {}) => {
+  const isoDate = getWorkLineIsoDate(line, paycheck);
+  if (!isoDate) return "";
+
+  const [year, month, day] = isoDate.split("-");
+  return `${month}/${day}/${String(year).slice(-2)}`;
+};
+
+const getCscRegularRateForDate = (value = "") => {
+  const isoDate = formatDateForInput(value);
+  if (!isoDate) return null;
+
+  const schedule = CSC_PAY_RATE_SCHEDULE.find(
+    (entry) => isoDate >= entry.effectiveFrom && isoDate <= entry.effectiveThrough
+  );
+
+  return schedule?.regularRate ?? null;
+};
+
+const getExpectedCscRateForEarningsLine = (line = {}, paycheck = {}) => {
+  const regularRate = getCscRegularRateForDate(getWorkLineIsoDate(line, paycheck));
+  if (regularRate === null) return null;
+
+  const type = String(line.type || "").trim();
+  if (/\bOvertime\b/i.test(type)) return regularRate * 1.5;
+  if (/\bDouble\s*Time\b/i.test(type)) return regularRate * 2;
+  return regularRate;
+};
+
+const getAllowedCscRatesForEarningsLine = (line = {}, paycheck = {}) => {
+  const expectedRate = getExpectedCscRateForEarningsLine(line, paycheck);
+  if (expectedRate === null) return [];
+
+  return [expectedRate];
+};
 
 const normalizePaylocityDetails = (details = {}) => {
   const source = details && typeof details === "object" ? details : {};
@@ -488,7 +806,7 @@ const getPaycheckEarningsRows = (paycheck = {}) => {
       rate: line.rate || "0.00",
       hours: line.hours || "0.00",
       amount: line.amount || "0.00",
-      dateWorked: formatWorkLineDate(line.workLine),
+      dateWorked: getEarningsLineWorkDateDisplay(line, paycheck),
     }));
   }
 
@@ -505,8 +823,26 @@ const getPaycheckEarningsRows = (paycheck = {}) => {
 };
 
 const normalizePaycheck = (paycheck = {}) => {
-  const earningsLines = normalizeEarningsLines(paycheck.earningsLines);
-  const earningsHours = earningsLines.length ? sumEarningsLineField(earningsLines, "hours").toFixed(2) : "";
+  const storedEarningsLines = normalizeEarningsLines(paycheck.earningsLines);
+  const scannedEarningsLines = paycheck.scanText
+    ? parseEarningsLines(String(paycheck.scanText).replace(/\n/g, " "))
+    : [];
+  const verifiedEarningsLines = normalizeEarningsLines(
+    VERIFIED_CSC_PAYSTUB_EARNINGS[String(paycheck.checkNumber || "").trim()] || []
+  );
+  const selectedEarningsLines =
+    verifiedEarningsLines.length
+      ? verifiedEarningsLines
+      : scannedEarningsLines.length > storedEarningsLines.length
+      ? scannedEarningsLines
+      : storedEarningsLines;
+  const earningsLines = selectedEarningsLines.map((line) =>
+    normalizeEarningsLine({
+      ...line,
+      workDate: getWorkLineIsoDate(line, paycheck),
+    })
+  );
+  const earningsHours = earningsLines.length ? getWorkedEarningsHours(earningsLines).toFixed(2) : "";
   const earningsGross = earningsLines.length ? sumEarningsLineField(earningsLines, "amount").toFixed(2) : "";
   const uniqueRates = getUniqueEarningsRates(earningsLines);
 
@@ -529,7 +865,9 @@ const normalizePaycheck = (paycheck = {}) => {
     updatedAt: paycheck.updatedAt || new Date().toISOString(),
   };
 
-  normalized.hours = earningsHours || normalizePaycheckHours(paycheck.hours, normalized.grossPay, normalized.rate);
+  normalized.hours = earningsLines.length
+    ? earningsHours
+    : normalizePaycheckHours(paycheck.hours, normalized.grossPay, normalized.rate);
 
   delete normalized.checkAmount;
   delete normalized.expectedRate;
@@ -577,41 +915,6 @@ const getUploadEndpointCandidates = () => {
     : [PAYCHECK_UPLOAD_ENDPOINT];
 
   return Array.from(new Set(candidates));
-};
-
-const resolveUploadEndpoint = () => {
-  if (typeof window === "undefined") return PAYCHECK_UPLOAD_ENDPOINT;
-  const host = window.location.hostname;
-  const isLocalDevHost = host === "localhost" || host === "127.0.0.1";
-  const isLocalWpHost = host === "main-dashboard.local";
-  if (isLocalWpHost) return PAYCHECK_UPLOAD_ENDPOINT;
-  if (!isLocalDevHost) return PAYCHECK_UPLOAD_ENDPOINT;
-  return PAYCHECK_UPLOAD_ENDPOINT;
-};
-
-const resolveDirectFileEndpoint = () => {
-  if (typeof window === "undefined") return PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT;
-
-  const host = window.location.hostname;
-  const isLocalDevHost = host === "localhost" || host === "127.0.0.1";
-  const isLocalWpHost = host === "main-dashboard.local";
-
-  if (isLocalWpHost) return PAYCHECK_UPLOAD_ENDPOINT;
-  if (isLocalDevHost) return PAYCHECK_UPLOAD_LOCALWP_HTTPS_ENDPOINT;
-  return PAYCHECK_UPLOAD_ENDPOINT;
-};
-
-const getDirectAttachmentUrl = (attachment = {}, action = "view") => {
-  const normalized = normalizePaycheckAttachment(attachment);
-  if (!normalized?.savedName) return "";
-
-  const params = new URLSearchParams({ action });
-  params.set("savedName", normalized.savedName);
-  if (normalized.originalName) {
-    params.set("originalName", normalized.originalName);
-  }
-
-  return `${resolveDirectFileEndpoint()}?${params.toString()}`;
 };
 
 const optionalNumber = (value) => {
@@ -662,15 +965,48 @@ const getPaycheckReconciliation = (paycheck = {}) => {
       detail: `$${earningsGross.toFixed(2)} earnings, $${(statedGross || 0).toFixed(2)} gross`,
     });
 
-    const earningsHours = sumEarningsLineField(earningsLines, "hours");
+    const earningsHours = getWorkedEarningsHours(earningsLines);
     const statedHours = optionalNumber(paycheck.hours);
     checks.push({
       id: "hours",
-      label: "Earnings hours equal total hours",
+      label: "Worked earnings hours equal total hours",
       actual: earningsHours,
       expected: statedHours,
       passed: amountsMatch(earningsHours, statedHours),
-      detail: `${earningsHours.toFixed(2)} earnings hours, ${(statedHours || 0).toFixed(2)} total hours`,
+      detail: `${earningsHours.toFixed(2)} worked hours, ${(statedHours || 0).toFixed(2)} total hours`,
+    });
+
+    earningsLines.forEach((line, index) => {
+      const actualRate = optionalNumber(line.rate);
+      const allowedRates = getAllowedCscRatesForEarningsLine(line, paycheck);
+      const dateWorked = getEarningsLineWorkDateDisplay(line, paycheck);
+
+      if (actualRate !== null && allowedRates.length) {
+        checks.push({
+          id: `rate-${index}`,
+          label: `${line.type || "Earnings"} rate matches work date`,
+          actual: actualRate,
+          expected: allowedRates[0],
+          passed: allowedRates.some((rate) => amountsMatch(actualRate, rate, 0.01)),
+          detail: `$${actualRate.toFixed(2)} actual, ${allowedRates
+            .map((rate) => `$${rate.toFixed(2)}`)
+            .join(" or ")} expected${dateWorked ? ` for ${dateWorked}` : ""}`,
+        });
+      }
+
+      const lineHours = optionalNumber(line.hours);
+      const lineAmount = optionalNumber(line.amount);
+      if (actualRate !== null && lineHours !== null && lineAmount !== null) {
+        const calculatedAmount = actualRate * lineHours;
+        checks.push({
+          id: `earnings-amount-${index}`,
+          label: `${line.type || "Earnings"} rate times hours equals amount`,
+          actual: calculatedAmount,
+          expected: lineAmount,
+          passed: amountsMatch(calculatedAmount, lineAmount),
+          detail: `$${calculatedAmount.toFixed(2)} calculated, $${lineAmount.toFixed(2)} paid`,
+        });
+      }
     });
   }
 
@@ -856,7 +1192,7 @@ const parsePaylocityDetails = (text = "", flatText = "") => {
 
 const parseEarningsLines = (flatText = "") => {
   const earningsLines = [];
-  const earningsRegex = /\b(Regular|Overtime)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9-]+)?\s+(\d+(?:\.\d{2}))/gi;
+  const earningsRegex = /\b(Regular|Overtime|Double\s*Time|CA\s+Break\s+Pre(?:mium)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9-]+)?\s+(\d+(?:\.\d{2}))/gi;
   let match = earningsRegex.exec(flatText);
 
   while (match) {
@@ -879,6 +1215,7 @@ const parsePaycheckScanText = (rawText = "") => {
   const text = limitScanText(rawText);
   const flat = text.replace(/\n/g, " ");
   const parsed = { ...DEFAULT_PAYCHECK, scanText: text };
+  const reportedHours = findNumberAfterLabel(flat, "Total Hours Worked");
 
   if (/contemporary services corporation|csc/i.test(text)) {
     parsed.employer = "Contemporary Services Corporation";
@@ -907,11 +1244,11 @@ const parsePaycheckScanText = (rawText = "") => {
   if (earningsLines.length) {
     parsed.earningsLines = earningsLines;
     parsed.rate = earningsLines[0].rate;
-    parsed.hours = sumEarningsLineField(earningsLines, "hours").toFixed(2);
+    parsed.hours = reportedHours || getWorkedEarningsHours(earningsLines).toFixed(2);
     parsed.grossPay = parsed.grossPay || sumEarningsLineField(earningsLines, "amount").toFixed(2);
   }
 
-  parsed.hours = parsed.hours || findNumberAfterLabel(flat, "Total Hours Worked");
+  parsed.hours = parsed.hours || reportedHours;
   parsed.grossPay = parsed.grossPay || findMoneyAfterLabel(flat, "Gross");
 
   const taxTotalMatch = flat.match(/Taxes\s+(\d+(?:\.\d{2})?)\s+(\d+(?:\.\d{2})?)/i);
@@ -1059,6 +1396,24 @@ export default function PaychecksTab() {
   const [isScanning, setIsScanning] = useState(false);
   const [isScanSectionOpen, setIsScanSectionOpen] = useState(false);
   const [isPaycheckFormOpen, setIsPaycheckFormOpen] = useState(false);
+  const [selectedWorkedPayPeriod, setSelectedWorkedPayPeriod] = useState(null);
+
+  useEffect(() => {
+    if (!selectedWorkedPayPeriod) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setSelectedWorkedPayPeriod(null);
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [selectedWorkedPayPeriod]);
 
   const totals = useMemo(() => {
     return paychecks.reduce(
@@ -1396,9 +1751,54 @@ export default function PaychecksTab() {
     setForm((current) => normalizePaycheck({ ...current, attachment: null }));
   };
 
-  const fetchAttachmentBlob = async (attachment, action) => {
+  const openWorkedPayPeriod = (paycheck) => {
+    const summary = buildWorkedPayPeriodSummary(paycheck);
+    if (summary) setSelectedWorkedPayPeriod(summary);
+  };
+
+  const closeWorkedPayPeriod = () => {
+    setSelectedWorkedPayPeriod(null);
+  };
+
+  const printWorkedPayPeriod = () => {
+    const printTarget = document.getElementById("paycheck-worked-period-print");
+    if (!printTarget || !selectedWorkedPayPeriod) return;
+
+    const previousTitle = document.title;
+    const printAncestors = [];
+    let printAncestor = printTarget.parentElement;
+
+    while (printAncestor && printAncestor !== document.body) {
+      printAncestor.classList.add("paycheck-print-ancestor");
+      printAncestors.push(printAncestor);
+      printAncestor = printAncestor.parentElement;
+    }
+
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      printTarget.classList.remove("paycheck-print-target");
+      printAncestors.forEach((ancestor) => ancestor.classList.remove("paycheck-print-ancestor"));
+      document.body.classList.remove("paycheck-worked-period-printing");
+      document.title = previousTitle;
+      window.removeEventListener("afterprint", cleanup);
+    };
+
+    printTarget.classList.add("paycheck-print-target");
+    document.body.classList.add("paycheck-worked-period-printing");
+    document.title = `CSC Shifts Worked - ${selectedWorkedPayPeriod.label}`;
+    window.addEventListener("afterprint", cleanup, { once: true });
+
+    window.requestAnimationFrame(() => {
+      window.print();
+      window.setTimeout(cleanup, 1000);
+    });
+  };
+
+  const requestPaycheckFile = async (attachment, action) => {
     const normalizedAttachment = normalizePaycheckAttachment(attachment);
-    if (!normalizedAttachment?.savedName) {
+    if (!normalizedAttachment?.savedName && !normalizedAttachment?.originalName) {
       throw new Error("This paycheck does not have a valid saved file link.");
     }
 
@@ -1407,9 +1807,12 @@ export default function PaychecksTab() {
     for (const endpoint of getUploadEndpointCandidates()) {
       const formData = new FormData();
       formData.append("action", action);
-      formData.append("savedName", normalizedAttachment.savedName);
-      formData.append("saved_name", normalizedAttachment.savedName);
-      formData.append("saved_file_name", normalizedAttachment.savedName);
+
+      if (normalizedAttachment.savedName) {
+        formData.append("savedName", normalizedAttachment.savedName);
+        formData.append("saved_name", normalizedAttachment.savedName);
+        formData.append("saved_file_name", normalizedAttachment.savedName);
+      }
 
       if (normalizedAttachment.originalName) {
         formData.append("originalName", normalizedAttachment.originalName);
@@ -1422,17 +1825,24 @@ export default function PaychecksTab() {
           method: "POST",
           body: formData,
           credentials: "include",
-          cache: "no-store",
+          headers: {
+            Accept: "application/pdf,image/*,text/plain,text/csv,application/octet-stream,application/json",
+          },
         });
+        const contentType = String(response.headers.get("content-type") || "").toLowerCase();
 
-        if (!response.ok) {
+        if (!response.ok || contentType.includes("application/json")) {
           const payload = await response.json().catch(() => null);
-          throw new Error(payload?.error || "The saved paycheck file could not be loaded.");
+          throw new Error(payload?.error || `Could not ${action} the paycheck file.`);
+        }
+
+        if (contentType.includes("text/html")) {
+          throw new Error("The paycheck file endpoint returned the app page instead of the saved file.");
         }
 
         const blob = await response.blob();
         if (!blob.size) {
-          throw new Error("The saved paycheck file is empty.");
+          throw new Error("The saved paycheck file was empty.");
         }
 
         return blob;
@@ -1441,7 +1851,35 @@ export default function PaychecksTab() {
       }
     }
 
-    throw lastError || new Error("The saved paycheck file could not be loaded.");
+    throw lastError || new Error(`Could not ${action} the paycheck file.`);
+  };
+
+  const viewAttachment = async (attachment) => {
+    setUploadStatus("");
+    setUploadError("");
+
+    const normalizedAttachment = normalizePaycheckAttachment(attachment);
+    if (!normalizedAttachment?.savedName && !normalizedAttachment?.originalName) {
+      setUploadError("This paycheck does not have a valid saved file link.");
+      return;
+    }
+
+    const previewWindow = window.open("about:blank", "_blank");
+    if (!previewWindow) {
+      setUploadError("Allow pop-ups for this site, then select View again.");
+      return;
+    }
+    previewWindow.opener = null;
+
+    try {
+      const blob = await requestPaycheckFile(normalizedAttachment, "view");
+      const objectUrl = URL.createObjectURL(blob);
+      previewWindow.location.replace(objectUrl);
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    } catch (error) {
+      previewWindow.close();
+      setUploadError(error?.message || "Could not view the saved paycheck file.");
+    }
   };
 
   const downloadAttachment = async (attachment) => {
@@ -1449,9 +1887,7 @@ export default function PaychecksTab() {
     setUploadError("");
 
     const normalizedAttachment = normalizePaycheckAttachment(attachment);
-    const downloadUrl = getDirectAttachmentUrl(normalizedAttachment, "download");
-
-    if (!normalizedAttachment?.savedName || !downloadUrl) {
+    if (!normalizedAttachment?.savedName && !normalizedAttachment?.originalName) {
       setUploadError("This paycheck does not have a valid saved file link.");
       return;
     }
@@ -1461,42 +1897,19 @@ export default function PaychecksTab() {
       normalizedAttachment.savedName ||
       "paycheck-file";
 
-    const openDownloadUrl = () => {
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    };
-
     try {
-      const response = await fetch(downloadUrl, {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error || `Download failed with status ${response.status}.`);
-      }
-
-      const blob = await response.blob();
-      if (!blob.size) throw new Error("The saved paycheck file is empty.");
-
+      const blob = await requestPaycheckFile(normalizedAttachment, "download");
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
       link.download = fileName;
+      link.rel = "noopener noreferrer";
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    } catch {
-      openDownloadUrl();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    } catch (error) {
+      setUploadError(error?.message || "Could not download the saved paycheck file.");
     }
   };
 
@@ -1591,19 +2004,19 @@ export default function PaychecksTab() {
             {form.earningsLines.map((line) => (
               <div
                 key={line.id}
-                className="grid grid-cols-[minmax(0,1fr)_70px_48px_68px] items-center gap-1 rounded-md bg-white px-2 py-1.5 text-xs text-slate-700"
+                className="grid grid-cols-[minmax(120px,1fr)_70px_48px_68px] items-center gap-1 rounded-md bg-white px-2 py-1.5 text-xs text-slate-700"
               >
-                <span className="truncate font-black text-slate-950">
-                  {line.type || "Earnings"}
-                  {formatWorkLineDate(line.workLine) ? (
-                    <span className="ml-1 font-semibold text-slate-500">
-                      {formatWorkLineDate(line.workLine)}
+                <span className="min-w-0 whitespace-normal break-words text-slate-950">
+                  {formatEarningsTypeLabel(line.type)}
+                  {getEarningsLineWorkDateDisplay(line, form) ? (
+                    <span className="ml-1 text-slate-500">
+                      {getEarningsLineWorkDateDisplay(line, form)}
                     </span>
                   ) : null}
                 </span>
-                <span className="text-right font-bold">${line.rate || "0.00"}/hr</span>
+                <span className="text-right">${line.rate || "0.00"}/hr</span>
                 <span className="text-right">{line.hours || "0.00"}h</span>
-                <span className="text-right font-bold">${line.amount || "0.00"}</span>
+                <span className="text-right">${line.amount || "0.00"}</span>
               </div>
             ))}
           </div>
@@ -1621,19 +2034,18 @@ export default function PaychecksTab() {
           <div className="flex flex-wrap gap-1.5">
             {!inline ? (
               <>
-                {getDirectAttachmentUrl(form.attachment, "view") ? (
-                  <a
-                    href={getDirectAttachmentUrl(form.attachment, "view")}
-                    target="_blank"
-                    rel="noreferrer"
+                {form.attachment.savedName || form.attachment.originalName ? (
+                  <button
+                    type="button"
+                    onClick={() => viewAttachment(form.attachment)}
                     className="inline-flex items-center gap-1 rounded-lg bg-blue-700 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-blue-800"
                     title="View paycheck file"
                   >
                     <Eye className="h-4 w-4" />
                     View
-                  </a>
+                  </button>
                 ) : null}
-                {getDirectAttachmentUrl(form.attachment, "download") ? (
+                {form.attachment.savedName || form.attachment.originalName ? (
                   <button
                     type="button"
                     onClick={() => downloadAttachment(form.attachment)}
@@ -1672,6 +2084,57 @@ export default function PaychecksTab() {
 
   return (
     <PageContainer surfaceClassName="min-h-screen bg-slate-100 sm:bg-teal-50" className="flex flex-col gap-2 bg-slate-100 py-2 sm:gap-3 sm:bg-teal-50 sm:py-3">
+      <style>{`
+        @media print {
+          @page { margin: 0.45in; }
+          body.paycheck-worked-period-printing * { visibility: hidden !important; }
+          body.paycheck-worked-period-printing .paycheck-print-ancestor,
+          body.paycheck-worked-period-printing .paycheck-print-ancestor > .paycheck-print-ancestor,
+          body.paycheck-worked-period-printing .paycheck-print-target,
+          body.paycheck-worked-period-printing .paycheck-print-target * { visibility: visible !important; }
+          body.paycheck-worked-period-printing .paycheck-print-ancestor {
+            position: static !important;
+            inset: auto !important;
+            display: block !important;
+            width: auto !important;
+            max-width: none !important;
+            height: auto !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            background: transparent !important;
+          }
+          body.paycheck-worked-period-printing .paycheck-print-ancestor > *:not(.paycheck-print-ancestor):not(.paycheck-print-target) {
+            display: none !important;
+          }
+          body.paycheck-worked-period-printing .paycheck-print-target {
+            position: static !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: none !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+          }
+          body.paycheck-worked-period-printing .paycheck-print-scroll {
+            display: block !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          body.paycheck-worked-period-printing .paycheck-print-target article {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          body.paycheck-worked-period-printing .paycheck-no-print,
+          body.paycheck-worked-period-printing .paycheck-no-print * {
+            display: none !important;
+          }
+        }
+      `}</style>
       <TabPageHeader
         icon={CircleDollarSign}
         title="Paychecks"
@@ -1818,26 +2281,43 @@ export default function PaychecksTab() {
                 </td>
               </tr>
             ) : (
-              paychecks.map((paycheck) => {
+              paychecks.map((paycheck, paycheckIndex) => {
                 const earningsRows = getPaycheckEarningsRows(paycheck);
                 const paycheckAttachment = getStoredPaycheckAttachment(paycheck);
                 const isDuplicateCheckNumber =
                   Boolean(paycheck.checkNumber) &&
                   duplicateCheckNumbers.has(String(paycheck.checkNumber).trim());
+                const isAlternatePayPeriod = paycheckIndex % 2 === 1;
+                const paycheckBackgroundClass =
+                  editingId === paycheck.id
+                    ? "bg-blue-100"
+                    : isAlternatePayPeriod
+                      ? "bg-sky-50"
+                      : "bg-white";
+                const earningsBackgroundClass =
+                  editingId === paycheck.id
+                    ? "bg-blue-50"
+                    : isAlternatePayPeriod
+                      ? "bg-sky-100/70"
+                      : "bg-slate-50";
 
                 return (
                   <React.Fragment key={paycheck.id}>
-                  <tr className={`grid grid-cols-6 gap-2 p-3 align-top md:table-row md:border-t md:border-slate-200 md:p-0 ${
-                    editingId === paycheck.id ? "bg-blue-50/60" : "bg-white"
-                  }`}>
+                  <tr className={`grid grid-cols-6 gap-2 p-3 align-top md:table-row md:border-t md:border-slate-200 md:p-0 ${paycheckBackgroundClass}`}>
                     <td className="col-span-4 block text-slate-900 md:table-cell md:px-1.5 md:py-2">
                       <div className="leading-tight">
                         <div className="mb-0.5 text-[10px] font-black uppercase tracking-wide text-slate-500 md:hidden">Check Date</div>
-                        <div className="font-black tabular-nums">{formatCompactDate(paycheck.checkDate)}</div>
+                        <div className="tabular-nums">{formatCompactDate(paycheck.checkDate)}</div>
                         {paycheck.payPeriodStart || paycheck.payPeriodEnd ? (
-                          <div className="mt-0.5 whitespace-nowrap text-sm font-semibold text-slate-500">
+                          <button
+                            type="button"
+                            onClick={() => openWorkedPayPeriod(paycheck)}
+                            className="mt-0.5 whitespace-nowrap text-left text-sm font-bold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900 hover:decoration-blue-700"
+                            title={`Show shifts worked for ${formatCompactPayPeriod(paycheck.payPeriodStart, paycheck.payPeriodEnd)}`}
+                            aria-label={`Show shifts worked for pay period ${formatCompactPayPeriod(paycheck.payPeriodStart, paycheck.payPeriodEnd)}`}
+                          >
                             {formatCompactPayPeriod(paycheck.payPeriodStart, paycheck.payPeriodEnd)}
-                          </div>
+                          </button>
                         ) : null}
                       </div>
                     </td>
@@ -1857,19 +2337,19 @@ export default function PaychecksTab() {
                         {earningsRows.map((line, index) => (
                             <div
                               key={`${paycheck.id}-earnings-${line.id || index}`}
-                              className="grid grid-cols-[minmax(0,1fr)_72px_48px_66px] items-center gap-1 rounded bg-slate-50 px-1.5 py-1 text-xs leading-tight text-slate-700 sm:text-sm md:grid-cols-[68px_72px_50px_66px]"
+                              className={`grid grid-cols-[minmax(120px,1fr)_72px_48px_66px] items-center gap-1 rounded px-1.5 py-1 text-xs leading-tight text-slate-700 sm:text-sm md:grid-cols-[minmax(120px,1fr)_72px_50px_66px] ${earningsBackgroundClass}`}
                             >
-                              <span className="truncate font-black text-slate-950">
-                                {line.type || "Earnings"}
+                              <span className="min-w-0 whitespace-normal break-words text-slate-950">
+                                {formatEarningsTypeLabel(line.type)}
                                 {line.dateWorked ? (
-                                  <span className="ml-1 font-semibold text-slate-500">
+                                  <span className="ml-1 text-slate-500">
                                     {line.dateWorked}
                                   </span>
                                 ) : null}
                               </span>
-                              <span className="text-right font-bold">${line.rate || "0.00"}/hr</span>
+                              <span className="text-right">${line.rate || "0.00"}/hr</span>
                               <span className="text-right">{line.hours || "0.00"}h</span>
-                              <span className="text-right font-bold">${line.amount || "0.00"}</span>
+                              <span className="text-right">${line.amount || "0.00"}</span>
                             </div>
                         ))}
                       </div>
@@ -1904,20 +2384,19 @@ export default function PaychecksTab() {
                             {editingId === paycheck.id ? "Cancel" : "Edit"}
                           </span>
                         </button>
-                        {paycheckAttachment?.savedName ? (
-                          <a
-                            href={getDirectAttachmentUrl(paycheckAttachment, "view")}
-                            target="_blank"
-                            rel="noreferrer"
+                        {paycheckAttachment?.savedName || paycheckAttachment?.originalName ? (
+                          <button
+                            type="button"
+                            onClick={() => viewAttachment(paycheckAttachment)}
                             className="inline-flex h-9 items-center justify-center rounded-md bg-slate-900 px-2 text-white hover:bg-slate-800 md:w-9 md:px-0"
                             title="View paycheck file"
                             aria-label="View paycheck file"
                           >
                             <Eye className="h-4 w-4" />
                             <span className="ml-1 text-[11px] font-bold md:hidden">View</span>
-                          </a>
+                          </button>
                         ) : null}
-                        {paycheckAttachment?.savedName ? (
+                        {paycheckAttachment?.savedName || paycheckAttachment?.originalName ? (
                           <button
                             type="button"
                             onClick={() => downloadAttachment(paycheckAttachment)}
@@ -1957,6 +2436,142 @@ export default function PaychecksTab() {
         </table>
         </div>
       </section>
+
+      {selectedWorkedPayPeriod ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="paycheck-worked-period-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeWorkedPayPeriod();
+          }}
+        >
+          <div
+            id="paycheck-worked-period-print"
+            className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
+              <div className="min-w-0">
+                <h2 id="paycheck-worked-period-title" className="text-lg font-extrabold text-slate-950 sm:text-xl">
+                  Shifts Worked, {selectedWorkedPayPeriod.label}
+                </h2>
+                <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+                  Only shifts marked Done are included.
+                </p>
+              </div>
+              <div className="paycheck-no-print flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={printWorkedPayPeriod}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800 sm:h-11 sm:px-4 sm:text-sm"
+                  aria-label={`Print shifts worked for ${selectedWorkedPayPeriod.label}`}
+                  title={`Print shifts worked for ${selectedWorkedPayPeriod.label}`}
+                >
+                  <Printer className="h-4 w-4" />
+                  <span className="hidden sm:inline">Print</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={closeWorkedPayPeriod}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-950 sm:h-11 sm:w-11"
+                  aria-label="Close shifts worked modal and return to Paychecks"
+                  title="Close and return to Paychecks"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-5 sm:py-4">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5 sm:p-3">
+                  <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 sm:text-[10px]">Worked Shifts</p>
+                  <p className="mt-1 text-lg font-extrabold text-slate-950 sm:text-xl">
+                    {selectedWorkedPayPeriod.workedShiftCount} out of {selectedWorkedPayPeriod.shiftCount}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5 sm:p-3">
+                  <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 sm:text-[10px]">Worked Hours</p>
+                  <p className="mt-1 text-lg font-extrabold text-slate-950 sm:text-xl">
+                    {selectedWorkedPayPeriod.workedHours.toFixed(1)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5 sm:p-3">
+                  <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 sm:text-[10px]">Estimated Earned Pay</p>
+                  <p className="mt-1 text-lg font-extrabold text-emerald-700 sm:text-xl">
+                    {formatCscCurrency(selectedWorkedPayPeriod.earnedPay)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="paycheck-print-scroll flex-1 overflow-y-auto p-4 sm:p-5">
+              {selectedWorkedPayPeriod.workedShifts.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                  <p className="text-sm font-bold text-slate-700">
+                    No shifts were marked Done for this pay period.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {selectedWorkedPayPeriod.workedShifts.map((shift) => (
+                    <article
+                      key={`${shift.recordSource}-${shift.id}`}
+                      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="text-lg font-extrabold text-slate-950">{shift.venue || "CSC Shift"}</h3>
+                          <p className="mt-0.5 text-sm font-bold text-slate-700">{shift.event || "Event not entered"}</p>
+                          {shouldShowDistinctCscJobName(shift) ? (
+                            <p className="mt-0.5 text-xs font-semibold text-slate-500">{shift.jobName}</p>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <span className="rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-green-800">
+                            Done
+                          </span>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-700">
+                            {shift.recordSource === "archived" ? "Archived" : "Active"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-2 text-sm text-slate-700">
+                        <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <span className="font-extrabold text-slate-950">Start</span>
+                          <span>{formatCscShiftDate(shift.startDate)} {formatCscShiftTime(shift.startTime)}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <span className="font-extrabold text-slate-950">Finish</span>
+                          <span>{formatCscShiftDate(shift.finishDate || shift.startDate)} {formatCscShiftTime(shift.finishTime)}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <span className="font-extrabold text-slate-950">Hours</span>
+                          <span>{getCscShiftHours(shift).toFixed(1)}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <span className="font-extrabold text-slate-950">Uniform</span>
+                          <span>{deriveCscUniform(shift)}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <span className="font-extrabold text-slate-950">Est. Pay</span>
+                          <span>{formatCscCurrency(getCscShiftEstimatedPay(shift))}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <span className="font-extrabold text-slate-950">Paid Status</span>
+                          <span>{shift.paidStatus || "Unpaid"}</span>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </PageContainer>
   );
 }

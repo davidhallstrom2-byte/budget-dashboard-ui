@@ -40,6 +40,7 @@ const TODO_STORAGE_KEY = 'todoTab.tasks.v1';
 const TODO_BACKUP_STORAGE_KEY = 'todoTab.tasks.backup.v1';
 const TODO_UPDATE_EVENT = 'todoTab:updated';
 const APP_NAVIGATE_EVENT = 'app:navigate';
+const EVENT_WATCH_REPORT_STORAGE_KEY = 'cscEventWatch.latestReport.v1';
 const KIA_FORUM_EVENTS_URL = 'https://thekiaforum.com/events/';
 const SOFI_STADIUM_EVENTS_URL = 'https://www.sofistadium.com/events';
 const INTUIT_DOME_EVENTS_URL = 'https://www.intuitdome.com/events/event-schedule';
@@ -276,6 +277,218 @@ const formatShortDateTime = (value) => {
     year: '2-digit',
     hour: 'numeric',
     minute: '2-digit',
+  });
+};
+
+const createEmptyEventWatchReport = (defaults = {}) => ({
+  scanDate: String(defaults.scanDate || '').trim(),
+  savedAt: defaults.savedAt || '',
+  source: defaults.source || '',
+  newEvents: Array.isArray(defaults.newEvents) ? defaults.newEvents.filter(Boolean) : [],
+  rescheduledEvents: Array.isArray(defaults.rescheduledEvents)
+    ? defaults.rescheduledEvents.filter(Boolean)
+    : [],
+  cancelledEvents: Array.isArray(defaults.cancelledEvents)
+    ? defaults.cancelledEvents.filter(Boolean)
+    : [],
+  scanStatus: Array.isArray(defaults.scanStatus) ? defaults.scanStatus.filter(Boolean) : [],
+  rawText: String(defaults.rawText || ''),
+});
+
+const stripEventWatchMarkup = (value = '') =>
+  String(value || '')
+    .replace(/^\s*[-*•]+\s*/, '')
+    .replace(/\*\*/g, '')
+    .replace(/^\s*#+\s*/, '')
+    .trim();
+
+const normalizeReportItems = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return stripEventWatchMarkup(item);
+        if (!item || typeof item !== 'object') return '';
+        return stripEventWatchMarkup(
+          [
+            item.venue,
+            item.eventName || item.event || item.title,
+            item.eventDate || item.date,
+            item.eventTime || item.time,
+            item.details || item.status,
+          ]
+            .filter(Boolean)
+            .join(' | ')
+        );
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    const item = stripEventWatchMarkup(value);
+    return item && !/^none\.?$/i.test(item) ? [item] : [];
+  }
+
+  return [];
+};
+
+const parseEventWatchReportText = (value = '') => {
+  const rawText = String(value || '').trim();
+  if (!rawText) return createEmptyEventWatchReport();
+
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed === 'object') {
+      const status = parsed.scanStatus || parsed.status || {};
+      const statusItems = Array.isArray(status)
+        ? status
+        : [
+            ...(normalizeReportItems(status.checked || status.successfullyChecked).map(
+              (item) => `Successfully checked: ${item}`
+            )),
+            ...(normalizeReportItems(status.failed || status.couldNotCheck).map(
+              (item) => `Extraction failed: ${item}`
+            )),
+            ...(normalizeReportItems(status.needsVerification).map(
+              (item) => `Needs verification: ${item}`
+            )),
+          ];
+
+      return createEmptyEventWatchReport({
+        scanDate: parsed.scanDate || parsed.scannedAt || parsed.date || '',
+        savedAt: new Date().toISOString(),
+        source: parsed.source || 'CSC Event Watch',
+        newEvents: normalizeReportItems(parsed.newEvents || parsed.new),
+        rescheduledEvents: normalizeReportItems(
+          parsed.rescheduledEvents || parsed.rescheduled
+        ),
+        cancelledEvents: normalizeReportItems(parsed.cancelledEvents || parsed.cancelled),
+        scanStatus: normalizeReportItems(statusItems),
+        rawText,
+      });
+    }
+  } catch {
+    // The daily report is usually copied as formatted text, not JSON.
+  }
+
+  const sectionItems = {
+    newEvents: [],
+    rescheduledEvents: [],
+    cancelledEvents: [],
+    scanStatus: [],
+  };
+  let activeSection = '';
+  let scanDate = '';
+
+  rawText.split(/\r?\n/).forEach((line) => {
+    const cleaned = stripEventWatchMarkup(line);
+    if (!cleaned) return;
+
+    const scanDateMatch = cleaned.match(/^scan\s+date(?:\s+and\s+time)?\s*:\s*(.+)$/i);
+    if (scanDateMatch) {
+      scanDate = scanDateMatch[1].trim();
+      return;
+    }
+
+    if (/^new events\s*:?$/i.test(cleaned)) {
+      activeSection = 'newEvents';
+      return;
+    }
+    if (/^rescheduled events\s*:?$/i.test(cleaned)) {
+      activeSection = 'rescheduledEvents';
+      return;
+    }
+    if (/^cancelled events\s*:?$/i.test(cleaned)) {
+      activeSection = 'cancelledEvents';
+      return;
+    }
+    if (/^scan status\s*:?$/i.test(cleaned)) {
+      activeSection = 'scanStatus';
+      return;
+    }
+
+    if (!activeSection || /^csc event watch\b/i.test(cleaned) || /^daily scan summary$/i.test(cleaned)) {
+      return;
+    }
+    if (/^none\.?$/i.test(cleaned)) return;
+    sectionItems[activeSection].push(cleaned);
+  });
+
+  return createEmptyEventWatchReport({
+    scanDate,
+    savedAt: new Date().toISOString(),
+    source: 'CSC Event Watch',
+    ...sectionItems,
+    rawText,
+  });
+};
+
+const loadEventWatchReport = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EVENT_WATCH_REPORT_STORAGE_KEY) || 'null');
+    return parsed && typeof parsed === 'object'
+      ? createEmptyEventWatchReport(parsed)
+      : createEmptyEventWatchReport();
+  } catch {
+    return createEmptyEventWatchReport();
+  }
+};
+
+const formatOpportunityForReport = (opportunity = {}) =>
+  [
+    canonicalVenueName(opportunity.venue) || 'Venue not entered',
+    opportunity.eventName || 'Event name not entered',
+    opportunity.eventDate ? formatDate(opportunity.eventDate) : 'Date not entered',
+    opportunity.eventTime ? formatTime(opportunity.eventTime) : '',
+  ]
+    .filter(Boolean)
+    .join(' | ');
+
+const buildLocalVenueScanReport = (scannedItems = [], existingItems = [], venue = '') => {
+  const canonicalVenue = canonicalVenueName(venue);
+  const existingForVenue = existingItems.filter(
+    (item) => canonicalVenueName(item.venue) === canonicalVenue
+  );
+  const newEvents = [];
+  const rescheduledEvents = [];
+  const cancelledEvents = [];
+
+  scannedItems.forEach((item) => {
+    const normalizedName = normalizeText(item.eventName);
+    const sameEvent = existingForVenue.find(
+      (existing) => normalizeText(existing.eventName) === normalizedName
+    );
+    const isCancelled = /\bcancell?ed\b/i.test(String(item.eventName || ''));
+
+    if (isCancelled) {
+      cancelledEvents.push(formatOpportunityForReport(item));
+      return;
+    }
+
+    if (!sameEvent) {
+      newEvents.push(formatOpportunityForReport(item));
+      return;
+    }
+
+    if (
+      String(sameEvent.eventDate || '') !== String(item.eventDate || '') ||
+      String(sameEvent.eventTime || '') !== String(item.eventTime || '')
+    ) {
+      rescheduledEvents.push(
+        `${canonicalVenue} | ${item.eventName} | ${formatDate(sameEvent.eventDate)}${
+          sameEvent.eventTime ? ` at ${formatTime(sameEvent.eventTime)}` : ''
+        } to ${formatDate(item.eventDate)}${item.eventTime ? ` at ${formatTime(item.eventTime)}` : ''}`
+      );
+    }
+  });
+
+  return createEmptyEventWatchReport({
+    scanDate: new Date().toLocaleString('en-US'),
+    savedAt: new Date().toISOString(),
+    source: `CSC Opportunities venue scanner, ${canonicalVenue}`,
+    newEvents,
+    rescheduledEvents,
+    cancelledEvents,
+    scanStatus: [`Successfully checked: ${canonicalVenue}`],
   });
 };
 
@@ -1887,7 +2100,7 @@ const parseRoxyEvents = (text = '', sourceUrl = ROXY_EVENTS_URL) => {
 const parseYouTubeTheaterDateLine = (line = '') => {
   const cleaned = sanitizeScannedLine(line);
   const datedEventMatch = cleaned.match(
-    /^(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(20\d{2})(?:\s*\/\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
+    /^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?\s*,?\s*)?([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s*(20\d{2})(?:\s*(?:\/|\||-|–|—)\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
   );
 
   if (datedEventMatch) {
@@ -1945,6 +2158,38 @@ const isYouTubeTheaterScannerNoiseLine = (value = '') => {
   );
 };
 
+const getYouTubeTheaterEventName = (blockLines = []) => {
+  const titleLines = [];
+
+  for (const value of blockLines) {
+    const line = sanitizeScannedLine(value);
+    const normalized = normalizeText(line);
+
+    if (!line || /^https?:\/\//i.test(line) || parseYouTubeTheaterDateLine(line)) {
+      continue;
+    }
+
+    const reachedEventControls =
+      /^doors open:/i.test(line) ||
+      Boolean(parseYouTubeTheaterEventStart(line)) ||
+      /^(buy tickets|more info|buy tickets more info|premium|parking|premium parking|parking map|rideshare information)$/.test(
+        normalized
+      );
+
+    if (reachedEventControls) {
+      if (titleLines.length) break;
+      continue;
+    }
+
+    if (isYouTubeTheaterScannerNoiseLine(line)) continue;
+
+    titleLines.push(line);
+    if (titleLines.length === 2) break;
+  }
+
+  return titleLines.join(' - ');
+};
+
 const parseYouTubeTheaterEvents = (
   text = '',
   sourceUrl = YOUTUBE_THEATER_EVENTS_URL
@@ -1965,13 +2210,7 @@ const parseYouTubeTheaterEvents = (
     }
 
     const blockLines = lines.slice(index + 1, nextDateIndex);
-    const eventName =
-      blockLines.find(
-        (line) =>
-          !isYouTubeTheaterScannerNoiseLine(line) &&
-          !parseYouTubeTheaterDateLine(line) &&
-          !/^https?:\/\//i.test(line)
-      ) || '';
+    const eventName = getYouTubeTheaterEventName(blockLines);
     const eventTime =
       dateDetails.eventTime ||
       blockLines.map(parseYouTubeTheaterEventStart).find(Boolean) ||
@@ -2258,6 +2497,77 @@ const getScheduledShiftConflicts = (opportunity = {}, allShifts = []) => {
     );
 };
 
+const archiveOpportunitiesBlockedByScheduledShifts = (
+  items = [],
+  allShifts = readCscShifts()
+) => {
+  const opportunities = Array.isArray(items) ? items : [];
+  const activeScheduledShifts = allShifts.filter(
+    (shift) =>
+      shift.recordSource !== 'archived' &&
+      !isCancelledShiftStatus(shift.shiftStatus) &&
+      !isCompletedShiftStatus(shift.shiftStatus)
+  );
+
+  if (!activeScheduledShifts.length) return opportunities;
+
+  const blockedById = new Map();
+
+  opportunities.forEach((opportunity) => {
+    const resolvedOpportunity = {
+      ...opportunity,
+      status: getResolvedOpportunityStatus(opportunity, allShifts),
+    };
+    const conflicts = getScheduledShiftConflicts(
+      resolvedOpportunity,
+      activeScheduledShifts
+    );
+
+    if (conflicts.length) blockedById.set(opportunity.id, conflicts);
+  });
+
+  if (!blockedById.size) return opportunities;
+
+  writeOpportunitySnapshot(
+    'Before conflicting CSC opportunities auto-archive',
+    opportunities,
+    readArray(VENUE_CONTACTS_STORAGE_KEY, [])
+  );
+
+  try {
+    const archived = readArray(OPPORTUNITIES_ARCHIVE_STORAGE_KEY, []);
+    const archivedById = new Map(
+      archived
+        .filter((item) => item?.id)
+        .map((item) => [item.id, item])
+    );
+    const archivedAt = new Date().toISOString();
+
+    blockedById.forEach((conflicts, opportunityId) => {
+      const opportunity = opportunities.find((item) => item.id === opportunityId);
+      if (!opportunity) return;
+
+      const existing = archivedById.get(opportunityId);
+      archivedById.set(opportunityId, {
+        ...opportunity,
+        archivedAt: existing?.archivedAt || archivedAt,
+        archiveReason: 'Scheduled for another CSC shift',
+        conflictingCscShiftIds: conflicts.map((shift) => shift.id).filter(Boolean),
+      });
+    });
+
+    localStorage.setItem(
+      OPPORTUNITIES_ARCHIVE_STORAGE_KEY,
+      JSON.stringify(Array.from(archivedById.values()))
+    );
+  } catch (error) {
+    console.error('Failed to archive conflicting CSC opportunities:', error);
+    return opportunities;
+  }
+
+  return opportunities.filter((opportunity) => !blockedById.has(opportunity.id));
+};
+
 const getStatusClass = (status) => {
   if (status === 'Scheduled') return 'bg-emerald-100 text-emerald-900 border-emerald-200';
   if (status === 'Completed') return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -2361,6 +2671,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [showFormDrawer, setShowFormDrawer] = useState(false);
   const [showScanDrawer, setShowScanDrawer] = useState(false);
   const [showCreateShiftDrawer, setShowCreateShiftDrawer] = useState(false);
+  const [showEventWatchDrawer, setShowEventWatchDrawer] = useState(false);
+  const [eventWatchReport, setEventWatchReport] = useState(() => loadEventWatchReport());
+  const [eventWatchReportText, setEventWatchReportText] = useState('');
   const [showConflictSection, setShowConflictSection] = useState(false);
   const [editingOpportunity, setEditingOpportunity] = useState(() => createBlankOpportunity());
   const [scanText, setScanText] = useState('');
@@ -2494,7 +2807,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           });
         });
 
-        return changed ? next : current;
+        const reconciled = changed ? next : current;
+        return archiveOpportunitiesBlockedByScheduledShifts(reconciled, allShifts);
       });
     };
 
@@ -3045,6 +3359,18 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     );
     const expiredCount = withDefaults.length - currentOpportunities.length;
 
+    const latestReport = buildLocalVenueScanReport(
+      currentOpportunities,
+      opportunities,
+      scanVenue
+    );
+    try {
+      localStorage.setItem(EVENT_WATCH_REPORT_STORAGE_KEY, JSON.stringify(latestReport));
+      setEventWatchReport(latestReport);
+    } catch (error) {
+      console.error('Failed to save the latest CSC Event Watch report:', error);
+    }
+
     setScannedOpportunities(currentOpportunities);
     flashMessage(
       currentOpportunities.length
@@ -3055,6 +3381,37 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           ? `Scanner skipped ${expiredCount} past event${expiredCount === 1 ? '' : 's'}.`
           : 'No event opportunities found. Copy the event date and event name lines from the venue page.'
     );
+  };
+
+  const openEventWatchReport = () => {
+    const latestReport = loadEventWatchReport();
+    setEventWatchReport(latestReport);
+    setEventWatchReportText(latestReport.rawText || '');
+    setShowEventWatchDrawer(true);
+  };
+
+  const handleSaveEventWatchReport = () => {
+    const parsedReport = parseEventWatchReportText(eventWatchReportText);
+    const hasReportData =
+      parsedReport.scanDate ||
+      parsedReport.newEvents.length ||
+      parsedReport.rescheduledEvents.length ||
+      parsedReport.cancelledEvents.length ||
+      parsedReport.scanStatus.length;
+
+    if (!hasReportData) {
+      flashMessage('Paste the complete Event Watch daily report before saving.');
+      return;
+    }
+
+    try {
+      localStorage.setItem(EVENT_WATCH_REPORT_STORAGE_KEY, JSON.stringify(parsedReport));
+      setEventWatchReport(parsedReport);
+      flashMessage('Latest Event Watch report saved.');
+    } catch (error) {
+      console.error('Failed to save the latest CSC Event Watch report:', error);
+      flashMessage('The Event Watch report could not be saved.');
+    }
   };
 
   const handleImportScanned = () => {
@@ -3214,7 +3571,6 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       if (excludedVenueSet.has(canonicalVenueName(opportunity.venue))) return;
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return;
-      if (summaryFilter !== 'conflicts' && scheduledShiftConflictMap.has(opportunity.id)) return;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return;
 
       if (combinedSearch) {
@@ -3261,7 +3617,6 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       if (excludedVenueSet.has(canonicalVenueName(opportunity.venue))) return false;
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return false;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return false;
-      if (summaryFilter !== 'conflicts' && scheduledShiftConflictMap.has(opportunity.id)) return false;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return false;
       if (!combinedSearch) return true;
 
@@ -3352,11 +3707,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const activeOpportunities = useMemo(
     () =>
       opportunities.filter(
-        (item) =>
-          isActiveOpportunityStatus(getResolvedOpportunityStatus(item, allCscShiftsForStatus)) &&
-          !scheduledShiftConflictMap.has(item.id)
+        (item) => isActiveOpportunityStatus(getResolvedOpportunityStatus(item, allCscShiftsForStatus))
       ),
-    [allCscShiftsForStatus, opportunities, scheduledShiftConflictMap]
+    [allCscShiftsForStatus, opportunities]
   );
 
   const upcomingOpportunities = useMemo(
@@ -3785,6 +4138,10 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               gap: 0.375rem;
             }
 
+            .csc-event-watch-action {
+              grid-column: 1 / -1;
+            }
+
             .csc-opportunity-browser-heading,
             .csc-month-label {
               display: none;
@@ -3974,6 +4331,16 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             <div className="csc-header-actions flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={openEventWatchReport}
+                title="Show the latest CSC Event Watch scan report"
+                aria-label="Show the latest CSC Event Watch scan report"
+                className={`csc-header-action csc-event-watch-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-emerald-500 text-white hover:bg-emerald-400`}
+              >
+                <CalendarCheck2 className="h-4 w-4" />
+                <span className="csc-header-action-label">Latest Event Watch Report</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowScanDrawer(true)}
                 title="Scan events"
                 aria-label="Scan events"
@@ -4091,7 +4458,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               <div>
                 <h2 className="text-xl font-black text-red-950">Opportunity Conflicts</h2>
                 <p className="text-sm font-semibold text-red-800">
-                  Scheduled-shift conflicts stay out of the active list and return automatically if the shift is cancelled or removed.
+                  Conflicting opportunities remain visible in the active list with a warning on each event card.
                 </p>
               </div>
             </div>
@@ -4329,6 +4696,120 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         </section>
       </div>
 
+      {showEventWatchDrawer ? (
+        <div className="fixed inset-0 z-[90] flex justify-end bg-slate-950/60">
+          <div className="h-full w-full max-w-3xl overflow-y-auto bg-slate-50 p-5 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-emerald-800">
+                  <CalendarCheck2 className="h-6 w-6" />
+                  <h3 className="text-2xl font-black text-slate-950">Latest Event Watch Report</h3>
+                </div>
+                <p className="mt-1 text-sm font-semibold text-slate-600">
+                  {eventWatchReport.scanDate
+                    ? `Scan date: ${eventWatchReport.scanDate}`
+                    : 'No Event Watch report has been saved yet.'}
+                </p>
+                {eventWatchReport.source ? (
+                  <p className="mt-1 text-xs font-bold text-slate-500">
+                    Source: {eventWatchReport.source}
+                    {eventWatchReport.savedAt
+                      ? ` | Saved ${formatShortDateTime(eventWatchReport.savedAt)}`
+                      : ''}
+                  </p>
+                ) : null}
+              </div>
+              <CloseScreenButton onClick={() => setShowEventWatchDrawer(false)} />
+            </div>
+
+            <div className="mt-5 grid gap-4">
+              {[
+                {
+                  title: 'New Events',
+                  items: eventWatchReport.newEvents,
+                  className: 'border-emerald-200 bg-emerald-50',
+                  titleClassName: 'text-emerald-950',
+                },
+                {
+                  title: 'Rescheduled Events',
+                  items: eventWatchReport.rescheduledEvents,
+                  className: 'border-amber-200 bg-amber-50',
+                  titleClassName: 'text-amber-950',
+                },
+                {
+                  title: 'Cancelled Events',
+                  items: eventWatchReport.cancelledEvents,
+                  className: 'border-red-200 bg-red-50',
+                  titleClassName: 'text-red-950',
+                },
+                {
+                  title: 'Scan Status',
+                  items: eventWatchReport.scanStatus,
+                  className: 'border-blue-200 bg-blue-50',
+                  titleClassName: 'text-blue-950',
+                },
+              ].map((section) => (
+                <section key={section.title} className={`rounded-2xl border p-4 ${section.className}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className={`text-base font-black ${section.titleClassName}`}>
+                      {section.title}
+                    </h4>
+                    <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-black text-slate-700">
+                      {section.items.length}
+                    </span>
+                  </div>
+                  {section.items.length ? (
+                    <ul className="mt-3 grid gap-2">
+                      {section.items.map((item, index) => (
+                        <li
+                          key={`${section.title}-${index}-${item}`}
+                          className="rounded-xl border border-white/80 bg-white/75 px-3 py-2 text-sm font-semibold leading-6 text-slate-800"
+                        >
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 text-sm font-bold text-slate-600">None.</p>
+                  )}
+                </section>
+              ))}
+            </div>
+
+            <section className="mt-5 rounded-2xl border border-slate-300 bg-white p-4">
+              <h4 className="text-base font-black text-slate-950">Update Latest Report</h4>
+              <p className="mt-1 text-sm font-medium text-slate-600">
+                Paste the complete CSC Event Watch daily report. The report stays saved in this browser until a newer report or venue scan replaces it.
+              </p>
+              <textarea
+                rows={10}
+                value={eventWatchReportText}
+                onChange={(event) => setEventWatchReportText(event.target.value)}
+                className="mt-3 w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm leading-6"
+                placeholder={'CSC Event Watch - Daily Scan Summary\nScan date: August 4, 2026\n\nNEW EVENTS\nNone.\n\nRESCHEDULED EVENTS\nNone.\n\nCANCELLED EVENTS\nNone.\n\nSCAN STATUS\nSuccessfully checked: Kia Forum'}
+              />
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEventWatchDrawer(false)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEventWatchReport}
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-extrabold text-white hover:bg-emerald-800"
+                >
+                  <ClipboardCheck className="h-4 w-4" />
+                  Save Latest Report
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      ) : null}
+
       {showFormDrawer ? (
         <div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/60">
           <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-6 shadow-2xl">
@@ -4558,6 +5039,8 @@ export {
   parseRoxyEvents,
   parseYouTubeTheaterEvents,
   parseVenueEvents,
+  parseEventWatchReportText,
+  buildLocalVenueScanReport,
   findMatchingCscShift,
   getScheduledShiftConflicts,
 };

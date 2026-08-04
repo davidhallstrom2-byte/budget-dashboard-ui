@@ -69,6 +69,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/budget-dashboard-fs/upload-credit-report.php': {
+        target: 'http://main-dashboard.local',
+        changeOrigin: true,
+        secure: false,
+      },
     },
     hmr: {
       host: useLan ? LAN_IP : 'localhost',

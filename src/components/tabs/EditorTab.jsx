@@ -44,6 +44,64 @@ const DEFAULT_TITLES = {
   misc: 'Miscellaneous'
 };
 
+const CREDIT_REPORT_FILE_ENDPOINT = '/budget-dashboard-fs/upload-credit-report.php';
+
+const normalizeCreditReportFile = (file = {}) => ({
+  id: file.id || `credit-report-file-${Date.now()}`,
+  originalName: file.originalName || file.name || 'Credit report',
+  savedName: file.savedName || '',
+  mimeType: file.mimeType || file.type || '',
+  size: Number(file.size || file.sizeBytes || 0) || 0,
+  uploadedAt: file.uploadedAt || new Date().toISOString(),
+  bureau: file.bureau || '',
+  reportDate: file.reportDate || '',
+});
+
+const formatCreditReportFileSize = (size = 0) => {
+  const bytes = Number(size || 0);
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const buildCreditReportFileUrl = (action, reportFile = {}) => {
+  const savedName = String(reportFile.savedName || '').trim();
+  if (!savedName) return '';
+
+  const params = new URLSearchParams();
+  params.set('action', action);
+  params.set('savedName', savedName);
+  if (reportFile.originalName) params.set('name', reportFile.originalName);
+  return `${CREDIT_REPORT_FILE_ENDPOINT}?${params.toString()}`;
+};
+
+const uploadCreditReportOriginal = async (file, reportMeta = {}) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('bureau', reportMeta.bureau || '');
+  formData.append('reportDate', reportMeta.reportDate || '');
+
+  const response = await fetch(CREDIT_REPORT_FILE_ENDPOINT, {
+    method: 'POST',
+    body: formData,
+  });
+  const responseText = await response.text();
+  let payload;
+
+  try {
+    payload = JSON.parse(responseText);
+  } catch {
+    throw new Error('The credit-report storage endpoint did not return a valid response.');
+  }
+
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `Credit-report upload failed with status ${response.status}.`);
+  }
+
+  return normalizeCreditReportFile(payload.file || payload);
+};
+
 const ITEM_TEMPLATES = [
   { name: 'Rent/Mortgage', category: 'housing', estBudget: 1500, recurrence: 'monthly' },
   { name: 'Electric Bill', category: 'housing', estBudget: 150, recurrence: 'monthly' },
@@ -118,6 +176,48 @@ const formatDebtCurrency = (value) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+const AUNT_PERSONAL_LOAN_ID = 'aunt-car-rear-differential-loan';
+const AUNT_PERSONAL_LOAN_INITIALIZED_KEY = 'auntPersonalLoanInitialized';
+const PERSONAL_LOAN_FREQUENCIES = [
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'biweekly', label: 'Every 2 weeks' },
+  { value: 'weekly', label: 'Weekly' },
+];
+
+const isAuntPersonalLoan = (item = {}) =>
+  item.personalLoanId === AUNT_PERSONAL_LOAN_ID;
+
+const getPersonalLoanStatusLabel = (item = {}) => {
+  if (item.repaymentStatus === 'paidOff' || getDebtNumber(item.currentAmountOwed || item.currentBalance) <= 0) {
+    return 'Paid off';
+  }
+  if (item.repaymentStatus === 'active') return 'Repayment active';
+  if (item.repaymentStatus === 'paused') return 'Repayment paused';
+  return 'Repayment not started';
+};
+
+const advancePersonalLoanDueDate = (dateValue, frequency = 'monthly') => {
+  const source = String(dateValue || '').trim();
+  if (!source) return '';
+
+  const nextDate = new Date(`${source}T12:00:00`);
+  if (Number.isNaN(nextDate.getTime())) return '';
+
+  if (frequency === 'weekly') {
+    nextDate.setDate(nextDate.getDate() + 7);
+  } else if (frequency === 'biweekly') {
+    nextDate.setDate(nextDate.getDate() + 14);
+  } else {
+    const originalDay = nextDate.getDate();
+    nextDate.setDate(1);
+    nextDate.setMonth(nextDate.getMonth() + 1);
+    const lastDay = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+    nextDate.setDate(Math.min(originalDay, lastDay));
+  }
+
+  return nextDate.toISOString().split('T')[0];
+};
 
 const getDebtDaysDelinquent = (item = {}) => {
   const sourceDate = item.delinquentSince || '';
@@ -230,8 +330,30 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   const [batchAddMode, setBatchAddMode] = useState(false);
   const [batchAddCategory, setBatchAddCategory] = useState('');
   const [debtEditor, setDebtEditor] = useState(null);
+  const [personalLoanEditor, setPersonalLoanEditor] = useState(null);
   const [showCreditReportScanner, setShowCreditReportScanner] = useState(false);
+  const [showSavedCreditReports, setShowSavedCreditReports] = useState(false);
   const batchItemNameRef = useRef(null);
+  const auntLoanInitializationRef = useRef(false);
+
+  const preserveItemActionScroll = (event) => {
+    if (!event.target.closest('button')) return;
+
+    const scrollLeft = window.scrollX;
+    const scrollTop = window.scrollY;
+    const restoreScroll = () => {
+      window.scrollTo({
+        left: scrollLeft,
+        top: scrollTop,
+        behavior: 'auto',
+      });
+    };
+
+    requestAnimationFrame(() => {
+      restoreScroll();
+      requestAnimationFrame(restoreScroll);
+    });
+  };
 
   useEffect(() => {
     if (state?.meta?.categoryNames) {
@@ -277,6 +399,80 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (
+      auntLoanInitializationRef.current ||
+      !state?.buckets?.banking ||
+      state?.meta?.[AUNT_PERSONAL_LOAN_INITIALIZED_KEY]
+    ) {
+      return;
+    }
+
+    auntLoanInitializationRef.current = true;
+
+    const existingLoan = Object.values(state.buckets)
+      .flatMap((items) => items || [])
+      .find((item) => isAuntPersonalLoan(item));
+
+    const loanItem = existingLoan || {
+      id: `personal-loan-${AUNT_PERSONAL_LOAN_ID}`,
+      category: 'Personal Loan - Aunt',
+      estBudget: 0,
+      actualCost: 0,
+      dueDate: '',
+      status: 'paused',
+      recurrence: 'none',
+      currentBalance: 2365,
+      currentAmountOwed: 2365,
+      originalBalance: 2365,
+      availableCredit: 0,
+      accountStatus: 'Open',
+      personalLoanId: AUNT_PERSONAL_LOAN_ID,
+      loanType: 'personal',
+      lender: 'Aunt',
+      loanPurpose: 'Car rear differential',
+      interestRate: 0,
+      repaymentStatus: 'notStarted',
+      repaymentFrequency: 'monthly',
+      paymentAmount: 0,
+      firstPaymentDate: '',
+      nextPaymentDate: '',
+      loanPaymentHistory: [],
+      pausedReason: 'Repayment not started - waiting until affordable',
+      pausedAt: new Date().toISOString(),
+      debtStatusNotes: 'Personal loan from Aunt for the car rear differential. Repayment has not started.',
+      loanCreatedAt: new Date().toISOString(),
+    };
+
+    const updatedState = {
+      ...state,
+      buckets: existingLoan
+        ? state.buckets
+        : {
+            ...state.buckets,
+            banking: [...state.buckets.banking, loanItem],
+          },
+      meta: {
+        ...(state.meta || {}),
+        [AUNT_PERSONAL_LOAN_INITIALIZED_KEY]: true,
+      },
+    };
+
+    setState(updatedState);
+    setCollapsedCategories((current) => ({ ...current, banking: false }));
+    setTimeout(
+      () => saveBudgetWithIndicator(
+        updatedState,
+        existingLoan
+          ? 'Aunt personal loan linked to the repayment manager.'
+          : 'Aunt personal loan created with repayment not started.'
+      ),
+      100
+    );
+    // This one-time data migration must use the hydrated state present when the Editor opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.buckets?.banking, state?.meta?.[AUNT_PERSONAL_LOAN_INITIALIZED_KEY]]);
 
   // CSC AUTO-GENERATION DISABLED
   // The useEffect that was here has been removed to prevent automatic regeneration of CSC weekly income entries
@@ -360,6 +556,252 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     );
   };
 
+  const auntPersonalLoanRecord = useMemo(() => {
+    for (const [bucket, items] of Object.entries(state?.buckets || {})) {
+      const item = (items || []).find((entry) => isAuntPersonalLoan(entry));
+      if (item) return { bucket, item };
+    }
+    return null;
+  }, [state?.buckets]);
+
+  const openPersonalLoanEditor = (bucket, item, focusPayment = false) => {
+    const paymentAmount = getDebtNumber(item.paymentAmount || item.estBudget);
+    setPersonalLoanEditor({
+      bucket,
+      item: {
+        ...item,
+        lender: item.lender || 'Aunt',
+        loanPurpose: item.loanPurpose || 'Car rear differential',
+        originalBalance: getDebtNumber(item.originalBalance || 2365),
+        currentAmountOwed: getDebtNumber(item.currentAmountOwed || item.currentBalance),
+        interestRate: getDebtNumber(item.interestRate),
+        repaymentStatus: item.repaymentStatus || 'notStarted',
+        repaymentFrequency: item.repaymentFrequency || 'monthly',
+        paymentAmount,
+        firstPaymentDate: item.firstPaymentDate || '',
+        nextPaymentDate: item.nextPaymentDate || item.dueDate || '',
+        debtStatusNotes: item.debtStatusNotes || '',
+      },
+      paymentEntry: {
+        amount: paymentAmount || '',
+        date: new Date().toISOString().split('T')[0],
+      },
+      focusPayment,
+    });
+  };
+
+  const updatePersonalLoanEditorField = (field, value) => {
+    setPersonalLoanEditor((current) =>
+      current
+        ? {
+            ...current,
+            item: {
+              ...current.item,
+              [field]: value,
+            },
+          }
+        : current
+    );
+  };
+
+  const updatePersonalLoanPaymentEntry = (field, value) => {
+    setPersonalLoanEditor((current) =>
+      current
+        ? {
+            ...current,
+            paymentEntry: {
+              ...current.paymentEntry,
+              [field]: value,
+            },
+          }
+        : current
+    );
+  };
+
+  const savePersonalLoanPlan = () => {
+    if (!personalLoanEditor?.bucket || !personalLoanEditor?.item?.id) return;
+
+    const repaymentStatus = personalLoanEditor.item.repaymentStatus || 'notStarted';
+    const paymentAmount = getDebtNumber(personalLoanEditor.item.paymentAmount);
+    const firstPaymentDate = personalLoanEditor.item.firstPaymentDate || '';
+    const currentAmountOwed = getDebtNumber(personalLoanEditor.item.currentAmountOwed);
+
+    if (repaymentStatus === 'active' && paymentAmount <= 0) {
+      alert('Enter a payment amount before starting repayment.');
+      return;
+    }
+
+    if (repaymentStatus === 'active' && !firstPaymentDate) {
+      alert('Choose the first payment date before starting repayment.');
+      return;
+    }
+
+    const isPaidOff = currentAmountOwed <= 0 || repaymentStatus === 'paidOff';
+    const isActive = repaymentStatus === 'active' && !isPaidOff;
+    const normalizedRepaymentStatus = isPaidOff ? 'paidOff' : repaymentStatus;
+    const updatedItem = {
+      ...personalLoanEditor.item,
+      category: personalLoanEditor.item.category || 'Personal Loan - Aunt',
+      personalLoanId: AUNT_PERSONAL_LOAN_ID,
+      loanType: 'personal',
+      lender: personalLoanEditor.item.lender || 'Aunt',
+      loanPurpose: personalLoanEditor.item.loanPurpose || 'Car rear differential',
+      originalBalance: getDebtNumber(personalLoanEditor.item.originalBalance),
+      currentBalance: isPaidOff ? 0 : currentAmountOwed,
+      currentAmountOwed: isPaidOff ? 0 : currentAmountOwed,
+      interestRate: getDebtNumber(personalLoanEditor.item.interestRate),
+      repaymentStatus: normalizedRepaymentStatus,
+      repaymentFrequency: personalLoanEditor.item.repaymentFrequency || 'monthly',
+      paymentAmount: isPaidOff ? 0 : paymentAmount,
+      firstPaymentDate,
+      nextPaymentDate: isActive
+        ? (personalLoanEditor.item.nextPaymentDate || firstPaymentDate)
+        : '',
+      estBudget: isActive ? paymentAmount : 0,
+      actualCost: isActive ? getDebtNumber(personalLoanEditor.item.actualCost) : 0,
+      dueDate: isActive
+        ? (personalLoanEditor.item.nextPaymentDate || firstPaymentDate)
+        : '',
+      status: isPaidOff ? 'paid' : isActive ? 'pending' : 'paused',
+      accountStatus: isPaidOff ? 'Paid in Full' : 'Open',
+      pausedReason: isPaidOff || isActive
+        ? ''
+        : normalizedRepaymentStatus === 'paused'
+          ? 'Repayment temporarily paused'
+          : 'Repayment not started - waiting until affordable',
+      pausedAt: isPaidOff || isActive ? '' : new Date().toISOString(),
+      debtStatusNotes: personalLoanEditor.item.debtStatusNotes || '',
+      loanUpdatedAt: new Date().toISOString(),
+    };
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [personalLoanEditor.bucket]: state.buckets[personalLoanEditor.bucket].map((item) =>
+        item.id === updatedItem.id ? updatedItem : item
+      ),
+    };
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setPersonalLoanEditor(null);
+    setTimeout(
+      () => saveBudgetWithIndicator(
+        updatedState,
+        isPaidOff
+          ? 'Aunt personal loan marked paid off.'
+          : isActive
+            ? 'Aunt personal loan repayment plan started.'
+            : 'Aunt personal loan saved with no active payment due.'
+      ),
+      100
+    );
+  };
+
+  const pausePersonalLoanRepayment = (bucket, item) => {
+    const updatedBuckets = {
+      ...state.buckets,
+      [bucket]: state.buckets[bucket].map((entry) =>
+        entry.id === item.id
+          ? {
+              ...entry,
+              repaymentStatus: 'paused',
+              status: 'paused',
+              dueDate: '',
+              nextPaymentDate: '',
+              estBudget: 0,
+              actualCost: 0,
+              pausedReason: 'Repayment temporarily paused',
+              pausedAt: new Date().toISOString(),
+              loanUpdatedAt: new Date().toISOString(),
+            }
+          : entry
+      ),
+    };
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setTimeout(
+      () => saveBudgetWithIndicator(updatedState, 'Aunt personal loan repayment paused. No payment is currently due.'),
+      100
+    );
+  };
+
+  const recordPersonalLoanPayment = () => {
+    if (!personalLoanEditor?.bucket || !personalLoanEditor?.item?.id) return;
+
+    const paymentAmount = getDebtNumber(personalLoanEditor.paymentEntry?.amount);
+    const paymentDate = personalLoanEditor.paymentEntry?.date || '';
+    const currentAmountOwed = getDebtNumber(
+      personalLoanEditor.item.currentAmountOwed || personalLoanEditor.item.currentBalance
+    );
+
+    if (personalLoanEditor.item.repaymentStatus !== 'active') {
+      alert('Start the repayment plan before recording a payment.');
+      return;
+    }
+    if (paymentAmount <= 0 || !paymentDate) {
+      alert('Enter the payment amount and payment date.');
+      return;
+    }
+
+    const appliedAmount = Math.min(paymentAmount, currentAmountOwed);
+    const remainingBalance = Math.max(0, currentAmountOwed - appliedAmount);
+    const isPaidOff = remainingBalance <= 0;
+    const nextPaymentDate = isPaidOff
+      ? ''
+      : advancePersonalLoanDueDate(
+          personalLoanEditor.item.nextPaymentDate || personalLoanEditor.item.dueDate || paymentDate,
+          personalLoanEditor.item.repaymentFrequency
+        );
+    const historyEntry = {
+      id: `aunt-loan-payment-${Date.now()}`,
+      amount: appliedAmount,
+      paymentDate,
+      balanceAfter: remainingBalance,
+      recordedAt: new Date().toISOString(),
+    };
+    const updatedItem = {
+      ...personalLoanEditor.item,
+      currentBalance: remainingBalance,
+      currentAmountOwed: remainingBalance,
+      actualCost: appliedAmount,
+      lastPaymentDate: paymentDate,
+      nextPaymentDate,
+      dueDate: nextPaymentDate,
+      repaymentStatus: isPaidOff ? 'paidOff' : 'active',
+      status: isPaidOff ? 'paid' : 'pending',
+      accountStatus: isPaidOff ? 'Paid in Full' : 'Open',
+      estBudget: isPaidOff ? 0 : getDebtNumber(personalLoanEditor.item.paymentAmount),
+      paymentAmount: isPaidOff ? 0 : getDebtNumber(personalLoanEditor.item.paymentAmount),
+      loanPaymentHistory: [
+        ...(Array.isArray(personalLoanEditor.item.loanPaymentHistory)
+          ? personalLoanEditor.item.loanPaymentHistory
+          : []),
+        historyEntry,
+      ],
+      pausedReason: '',
+      pausedAt: '',
+      loanUpdatedAt: new Date().toISOString(),
+    };
+
+    const updatedBuckets = {
+      ...state.buckets,
+      [personalLoanEditor.bucket]: state.buckets[personalLoanEditor.bucket].map((item) =>
+        item.id === updatedItem.id ? updatedItem : item
+      ),
+    };
+    const updatedState = { ...state, buckets: updatedBuckets };
+    setState(updatedState);
+    setPersonalLoanEditor(null);
+    setTimeout(
+      () => saveBudgetWithIndicator(
+        updatedState,
+        isPaidOff
+          ? `Final payment of ${formatDebtCurrency(appliedAmount)} recorded. Aunt personal loan is paid off.`
+          : `${formatDebtCurrency(appliedAmount)} payment recorded. Remaining balance: ${formatDebtCurrency(remainingBalance)}.`
+      ),
+      100
+    );
+  };
+
   const getRowBackgroundColor = (item) => {
     if (item.status === 'notPaying') return 'bg-slate-200 border-slate-300';
     if (item.status === 'paused') return 'bg-indigo-50 border-indigo-200';
@@ -386,6 +828,11 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   const handlePaidClick = (bucket, id) => {
     const item = state.buckets[bucket].find(item => item.id === id);
     if (!item) return;
+
+    if (isAuntPersonalLoan(item)) {
+      openPersonalLoanEditor(bucket, item, true);
+      return;
+    }
 
     const previousState = { dueDate: item.dueDate, status: item.status, actualCost: item.actualCost };
 
@@ -433,6 +880,11 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     const item = state.buckets[bucket].find((entry) => entry.id === id);
     if (!item || ['paid', 'notPaying', 'paused'].includes(item.status)) return;
 
+    if (isAuntPersonalLoan(item)) {
+      pausePersonalLoanRepayment(bucket, item);
+      return;
+    }
+
     const reason = window.prompt(
       'Reason for temporarily pausing this item:',
       item.pausedReason || 'Paused until income improves'
@@ -476,6 +928,11 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   const handleResumePaused = (bucket, id) => {
     const item = state.buckets[bucket].find((entry) => entry.id === id);
     if (!item || item.status !== 'paused') return;
+
+    if (isAuntPersonalLoan(item)) {
+      openPersonalLoanEditor(bucket, item);
+      return;
+    }
 
     const previousState = item.pausedPreviousState || {};
     const restoredStatus =
@@ -669,8 +1126,18 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
     setTimeout(() => saveBudgetWithIndicator(updatedState, 'Debt and account details saved.'), 100);
   };
 
-  const handleCreditReportImport = (operations = [], reportMeta = {}) => {
+  const savedCreditReports = useMemo(
+    () => (Array.isArray(state?.meta?.creditReports) ? state.meta.creditReports.map(normalizeCreditReportFile) : []),
+    [state?.meta?.creditReports]
+  );
+
+  const handleCreditReportImport = async (operations = [], reportMeta = {}, originalReport = {}) => {
     if (!operations.length) return;
+
+    let savedReportFile = null;
+    if (originalReport.saveOriginal && originalReport.file) {
+      savedReportFile = await uploadCreditReportOriginal(originalReport.file, reportMeta);
+    }
 
     const updatedBuckets = Object.fromEntries(
       Object.entries(state.buckets || {}).map(([bucket, items]) => [bucket, [...(items || [])]])
@@ -686,6 +1153,8 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         bureau: account.bureau || reportMeta.bureau || '',
         reportDate: account.reportDate || reportMeta.reportDate || '',
         importedAt: new Date().toISOString(),
+        reportFileId: savedReportFile?.id || '',
+        reportFileName: savedReportFile?.originalName || '',
       };
 
       if (operation.type === 'update') {
@@ -735,14 +1204,60 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       createdCount += 1;
     });
 
-    const updatedState = { ...state, buckets: updatedBuckets };
+    const currentReports = Array.isArray(state?.meta?.creditReports) ? state.meta.creditReports : [];
+    const updatedState = {
+      ...state,
+      buckets: updatedBuckets,
+      meta: {
+        ...(state.meta || {}),
+        creditReports: savedReportFile ? [...currentReports, savedReportFile] : currentReports,
+      },
+    };
     setState(updatedState);
     setShowCreditReportScanner(false);
+    if (savedReportFile) setShowSavedCreditReports(true);
     const summary = [
       createdCount ? `${createdCount} created` : '',
       updatedCount ? `${updatedCount} updated` : '',
     ].filter(Boolean).join(', ');
     setTimeout(() => saveBudgetWithIndicator(updatedState, `Credit report import complete: ${summary}.`), 100);
+  };
+
+  const deleteSavedCreditReport = async (reportFile) => {
+    if (!reportFile?.savedName) return;
+    if (!confirm(`Delete the saved original credit report "${reportFile.originalName}"?`)) return;
+
+    const formData = new FormData();
+    formData.append('action', 'delete');
+    formData.append('savedName', reportFile.savedName);
+
+    const response = await fetch(CREDIT_REPORT_FILE_ENDPOINT, {
+      method: 'POST',
+      body: formData,
+    });
+    const responseText = await response.text();
+    let payload;
+
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      throw new Error('The credit-report storage endpoint did not return a valid response.');
+    }
+
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(payload?.error || 'The saved credit report could not be deleted.');
+    }
+
+    const updatedReports = savedCreditReports.filter((file) => file.id !== reportFile.id);
+    const updatedState = {
+      ...state,
+      meta: {
+        ...(state.meta || {}),
+        creditReports: updatedReports,
+      },
+    };
+    setState(updatedState);
+    setTimeout(() => saveBudgetWithIndicator(updatedState, 'Saved credit report deleted.'), 100);
   };
 
   const handleRollForward = (bucket, id) => {
@@ -990,6 +1505,15 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       'Account Last 4',
       'Settlement Amount',
       'Debt Notes',
+      'Loan Lender',
+      'Loan Purpose',
+      'Interest Rate',
+      'Repayment Status',
+      'Payment Amount',
+      'Payment Frequency',
+      'First Payment Date',
+      'Next Payment Date',
+      'Payment History',
     ];
     const rows = items.map(item => {
       const daysDelinquent = getDebtDaysDelinquent(item);
@@ -1016,6 +1540,19 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         item.accountLast4 || '',
         item.settlementAmount || 0,
         item.debtStatusNotes || '',
+        item.lender || '',
+        item.loanPurpose || '',
+        item.interestRate || 0,
+        item.repaymentStatus || '',
+        item.paymentAmount || 0,
+        item.repaymentFrequency || '',
+        item.firstPaymentDate || '',
+        item.nextPaymentDate || '',
+        Array.isArray(item.loanPaymentHistory)
+          ? item.loanPaymentHistory
+              .map((payment) => `${payment.paymentDate}: ${formatDebtCurrency(payment.amount)} (${formatDebtCurrency(payment.balanceAfter)} remaining)`)
+              .join(' | ')
+          : '',
       ];
     });
 
@@ -1516,6 +2053,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                     return (
                       <tr
                         key={item.id}
+                        onClickCapture={preserveItemActionScroll}
                         className={`border-t ${getRowBackgroundColor(item)} ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
                       >
                         <td className="px-1 py-2 w-8">
@@ -1739,6 +2277,17 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                               </button>
                             )}
 
+                            {isAuntPersonalLoan(item) && (
+                              <button
+                                onClick={() => openPersonalLoanEditor(bucketName, item)}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded bg-blue-700 text-white hover:bg-blue-800"
+                                title="Manage aunt personal loan repayment"
+                                aria-label="Manage aunt personal loan repayment"
+                              >
+                                <DollarSign className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
                             {bucketName !== 'income' && (
                               <button
                                 onClick={() => openDebtEditor(bucketName, item)}
@@ -1750,13 +2299,15 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                               </button>
                             )}
 
-                            <button
-                              onClick={() => duplicateItem(bucketName, item.id)}
-                              className="px-1.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-                              title="Duplicate Item"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
+                            {!isAuntPersonalLoan(item) && (
+                              <button
+                                onClick={() => duplicateItem(bucketName, item.id)}
+                                className="px-1.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                title="Duplicate Item"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                            )}
 
                             <button
                               onClick={() => handleArchiveClick(bucketName, item.id)}
@@ -1811,6 +2362,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                   return (
                     <tr
                       key={item.id}
+                      onClickCapture={preserveItemActionScroll}
                       className={`border-t ${getRowBackgroundColor(item)} ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
                     >
                       <td className="px-1 py-2 w-8">
@@ -2020,6 +2572,17 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                               </button>
                           )}
 
+                          {isAuntPersonalLoan(item) && (
+                            <button
+                              onClick={() => openPersonalLoanEditor(bucketName, item)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded bg-blue-700 text-white hover:bg-blue-800"
+                              title="Manage aunt personal loan repayment"
+                              aria-label="Manage aunt personal loan repayment"
+                            >
+                              <DollarSign className="h-4 w-4" />
+                            </button>
+                          )}
+
                           {bucketName !== 'income' && (
                             <button
                               onClick={() => openDebtEditor(bucketName, item)}
@@ -2031,13 +2594,15 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                             </button>
                           )}
 
-                          <button
-                            onClick={() => duplicateItem(bucketName, item.id)}
-                            className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-                            title="Duplicate Item"
-                          >
-                            <Copy className="w-4 h-4" />
-                          </button>
+                          {!isAuntPersonalLoan(item) && (
+                            <button
+                              onClick={() => duplicateItem(bucketName, item.id)}
+                              className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                              title="Duplicate Item"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+                          )}
 
                           <button
                             onClick={() => handleArchiveClick(bucketName, item.id)}
@@ -2348,6 +2913,91 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         </button>
       </section>
 
+      {auntPersonalLoanRecord && (
+        <section className="mb-6 flex flex-col gap-4 rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <DollarSign className="mt-0.5 h-6 w-6 shrink-0 text-blue-700" />
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-black text-blue-950">Personal Loan from Aunt</h3>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-black ${
+                    auntPersonalLoanRecord.item.repaymentStatus === 'active'
+                      ? 'bg-green-100 text-green-800'
+                      : auntPersonalLoanRecord.item.repaymentStatus === 'paidOff'
+                        ? 'bg-slate-200 text-slate-800'
+                        : 'bg-indigo-100 text-indigo-800'
+                  }`}
+                >
+                  {getPersonalLoanStatusLabel(auntPersonalLoanRecord.item)}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-bold text-blue-900">
+                Remaining balance: {formatDebtCurrency(
+                  auntPersonalLoanRecord.item.currentAmountOwed ||
+                  auntPersonalLoanRecord.item.currentBalance
+                )} · Interest: {getDebtNumber(auntPersonalLoanRecord.item.interestRate)}%
+              </p>
+              <p className="mt-1 text-xs text-blue-800">
+                Purpose: {auntPersonalLoanRecord.item.loanPurpose || 'Car rear differential'}. The original repair expense remains separate, so the $2,365 is not counted twice.
+              </p>
+              {auntPersonalLoanRecord.item.repaymentStatus === 'active' ? (
+                <p className="mt-1 text-xs font-semibold text-green-800">
+                  {formatDebtCurrency(auntPersonalLoanRecord.item.paymentAmount)} {auntPersonalLoanRecord.item.repaymentFrequency || 'monthly'} · next due {auntPersonalLoanRecord.item.nextPaymentDate || auntPersonalLoanRecord.item.dueDate}
+                </p>
+              ) : auntPersonalLoanRecord.item.repaymentStatus !== 'paidOff' ? (
+                <p className="mt-1 text-xs font-semibold text-indigo-800">
+                  No payment amount or due date is active. This loan is excluded from totals and payment alerts until repayment starts.
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => openPersonalLoanEditor(
+                auntPersonalLoanRecord.bucket,
+                auntPersonalLoanRecord.item
+              )}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-xs font-black text-white hover:bg-blue-800"
+            >
+              <Edit2 className="h-4 w-4" />
+              {auntPersonalLoanRecord.item.repaymentStatus === 'notStarted'
+                ? 'Start Repayment'
+                : 'Manage Loan'}
+            </button>
+            {auntPersonalLoanRecord.item.repaymentStatus === 'active' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => openPersonalLoanEditor(
+                    auntPersonalLoanRecord.bucket,
+                    auntPersonalLoanRecord.item,
+                    true
+                  )}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-3 py-2 text-xs font-black text-white hover:bg-green-800"
+                >
+                  <DollarSign className="h-4 w-4" />
+                  Record Payment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => pausePersonalLoanRepayment(
+                    auntPersonalLoanRecord.bucket,
+                    auntPersonalLoanRecord.item
+                  )}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-700 px-3 py-2 text-xs font-black text-white hover:bg-indigo-800"
+                >
+                  <PauseCircle className="h-4 w-4" />
+                  Pause Repayment
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
       <div className="flex flex-col gap-3 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
@@ -2388,6 +3038,16 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
             >
               <ScanSearch className="h-4 w-4" />
               <span className="hidden sm:inline">Scan Credit Report</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowSavedCreditReports((current) => !current)}
+              className="flex items-center gap-2 rounded bg-indigo-700 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-800"
+              title="View saved original credit reports"
+            >
+              <FileText className="h-4 w-4" />
+              <span className="hidden sm:inline">Saved Reports ({savedCreditReports.length})</span>
             </button>
 
             {selectedItems.size > 0 && (
@@ -2453,6 +3113,77 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           </div>
         </div>
       </div>
+
+      {showSavedCreditReports && (
+        <section className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-black text-indigo-950">Saved Credit Reports</h3>
+              <p className="mt-1 text-xs font-semibold text-indigo-800">
+                Original files are stored separately. Budget data contains only file metadata and links.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSavedCreditReports(false)}
+              className="rounded-lg p-2 text-indigo-800 hover:bg-indigo-100"
+              aria-label="Close saved credit reports"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {savedCreditReports.length === 0 ? (
+            <p className="mt-4 rounded-lg border border-indigo-100 bg-white p-4 text-sm font-semibold text-slate-600">
+              No original credit reports have been saved yet.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-2">
+              {[...savedCreditReports].reverse().map((reportFile) => (
+                <div key={reportFile.id} className="flex flex-col gap-3 rounded-lg border border-indigo-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate font-black text-slate-950">{reportFile.originalName}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      {[
+                        reportFile.bureau,
+                        reportFile.reportDate ? `Report date ${reportFile.reportDate}` : '',
+                        formatCreditReportFileSize(reportFile.size),
+                        reportFile.uploadedAt ? `Saved ${new Date(reportFile.uploadedAt).toLocaleString()}` : '',
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <a
+                      href={buildCreditReportFileUrl('view', reportFile)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-xs font-black text-white hover:bg-blue-800"
+                    >
+                      <FileText className="h-4 w-4" />
+                      View
+                    </a>
+                    <a
+                      href={buildCreditReportFileUrl('download', reportFile)}
+                      className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black text-white hover:bg-emerald-800"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => deleteSavedCreditReport(reportFile).catch((error) => alert(error.message))}
+                      className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-3 py-2 text-xs font-black text-white hover:bg-red-800"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {batchAddMode && (
         <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
@@ -2557,6 +3288,290 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         state={state}
         onImport={handleCreditReportImport}
       />
+
+      {personalLoanEditor && (
+        <div className="fixed inset-0 z-[9998]">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/50"
+            onClick={() => setPersonalLoanEditor(null)}
+            aria-label="Close personal loan repayment"
+          />
+          <aside className="absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-blue-700" />
+                  <h2 className="text-xl font-black text-slate-950">Aunt Personal Loan</h2>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">
+                  Set repayment terms when affordable, record each payment, and track the remaining balance.
+                </p>
+              </div>
+              <CloseScreenButton onClick={() => setPersonalLoanEditor(null)} />
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-xs font-black uppercase tracking-wide text-blue-800">Current Loan Status</p>
+                <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs font-semibold text-blue-700">Remaining balance</p>
+                    <p className="text-xl font-black text-blue-950">
+                      {formatDebtCurrency(
+                        personalLoanEditor.item.currentAmountOwed ||
+                        personalLoanEditor.item.currentBalance
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-blue-700">Repayment</p>
+                    <p className="text-sm font-black text-blue-950">
+                      {getPersonalLoanStatusLabel(personalLoanEditor.item)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-blue-700">Interest</p>
+                    <p className="text-sm font-black text-blue-950">
+                      {getDebtNumber(personalLoanEditor.item.interestRate)}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-bold text-slate-700">
+                  Lender
+                  <input
+                    value={personalLoanEditor.item.lender || ''}
+                    onChange={(event) => updatePersonalLoanEditorField('lender', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Purpose
+                  <input
+                    value={personalLoanEditor.item.loanPurpose || ''}
+                    onChange={(event) => updatePersonalLoanEditorField('loanPurpose', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Original Balance
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={personalLoanEditor.item.originalBalance ?? 2365}
+                    onChange={(event) => updatePersonalLoanEditorField('originalBalance', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Remaining Balance
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={personalLoanEditor.item.currentAmountOwed ?? 2365}
+                    onChange={(event) => updatePersonalLoanEditorField('currentAmountOwed', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Interest Rate
+                  <div className="relative mt-1">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={personalLoanEditor.item.interestRate ?? 0}
+                      onChange={(event) => updatePersonalLoanEditorField('interestRate', event.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 pr-8 text-sm"
+                    />
+                    <span className="pointer-events-none absolute right-3 top-2 text-sm font-bold text-slate-500">%</span>
+                  </div>
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Repayment Status
+                  <select
+                    value={personalLoanEditor.item.repaymentStatus || 'notStarted'}
+                    onChange={(event) => updatePersonalLoanEditorField('repaymentStatus', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="notStarted">Repayment not started</option>
+                    <option value="active">Repayment active</option>
+                    <option value="paused">Repayment paused</option>
+                    <option value="paidOff">Paid off</option>
+                  </select>
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Payment Amount
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={personalLoanEditor.item.paymentAmount ?? 0}
+                    onChange={(event) => updatePersonalLoanEditorField('paymentAmount', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="Enter when repayment starts"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Payment Frequency
+                  <select
+                    value={personalLoanEditor.item.repaymentFrequency || 'monthly'}
+                    onChange={(event) => updatePersonalLoanEditorField('repaymentFrequency', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  >
+                    {PERSONAL_LOAN_FREQUENCIES.map((frequency) => (
+                      <option key={frequency.value} value={frequency.value}>
+                        {frequency.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  First Payment Date
+                  <input
+                    type="date"
+                    value={personalLoanEditor.item.firstPaymentDate || ''}
+                    onChange={(event) => {
+                      updatePersonalLoanEditorField('firstPaymentDate', event.target.value);
+                      if (!personalLoanEditor.item.nextPaymentDate) {
+                        updatePersonalLoanEditorField('nextPaymentDate', event.target.value);
+                      }
+                    }}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  Next Payment Date
+                  <input
+                    type="date"
+                    value={personalLoanEditor.item.nextPaymentDate || ''}
+                    onChange={(event) => updatePersonalLoanEditorField('nextPaymentDate', event.target.value)}
+                    disabled={personalLoanEditor.item.repaymentStatus !== 'active'}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-500"
+                  />
+                </label>
+
+                <label className="md:col-span-2 text-sm font-bold text-slate-700">
+                  Loan Notes
+                  <textarea
+                    value={personalLoanEditor.item.debtStatusNotes || ''}
+                    onChange={(event) => updatePersonalLoanEditorField('debtStatusNotes', event.target.value)}
+                    rows={3}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+
+              {personalLoanEditor.item.repaymentStatus === 'active' && (
+                <section
+                  className={`mt-6 rounded-xl border-2 p-4 ${
+                    personalLoanEditor.focusPayment
+                      ? 'border-green-400 bg-green-50'
+                      : 'border-slate-200 bg-slate-50'
+                  }`}
+                >
+                  <h3 className="font-black text-slate-950">Record a Payment</h3>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Recording a payment reduces the remaining balance and advances the next due date.
+                  </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                    <label className="text-sm font-bold text-slate-700">
+                      Amount
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        autoFocus={personalLoanEditor.focusPayment}
+                        value={personalLoanEditor.paymentEntry?.amount ?? ''}
+                        onChange={(event) => updatePersonalLoanPaymentEntry('amount', event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="text-sm font-bold text-slate-700">
+                      Payment Date
+                      <input
+                        type="date"
+                        value={personalLoanEditor.paymentEntry?.date || ''}
+                        onChange={(event) => updatePersonalLoanPaymentEntry('date', event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={recordPersonalLoanPayment}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-black text-white hover:bg-green-800"
+                    >
+                      <DollarSign className="h-4 w-4" />
+                      Record Payment
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              <section className="mt-6">
+                <h3 className="font-black text-slate-950">Payment History</h3>
+                {Array.isArray(personalLoanEditor.item.loanPaymentHistory) &&
+                personalLoanEditor.item.loanPaymentHistory.length > 0 ? (
+                  <div className="mt-2 space-y-2">
+                    {[...personalLoanEditor.item.loanPaymentHistory].reverse().map((payment) => (
+                      <div
+                        key={payment.id}
+                        className="flex flex-col gap-1 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <p className="text-sm font-black text-slate-900">
+                            {formatDebtCurrency(payment.amount)}
+                          </p>
+                          <p className="text-xs text-slate-600">{payment.paymentDate}</p>
+                        </div>
+                        <p className="text-xs font-bold text-slate-700">
+                          {formatDebtCurrency(payment.balanceAfter)} remaining
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500">
+                    No payments recorded yet.
+                  </p>
+                )}
+              </section>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setPersonalLoanEditor(null)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={savePersonalLoanPlan}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-blue-800"
+              >
+                <Save className="h-4 w-4" />
+                Save Repayment Plan
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {debtEditor && (
         <div className="fixed inset-0 z-[9998]">
