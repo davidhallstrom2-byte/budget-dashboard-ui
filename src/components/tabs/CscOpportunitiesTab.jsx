@@ -2497,77 +2497,6 @@ const getScheduledShiftConflicts = (opportunity = {}, allShifts = []) => {
     );
 };
 
-const archiveOpportunitiesBlockedByScheduledShifts = (
-  items = [],
-  allShifts = readCscShifts()
-) => {
-  const opportunities = Array.isArray(items) ? items : [];
-  const activeScheduledShifts = allShifts.filter(
-    (shift) =>
-      shift.recordSource !== 'archived' &&
-      !isCancelledShiftStatus(shift.shiftStatus) &&
-      !isCompletedShiftStatus(shift.shiftStatus)
-  );
-
-  if (!activeScheduledShifts.length) return opportunities;
-
-  const blockedById = new Map();
-
-  opportunities.forEach((opportunity) => {
-    const resolvedOpportunity = {
-      ...opportunity,
-      status: getResolvedOpportunityStatus(opportunity, allShifts),
-    };
-    const conflicts = getScheduledShiftConflicts(
-      resolvedOpportunity,
-      activeScheduledShifts
-    );
-
-    if (conflicts.length) blockedById.set(opportunity.id, conflicts);
-  });
-
-  if (!blockedById.size) return opportunities;
-
-  writeOpportunitySnapshot(
-    'Before conflicting CSC opportunities auto-archive',
-    opportunities,
-    readArray(VENUE_CONTACTS_STORAGE_KEY, [])
-  );
-
-  try {
-    const archived = readArray(OPPORTUNITIES_ARCHIVE_STORAGE_KEY, []);
-    const archivedById = new Map(
-      archived
-        .filter((item) => item?.id)
-        .map((item) => [item.id, item])
-    );
-    const archivedAt = new Date().toISOString();
-
-    blockedById.forEach((conflicts, opportunityId) => {
-      const opportunity = opportunities.find((item) => item.id === opportunityId);
-      if (!opportunity) return;
-
-      const existing = archivedById.get(opportunityId);
-      archivedById.set(opportunityId, {
-        ...opportunity,
-        archivedAt: existing?.archivedAt || archivedAt,
-        archiveReason: 'Scheduled for another CSC shift',
-        conflictingCscShiftIds: conflicts.map((shift) => shift.id).filter(Boolean),
-      });
-    });
-
-    localStorage.setItem(
-      OPPORTUNITIES_ARCHIVE_STORAGE_KEY,
-      JSON.stringify(Array.from(archivedById.values()))
-    );
-  } catch (error) {
-    console.error('Failed to archive conflicting CSC opportunities:', error);
-    return opportunities;
-  }
-
-  return opportunities.filter((opportunity) => !blockedById.has(opportunity.id));
-};
-
 const getStatusClass = (status) => {
   if (status === 'Scheduled') return 'bg-emerald-100 text-emerald-900 border-emerald-200';
   if (status === 'Completed') return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -2688,6 +2617,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const noteTextareaRefs = useRef(new Map());
   const importInputRef = useRef(null);
   const venueFilterRef = useRef(null);
+  const saveMessageTimerRef = useRef(null);
 
   const venueNames = useMemo(
     () => VENUE_DEFINITIONS.map((definition) => definition.venue),
@@ -2702,6 +2632,15 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     : selectedVenueCount === 0
       ? 'No venues'
       : `${selectedVenueCount} of ${venueNames.length} venues`;
+
+  useEffect(
+    () => () => {
+      if (saveMessageTimerRef.current) {
+        window.clearTimeout(saveMessageTimerRef.current);
+      }
+    },
+    []
+  );
 
   const toggleVenue = (venue) => {
     setExcludedVenues((current) =>
@@ -2807,8 +2746,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           });
         });
 
-        const reconciled = changed ? next : current;
-        return archiveOpportunitiesBlockedByScheduledShifts(reconciled, allShifts);
+        // A scheduled shift may conflict with another venue opportunity, but the
+        // opportunity must remain available so David can choose which event to work.
+        return changed ? next : current;
       });
     };
 
@@ -2976,9 +2916,16 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     );
   };
 
-  const flashMessage = (message, duration = 3000) => {
+  const flashMessage = (message, duration = 6000) => {
+    if (saveMessageTimerRef.current) {
+      window.clearTimeout(saveMessageTimerRef.current);
+    }
+
     setSaveMessage(message);
-    window.setTimeout(() => setSaveMessage(''), duration);
+    saveMessageTimerRef.current = window.setTimeout(() => {
+      setSaveMessage('');
+      saveMessageTimerRef.current = null;
+    }, duration);
   };
 
   const saveSnapshot = (label) =>
@@ -4320,12 +4267,35 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         `}</style>
         <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
 
+        {saveMessage ? (
+          <div
+            className="pointer-events-none fixed inset-x-3 top-4 z-[100] flex justify-center sm:inset-x-6"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="pointer-events-auto flex w-full max-w-2xl items-start gap-3 rounded-2xl border border-violet-300 bg-violet-950 px-4 py-3 text-white shadow-2xl ring-1 ring-black/10 sm:px-5">
+              <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" aria-hidden="true" />
+              <p className="min-w-0 flex-1 text-sm font-extrabold leading-5 sm:text-base">
+                {saveMessage}
+              </p>
+              <button
+                type="button"
+                onClick={() => setSaveMessage('')}
+                className="-mr-1 -mt-1 rounded-lg p-1.5 text-violet-100 hover:bg-white/15 hover:text-white"
+                aria-label="Dismiss message"
+                title="Dismiss message"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <TabPageHeader
           icon={Sparkles}
           title="CSC Opportunities"
           subtitle="Track venue events, editable notes, and links to actual CSC shifts."
           theme="violet"
-          message={saveMessage}
           className="budget-mobile-header"
           actions={
             <div className="csc-header-actions flex flex-wrap gap-2">

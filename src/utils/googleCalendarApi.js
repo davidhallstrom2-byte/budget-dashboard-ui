@@ -1,10 +1,18 @@
 const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
-const GOOGLE_CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
+const GOOGLE_CALENDAR_ENDPOINT =
+  "https://www.googleapis.com/calendar/v3/calendars/primary";
+const GOOGLE_CALENDAR_API_ROOT =
+  "https://www.googleapis.com/calendar/v3/calendars";
 const GOOGLE_CALENDAR_EVENTS_ENDPOINT =
   "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
-const GOOGLE_TOKEN_STORAGE_KEY = "googleCalendarApi.accessToken.v1";
-const GOOGLE_TOKEN_EXPIRES_AT_STORAGE_KEY = "googleCalendarApi.accessTokenExpiresAt.v1";
+const GOOGLE_TOKEN_STORAGE_KEY = "googleCalendarApi.accessToken.v2";
+const GOOGLE_TOKEN_EXPIRES_AT_STORAGE_KEY = "googleCalendarApi.accessTokenExpiresAt.v2";
+const LEGACY_GOOGLE_TOKEN_STORAGE_KEYS = [
+  "googleCalendarApi.accessToken.v1",
+  "googleCalendarApi.accessTokenExpiresAt.v1",
+];
 
 let googleIdentityScriptPromise = null;
 let googleTokenClient = null;
@@ -85,6 +93,9 @@ const storeAccessToken = (tokenResponse) => {
 export const clearGoogleCalendarAccessToken = () => {
   localStorage.removeItem(GOOGLE_TOKEN_STORAGE_KEY);
   localStorage.removeItem(GOOGLE_TOKEN_EXPIRES_AT_STORAGE_KEY);
+  LEGACY_GOOGLE_TOKEN_STORAGE_KEYS.forEach((storageKey) => {
+    localStorage.removeItem(storageKey);
+  });
 };
 
 export const getGoogleCalendarAccessToken = async () => {
@@ -115,7 +126,7 @@ export const getGoogleCalendarAccessToken = async () => {
   pendingTokenRequest = new Promise((resolve, reject) => {
     googleTokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: GOOGLE_CALENDAR_EVENTS_SCOPE,
+      scope: GOOGLE_CALENDAR_SCOPE,
       callback: (tokenResponse) => {
         pendingTokenRequest = null;
 
@@ -157,10 +168,126 @@ export const getGoogleCalendarAccessToken = async () => {
   return pendingTokenRequest;
 };
 
+const readGoogleCalendarResponse = async (response, fallbackMessage) => {
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      clearGoogleCalendarAccessToken();
+    }
+
+    const apiMessage = String(data?.error?.message || "").trim();
+    throw new Error(
+      apiMessage
+        ? `${fallbackMessage} ${apiMessage}`
+        : `${fallbackMessage} Status ${response.status}.`
+    );
+  }
+
+  return data;
+};
+
+const buildGoogleCalendarEventsEndpoint = (eventId = "", eventPayload = {}) => {
+  const normalizedEventId = String(eventId || "").trim();
+  const endpoint = normalizedEventId
+    ? `${GOOGLE_CALENDAR_EVENTS_ENDPOINT}/${encodeURIComponent(normalizedEventId)}`
+    : GOOGLE_CALENDAR_EVENTS_ENDPOINT;
+  const url = new URL(endpoint);
+
+  if (String(eventPayload?.eventLabelId || "").trim()) {
+    url.searchParams.set("eventLabelVersion", "1");
+  }
+
+  return url.toString();
+};
+
+const buildGoogleCalendarEndpoint = (calendarId = "primary") =>
+  `${GOOGLE_CALENDAR_API_ROOT}/${encodeURIComponent(
+    String(calendarId || "primary").trim() || "primary"
+  )}`;
+
+export const ensureGoogleCalendarEventLabel = async ({
+  id,
+  backgroundColor,
+  name = "",
+}) => {
+  const normalizedId = String(id || "").trim();
+  const normalizedBackgroundColor = String(backgroundColor || "").trim();
+  const normalizedName = String(name || "").trim();
+
+  if (!normalizedId || !normalizedBackgroundColor) {
+    throw new Error(
+      "Google Calendar label ID and background color are required."
+    );
+  }
+
+  const token = await getGoogleCalendarAccessToken();
+  const requestHeaders = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  const calendarResponse = await fetch(GOOGLE_CALENDAR_ENDPOINT, {
+    headers: requestHeaders,
+  });
+  const calendar = await readGoogleCalendarResponse(
+    calendarResponse,
+    "Google Calendar label lookup failed."
+  );
+  const existingLabels = Array.isArray(calendar?.labelProperties?.eventLabels)
+    ? calendar.labelProperties.eventLabels
+    : [];
+  const existingLabel = existingLabels.find(
+    (label) => String(label?.id || "").trim() === normalizedId
+  );
+
+  if (
+    existingLabel &&
+    String(existingLabel.backgroundColor || "").toLowerCase() ===
+      normalizedBackgroundColor.toLowerCase() &&
+    String(existingLabel.name || "").trim() === normalizedName
+  ) {
+    return existingLabel;
+  }
+
+  const updatedLabel = {
+    id: normalizedId,
+    backgroundColor: normalizedBackgroundColor,
+    ...(normalizedName ? { name: normalizedName } : {}),
+  };
+  const updatedLabels = [
+    ...existingLabels.filter(
+      (label) => String(label?.id || "").trim() !== normalizedId
+    ),
+    updatedLabel,
+  ];
+  const resolvedCalendarId = String(calendar?.id || "primary").trim() || "primary";
+  const calendarUpdatePayload = {
+    summary: String(calendar?.summary || "").trim(),
+    description: String(calendar?.description || ""),
+    location: String(calendar?.location || ""),
+    timeZone: String(calendar?.timeZone || ""),
+    labelProperties: {
+      eventLabels: updatedLabels,
+    },
+  };
+  const updateResponse = await fetch(buildGoogleCalendarEndpoint(resolvedCalendarId), {
+    method: "PUT",
+    headers: requestHeaders,
+    body: JSON.stringify(calendarUpdatePayload),
+  });
+
+  await readGoogleCalendarResponse(
+    updateResponse,
+    "Google Calendar label setup failed."
+  );
+
+  return updatedLabel;
+};
+
 export const createGoogleCalendarEvent = async (eventPayload) => {
   const token = await getGoogleCalendarAccessToken();
 
-  const response = await fetch(GOOGLE_CALENDAR_EVENTS_ENDPOINT, {
+  const response = await fetch(buildGoogleCalendarEventsEndpoint("", eventPayload), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -169,18 +296,36 @@ export const createGoogleCalendarEvent = async (eventPayload) => {
     body: JSON.stringify(eventPayload),
   });
 
-  const data = await response.json().catch(() => ({}));
+  return readGoogleCalendarResponse(
+    response,
+    "Google Calendar event creation failed."
+  );
+};
 
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      clearGoogleCalendarAccessToken();
-    }
+export const updateGoogleCalendarEvent = async (eventId, eventPayload) => {
+  const normalizedEventId = String(eventId || "").trim();
 
-    throw new Error(
-      data?.error?.message ||
-        `Google Calendar event creation failed with status ${response.status}.`
-    );
+  if (!normalizedEventId) {
+    throw new Error("Missing Google Calendar event ID. The existing calendar event could not be updated.");
   }
 
-  return data;
+  const token = await getGoogleCalendarAccessToken();
+  const endpoint = buildGoogleCalendarEventsEndpoint(
+    normalizedEventId,
+    eventPayload
+  );
+
+  const response = await fetch(endpoint, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(eventPayload),
+  });
+
+  return readGoogleCalendarResponse(
+    response,
+    "Google Calendar event update failed."
+  );
 };

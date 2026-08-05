@@ -21,6 +21,7 @@ import {
   History,
   ListChecks,
   MapPin,
+  Palette,
   Phone,
   Plus,
   Printer,
@@ -35,7 +36,12 @@ import {
 import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
 import CloseScreenButton from '../common/CloseScreenButton.jsx';
-import { createGoogleCalendarEvent } from '../../utils/googleCalendarApi';
+import {
+  getGoogleCalendarAccessToken,
+  createGoogleCalendarEvent,
+  ensureGoogleCalendarEventLabel,
+  updateGoogleCalendarEvent,
+} from '../../utils/googleCalendarApi';
 
 const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
@@ -61,6 +67,11 @@ const DOUBLE_TIME_HOUR_THRESHOLD = 12;
 const OVERTIME_RATE_MULTIPLIER = 1.5;
 const DOUBLE_TIME_RATE_MULTIPLIER = 2;
 const DEFAULT_VISIBLE_SHIFT_COUNT = 5;
+const CSC_GOOGLE_CALENDAR_LABEL_ID = 'c5c5c5c5-5c5c-4c5c-8c5c-c5c5c5c5c5c5';
+const CSC_GOOGLE_CALENDAR_LABEL_NAME = 'CSC Shifts';
+const CSC_GOOGLE_CALENDAR_BACKGROUND_COLOR = '#B8860B';
+const GOOGLE_PRIMARY_CALENDAR_EVENTS_ENDPOINT =
+  'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 
 const CSC_COMPANY = {
   name: 'Contemporary Services Corporation',
@@ -1094,8 +1105,14 @@ const mergeDuplicateShiftRecords = (existingShift = {}, incomingShift = {}, pref
   return normalizeShift({
     ...existingShift,
     id: existingShift.id || incomingShift.id,
-    startDate: existingShift.startDate || incomingShift.startDate,
-    startTime: existingShift.startTime || incomingShift.startTime,
+    startDate:
+      preferIncomingSchedule && incomingShift.startDate
+        ? incomingShift.startDate
+        : existingShift.startDate || incomingShift.startDate,
+    startTime:
+      preferIncomingSchedule && incomingShift.startTime
+        ? incomingShift.startTime
+        : existingShift.startTime || incomingShift.startTime,
     finishDate: useIncomingFinish
       ? incomingShift.finishDate || incomingShift.startDate
       : existingShift.finishDate || existingShift.startDate || incomingShift.finishDate || incomingShift.startDate,
@@ -1989,8 +2006,39 @@ const getScannedShiftMatchScore = (existingShift = {}, scannedShift = {}) => {
   return score;
 };
 
+const isScannedScheduleChangeMatch = (existingShift = {}, scannedShift = {}) => {
+  if (!hasCompleteShiftWindow(existingShift) || !hasCompleteShiftWindow(scannedShift)) return false;
+  if (existingShift.startDate !== scannedShift.startDate) return false;
+
+  const startTimeMatches = existingShift.startTime === scannedShift.startTime;
+  const finishWindowMatches =
+    (existingShift.finishDate || existingShift.startDate) ===
+      (scannedShift.finishDate || scannedShift.startDate) &&
+    existingShift.finishTime === scannedShift.finishTime;
+
+  // A safe schedule-change match requires one stable end of the shift window.
+  // If both ends changed, the scanner refuses to guess and adds a separate shift.
+  if (startTimeMatches === finishWindowMatches) return false;
+
+  const venueOrAddressMatches =
+    scanTextIncludes(existingShift.venue, scannedShift.venue) ||
+    scanTextIncludes(existingShift.address, scannedShift.address);
+  const eventIdentityMatches =
+    scanTextIncludes(existingShift.jobName, scannedShift.jobName) ||
+    scanTextIncludes(existingShift.shiftName, scannedShift.shiftName) ||
+    scanTextIncludes(existingShift.event, scannedShift.event);
+
+  return venueOrAddressMatches && eventIdentityMatches && getScannedShiftMatchScore(existingShift, scannedShift) >= 5;
+};
+
 const findMatchingShiftIdForScannedEmail = (currentShifts = [], scannedShift = {}) => {
   if (!scannedShift?.startDate || !scannedShift?.startTime) return '';
+
+  const scheduleChangeMatches = currentShifts.filter((shift) =>
+    isScannedScheduleChangeMatch(shift, scannedShift)
+  );
+
+  if (scheduleChangeMatches.length === 1) return scheduleChangeMatches[0].id;
 
   const exactIdMatch = currentShifts.find((shift) => shift.id === scannedShift.id);
   if (exactIdMatch && areLikelyDuplicateShifts(exactIdMatch, scannedShift)) return exactIdMatch.id;
@@ -2037,6 +2085,11 @@ const createUniqueScannedShiftId = (currentById, scannedShift = {}) => {
 
 const mergeScannedShiftWithExisting = (existingShift = {}, scannedShift = {}) =>
   mergeDuplicateShiftRecords(existingShift, scannedShift, true);
+
+const hasShiftCalendarTimeChanged = (existingShift = {}, updatedShift = {}) =>
+  hasCompleteShiftWindow(existingShift) &&
+  hasCompleteShiftWindow(updatedShift) &&
+  getShiftWindowKey(existingShift) !== getShiftWindowKey(updatedShift);
 
 const parseCsv = (text) => {
   const lines = text
@@ -2417,17 +2470,228 @@ const readStoredRides = () => [
 
 const readStoredPaychecks = () => readArrayStorage(PAYCHECK_STORAGE_KEY, []);
 
+const parsePaycheckMoney = (value) => {
+  const number = Number(String(value ?? '').replace(/[$,\s]/g, ''));
+  return Number.isFinite(number) ? number : 0;
+};
+
+const isCscPaycheck = (paycheck = {}) => {
+  const employer = String(paycheck.employer || '').trim();
+  return !employer || /contemporary services|\bcsc\b/i.test(employer);
+};
+
+const getPaycheckIdentity = (paycheck = {}, index = 0) =>
+  String(
+    paycheck.id ||
+      paycheck.checkNumber ||
+      [paycheck.checkDate, paycheck.payPeriodStart, paycheck.payPeriodEnd, index].join('|')
+  );
+
+const getActualPaycheckGross = (paycheck = {}) => {
+  const statedGross = parsePaycheckMoney(paycheck.grossPay);
+  if (statedGross) return statedGross;
+
+  return Array.isArray(paycheck.earningsLines)
+    ? paycheck.earningsLines.reduce(
+        (sum, line) => sum + parsePaycheckMoney(line?.amount),
+        0
+      )
+    : 0;
+};
+
+const getActualPaycheckNet = (paycheck = {}) =>
+  parsePaycheckMoney(paycheck.netPay || paycheck.checkAmount);
+
+const normalizePaycheckDate = (value = '') => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+  const monthFirstMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})$/);
+  if (!monthFirstMatch) {
+    const monthNameMatch = text.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),\s*(\d{4})$/);
+    if (!monthNameMatch) return '';
+
+    const parsedDate = new Date(`${monthNameMatch[1]} ${monthNameMatch[2]}, ${monthNameMatch[3]} 12:00:00`);
+    if (Number.isNaN(parsedDate.getTime())) return '';
+    return toLocalDateKey(parsedDate);
+  }
+
+  const year = monthFirstMatch[3].length === 2
+    ? `20${monthFirstMatch[3]}`
+    : monthFirstMatch[3];
+  const month = monthFirstMatch[1].padStart(2, '0');
+  const day = monthFirstMatch[2].padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const shiftPaycheckDate = (value = '', days = 0) => {
+  const dateValue = normalizePaycheckDate(value);
+  const date = parseLocalDate(dateValue);
+  if (!date) return '';
+
+  date.setDate(date.getDate() + days);
+  return toLocalDateKey(date);
+};
+
+const PAYCHECK_REPORT_DATE_PATTERN =
+  '(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s*\\d{4}|\\d{1,2}[\\/-]\\d{1,2}[\\/-](?:\\d{4}|\\d{2}))';
+
+const findPaycheckDateAfterLabel = (text = '', labelPattern = '') => {
+  const match = String(text || '').match(
+    new RegExp(`${labelPattern}\\s*:?\\s*(${PAYCHECK_REPORT_DATE_PATTERN})`, 'i')
+  );
+  return match ? normalizePaycheckDate(match[1]) : '';
+};
+
+const getPaycheckPeriodRange = (paycheck = {}) => {
+  let startDate = normalizePaycheckDate(paycheck.payPeriodStart);
+  let endDate = normalizePaycheckDate(paycheck.payPeriodEnd);
+  const scanText = String(paycheck.scanText || '').replace(/\s+/g, ' ').trim();
+
+  if ((!startDate || !endDate) && scanText) {
+    startDate = startDate || findPaycheckDateAfterLabel(
+      scanText,
+      '(?:Pay\\s+)?Period\\s+(?:Beginning|Begin|Start|From)'
+    );
+    endDate = endDate || findPaycheckDateAfterLabel(
+      scanText,
+      '(?:Pay\\s+)?Period\\s+(?:Ending|End|Through|Thru|To)'
+    );
+
+    if (!startDate || !endDate) {
+      const rangePatterns = [
+        new RegExp(
+          `(?:Pay\\s+)?Period(?:\\s+Dates?)?\\s*:?\\s*(${PAYCHECK_REPORT_DATE_PATTERN})\\s*(?:-|–|—|to|through|thru)\\s*(${PAYCHECK_REPORT_DATE_PATTERN})`,
+          'i'
+        ),
+        new RegExp(
+          `Period\\s+(?:Beginning|Begin|Start)\\s+Period\\s+(?:Ending|End)(?:\\s+Check\\s+Date)?\\s+(${PAYCHECK_REPORT_DATE_PATTERN})\\s+(${PAYCHECK_REPORT_DATE_PATTERN})`,
+          'i'
+        ),
+      ];
+
+      for (const pattern of rangePatterns) {
+        const match = scanText.match(pattern);
+        if (!match) continue;
+
+        startDate = startDate || normalizePaycheckDate(match[1]);
+        endDate = endDate || normalizePaycheckDate(match[2]);
+        if (startDate && endDate) break;
+      }
+    }
+  }
+
+  if (!startDate && !endDate) return null;
+  if (!startDate) startDate = shiftPaycheckDate(endDate, -6);
+  if (!endDate) endDate = shiftPaycheckDate(startDate, 6);
+  if (!startDate || !endDate) return null;
+
+  return startDate <= endDate
+    ? { startDate, endDate }
+    : { startDate: endDate, endDate: startDate };
+};
+
+const getPaycheckWorkDates = (paycheck = {}) => {
+  const periodRange = getPaycheckPeriodRange(paycheck);
+  const checkDate = normalizePaycheckDate(paycheck.checkDate);
+  const candidateYears = Array.from(
+    new Set(
+      [periodRange?.startDate, periodRange?.endDate, checkDate]
+        .filter(Boolean)
+        .map((dateValue) => dateValue.slice(0, 4))
+    )
+  );
+  const workDates = new Set();
+
+  (Array.isArray(paycheck.earningsLines) ? paycheck.earningsLines : []).forEach((line) => {
+    const savedDate = normalizePaycheckDate(
+      line?.workDate || line?.dateWorked || line?.date || ''
+    );
+    if (savedDate) {
+      workDates.add(savedDate);
+      return;
+    }
+
+    const workLine = String(line?.workLine || '');
+    const explicitDateMatch = workLine.match(
+      /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})|(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})/
+    );
+    if (explicitDateMatch) {
+      const explicitDate = explicitDateMatch[1]
+        ? `${explicitDateMatch[1]}-${explicitDateMatch[2].padStart(2, '0')}-${explicitDateMatch[3].padStart(2, '0')}`
+        : `${explicitDateMatch[6]}-${explicitDateMatch[4].padStart(2, '0')}-${explicitDateMatch[5].padStart(2, '0')}`;
+      if (parseLocalDate(explicitDate)) workDates.add(explicitDate);
+      return;
+    }
+
+    const compactMonthDay = workLine.match(/(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/);
+    if (!compactMonthDay) return;
+
+    for (const year of candidateYears) {
+      const candidate = `${year}-${compactMonthDay[1]}-${compactMonthDay[2]}`;
+      if (!parseLocalDate(candidate)) continue;
+      if (
+        periodRange &&
+        (candidate < periodRange.startDate || candidate > periodRange.endDate)
+      ) {
+        continue;
+      }
+      workDates.add(candidate);
+      break;
+    }
+  });
+
+  return workDates;
+};
+
+const getPaycheckPeriodDisplay = (paycheck = {}) => {
+  const periodRange = getPaycheckPeriodRange(paycheck);
+  if (!periodRange) return 'Period not scanned';
+
+  return `${formatShortDate(periodRange.startDate)} - ${formatShortDate(periodRange.endDate)}`;
+};
+
 const getLinkedRideForShift = (shift = {}) =>
   readStoredRides().find((ride) => ride.linkedCscShiftId === shift.id) || null;
 
 const getPaychecksMatchingShift = (shift = {}, paychecks = []) => {
-  const shiftDate = String(shift.startDate || '').slice(0, 10);
+  const shiftDate = normalizePaycheckDate(shift.startDate);
   if (!shiftDate) return [];
 
   return paychecks.filter((paycheck) => {
-    const periodStart = String(paycheck.payPeriodStart || '').slice(0, 10);
-    const periodEnd = String(paycheck.payPeriodEnd || '').slice(0, 10);
-    return Boolean(periodStart && periodEnd && shiftDate >= periodStart && shiftDate <= periodEnd);
+    const periodRange = getPaycheckPeriodRange(paycheck);
+    const matchesPayPeriod = Boolean(
+      periodRange &&
+      shiftDate >= periodRange.startDate &&
+      shiftDate <= periodRange.endDate
+    );
+    const matchesScannedWorkDate = getPaycheckWorkDates(paycheck).has(shiftDate);
+
+    return matchesPayPeriod || matchesScannedWorkDate;
+  });
+};
+
+const getUniquePaychecksMatchingShifts = (shifts = [], paychecks = []) => {
+  const matched = new Map();
+
+  shifts.forEach((shift) => {
+    getPaychecksMatchingShift(shift, paychecks)
+      .filter(isCscPaycheck)
+      .forEach((paycheck) => {
+        const paycheckIndex = paychecks.indexOf(paycheck);
+        matched.set(getPaycheckIdentity(paycheck, paycheckIndex), paycheck);
+      });
+  });
+
+  return Array.from(matched.values()).sort((a, b) => {
+    const aRange = getPaycheckPeriodRange(a);
+    const bRange = getPaycheckPeriodRange(b);
+    const aDate = aRange?.startDate || normalizePaycheckDate(a.checkDate);
+    const bDate = bRange?.startDate || normalizePaycheckDate(b.checkDate);
+    return aDate.localeCompare(bDate);
   });
 };
 
@@ -2451,6 +2715,7 @@ const buildShiftCalendarEventPayload = (shift = {}) => {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Los_Angeles';
 
   return {
+    eventLabelId: CSC_GOOGLE_CALENDAR_LABEL_ID,
     summary: `CSC Shift - ${shift.venue || 'Shift'}${shift.event ? ` - ${shift.event}` : ''}`,
     location: [shift.venue, shift.address, shift.city].filter(Boolean).join(', '),
     description,
@@ -2463,6 +2728,63 @@ const buildShiftCalendarEventPayload = (shift = {}) => {
       timeZone: timezone,
     },
   };
+};
+
+const ensureCscGoogleCalendarLabel = () =>
+  ensureGoogleCalendarEventLabel({
+    id: CSC_GOOGLE_CALENDAR_LABEL_ID,
+    backgroundColor: CSC_GOOGLE_CALENDAR_BACKGROUND_COLOR,
+    name: CSC_GOOGLE_CALENDAR_LABEL_NAME,
+  });
+
+const isCscGoogleCalendarEvent = (event = {}) => {
+  const summary = normalizeShiftIdentityText(event.summary);
+  const description = normalizeShiftIdentityText(event.description);
+
+  return summary.startsWith('csc shift') || description.includes('csc shift status');
+};
+
+const findCscGoogleCalendarEventIds = async () => {
+  const token = await getGoogleCalendarAccessToken();
+  const eventIds = new Set();
+  let pageToken = '';
+
+  do {
+    const searchParams = new URLSearchParams({
+      maxResults: '2500',
+      q: 'CSC Shift',
+      showDeleted: 'false',
+      singleEvents: 'true',
+    });
+
+    if (pageToken) searchParams.set('pageToken', pageToken);
+
+    const response = await fetch(
+      `${GOOGLE_PRIMARY_CALENDAR_EVENTS_ENDPOINT}?${searchParams.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error?.message ||
+          `Google Calendar event search failed with status ${response.status}.`
+      );
+    }
+
+    (Array.isArray(data?.items) ? data.items : []).forEach((event) => {
+      const eventId = String(event?.id || '').trim();
+      if (eventId && isCscGoogleCalendarEvent(event)) eventIds.add(eventId);
+    });
+
+    pageToken = String(data?.nextPageToken || '').trim();
+  } while (pageToken);
+
+  return Array.from(eventIds);
 };
 
 const CscShiftsTab = ({ searchQuery = '' }) => {
@@ -2499,6 +2821,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [movingShiftId, setMovingShiftId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [calendarAddingShiftId, setCalendarAddingShiftId] = useState('');
+  const [calendarColorSyncing, setCalendarColorSyncing] = useState(false);
   const [paychecks, setPaychecks] = useState(() => readStoredPaychecks());
   const [selectedPaidMonthKey, setSelectedPaidMonthKey] = useState('');
   const [selectedWeekKey, setSelectedWeekKey] = useState('');
@@ -2746,6 +3069,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     try {
       calendarAddLockRef.current.add(shift.id);
       setCalendarAddingShiftId(shift.id);
+      await ensureCscGoogleCalendarLabel();
       const createdEvent = await createGoogleCalendarEvent(buildShiftCalendarEventPayload(shift));
       const calendarFields = {
         googleCalendarEventId: createdEvent?.id || '',
@@ -2762,6 +3086,87 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       calendarAddLockRef.current.delete(shift.id);
       setCalendarAddingShiftId('');
     }
+  };
+
+  const handleApplyCalendarBackground = async () => {
+    if (calendarColorSyncing || calendarAddLockRef.current.size) return;
+
+    setCalendarColorSyncing(true);
+
+    const calendarRegistry = readCalendarRegistry();
+    const savedEventIds = [...shifts, ...archivedShifts, ...calendarRegistry]
+      .map((item) => String(item?.googleCalendarEventId || '').trim())
+      .filter(Boolean);
+    let discoveredEventIds = [];
+    let discoveryFailure = '';
+
+    try {
+      await ensureCscGoogleCalendarLabel();
+    } catch (error) {
+      console.error('Failed to prepare the CSC Google Calendar background:', error);
+      setSaveMessage(
+        `Could not prepare the CSC Calendar background: ${
+          error?.message || 'Google Calendar label setup failed.'
+        }`
+      );
+      setTimeout(() => setSaveMessage(''), 8000);
+      setCalendarColorSyncing(false);
+      return;
+    }
+
+    try {
+      discoveredEventIds = await findCscGoogleCalendarEventIds();
+    } catch (error) {
+      console.error('Failed to search Google Calendar for CSC events:', error);
+      discoveryFailure = error?.message || 'Google Calendar event search failed.';
+    }
+
+    const linkedEventIds = Array.from(
+      new Set([...savedEventIds, ...discoveredEventIds])
+    );
+
+    if (!linkedEventIds.length) {
+      setSaveMessage(
+        discoveryFailure
+          ? `Could not search Google Calendar for CSC shifts: ${discoveryFailure}`
+          : 'No CSC Shift events were found in Google Calendar.'
+      );
+      setTimeout(() => setSaveMessage(''), discoveryFailure ? 8000 : 4500);
+      setCalendarColorSyncing(false);
+      return;
+    }
+
+    let updatedCount = 0;
+    const failures = [];
+
+    for (const eventId of linkedEventIds) {
+      try {
+        await updateGoogleCalendarEvent(eventId, {
+          eventLabelId: CSC_GOOGLE_CALENDAR_LABEL_ID,
+        });
+        updatedCount += 1;
+      } catch (error) {
+        console.error('Failed to apply the CSC Google Calendar background:', error);
+        failures.push(error?.message || 'Unknown Google Calendar error');
+      }
+    }
+
+    const successText = updatedCount
+      ? `Applied the dark yellow background to ${updatedCount} CSC Google Calendar event${updatedCount === 1 ? '' : 's'}.`
+      : 'No CSC Google Calendar events were updated.';
+    const failureText = failures.length
+      ? ` ${failures.length} event${failures.length === 1 ? '' : 's'} could not be updated.`
+      : '';
+    const discoveryWarning = discoveryFailure
+      ? ` Calendar search warning: ${discoveryFailure}`
+      : '';
+
+    setSaveMessage(`${successText}${failureText}${discoveryWarning}`);
+    setTimeout(
+      () => setSaveMessage(''),
+      failures.length || discoveryFailure ? 8000 : 4500
+    );
+    setCalendarColorSyncing(false);
   };
 
   const handlePlanOrOpenRide = (shift) => {
@@ -3852,6 +4257,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const owedShifts = doneShifts.filter((shift) => shift.paidStatus !== 'Paid');
     const openShifts = payableShifts.filter((shift) => !['Done', 'Cancelled'].includes(shift.shiftStatus));
     const cancelledShifts = monthShifts.filter((shift) => shift.shiftStatus === 'Cancelled');
+    const actualPaychecks = getUniquePaychecksMatchingShifts(doneShifts, paychecks);
     const weeklyGroups = new Map();
 
     monthShifts.forEach((shift) => {
@@ -3891,13 +4297,29 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     });
 
     const weeklyBreakdown = Array.from(weeklyGroups.values())
-      .map((week) => ({
-        ...week,
-        label: formatWeekRange(week.startDate, week.endDate),
-        shifts: week.shifts.sort((a, b) =>
-          `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`)
-        ),
-      }))
+      .map((week) => {
+        const weekPaychecks = getUniquePaychecksMatchingShifts(
+          week.shifts.filter((shift) => shift.shiftStatus === 'Done'),
+          paychecks
+        );
+
+        return {
+          ...week,
+          label: formatWeekRange(week.startDate, week.endDate),
+          shifts: week.shifts.sort((a, b) =>
+            `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`)
+          ),
+          actualPaychecks: weekPaychecks,
+          actualGrossPaid: weekPaychecks.reduce(
+            (sum, paycheck) => sum + getActualPaycheckGross(paycheck),
+            0
+          ),
+          actualNetReceived: weekPaychecks.reduce(
+            (sum, paycheck) => sum + getActualPaycheckNet(paycheck),
+            0
+          ),
+        };
+      })
       .sort((a, b) => a.weekKey.localeCompare(b.weekKey));
 
     return {
@@ -3911,14 +4333,22 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       owedCount: owedShifts.length,
       openCount: openShifts.length,
       cancelledCount: cancelledShifts.length,
+      actualPaychecks,
       totalHours: payableShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0),
       workedHours: doneShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0),
       projectedPay: payableShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
       earnedPay: doneShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
-      totalPay: paidShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
+      actualGrossPaid: actualPaychecks.reduce(
+        (sum, paycheck) => sum + getActualPaycheckGross(paycheck),
+        0
+      ),
+      actualNetReceived: actualPaychecks.reduce(
+        (sum, paycheck) => sum + getActualPaycheckNet(paycheck),
+        0
+      ),
       owedAmount: owedShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
     };
-  }, [archivedShifts, monthlySummary, selectedPaidMonthKey, shifts]);
+  }, [archivedShifts, monthlySummary, paychecks, selectedPaidMonthKey, shifts]);
 
   const activeShiftCount = useMemo(
     () => shifts.filter((shift) => !['Done', 'Cancelled'].includes(shift.shiftStatus)).length,
@@ -4060,7 +4490,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     setTimeout(() => setSaveMessage(''), 4000);
   };
 
-  const handleAddScannedShift = () => {
+  const handleAddScannedShift = async () => {
     if (!scannedShifts.length) {
       setSaveMessage('Scan a CSC email before adding shifts.');
       setTimeout(() => setSaveMessage(''), 3000);
@@ -4072,6 +4502,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     let updatedCount = 0;
     let addedCount = 0;
     let collisionSafeCount = 0;
+    let reconciledDuplicateCount = 0;
+    let calendarLinkWithoutIdCount = 0;
+    const calendarSyncRequests = new Map();
     const currentById = new Map(shifts.map((shift) => [shift.id, shift]));
 
     scannedShifts.forEach((scannedItem) => {
@@ -4081,7 +4514,44 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
       if (matchedShiftId) {
         const existingShift = currentById.get(matchedShiftId);
-        currentById.set(matchedShiftId, mergeScannedShiftWithExisting(existingShift, normalizedScannedItem));
+        const registryEntry = findCalendarRegistryEntry(existingShift);
+        const mergedShift = normalizeShift({
+          ...mergeScannedShiftWithExisting(existingShift, normalizedScannedItem),
+          googleCalendarEventId:
+            existingShift.googleCalendarEventId || registryEntry?.googleCalendarEventId || '',
+          googleCalendarEventLink:
+            existingShift.googleCalendarEventLink || registryEntry?.googleCalendarEventLink || '',
+          googleCalendarAddedAt:
+            existingShift.googleCalendarAddedAt || registryEntry?.googleCalendarAddedAt || '',
+        });
+
+        currentById.set(matchedShiftId, mergedShift);
+
+        if (hasShiftCalendarTimeChanged(existingShift, mergedShift)) {
+          if (mergedShift.googleCalendarEventId) {
+            calendarSyncRequests.set(mergedShift.googleCalendarEventId, {
+              shiftId: matchedShiftId,
+              shift: mergedShift,
+            });
+          } else if (mergedShift.googleCalendarEventLink) {
+            calendarLinkWithoutIdCount += 1;
+          }
+        }
+
+        if (normalizedScannedItem.id && normalizedScannedItem.id !== matchedShiftId) {
+          const scannedWindowDuplicate = currentById.get(normalizedScannedItem.id);
+          const duplicateMatchesScan =
+            scannedWindowDuplicate &&
+            shiftWindowsMatch(scannedWindowDuplicate, normalizedScannedItem) &&
+            (areLikelyDuplicateShifts(scannedWindowDuplicate, normalizedScannedItem) ||
+              getScannedShiftMatchScore(scannedWindowDuplicate, normalizedScannedItem) >= 4);
+
+          if (duplicateMatchesScan) {
+            currentById.delete(normalizedScannedItem.id);
+            reconciledDuplicateCount += 1;
+          }
+        }
+
         updatedCount += 1;
         return;
       }
@@ -4101,15 +4571,83 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     setScannedShifts([]);
     setShowScanDrawer(false);
 
+    let calendarUpdatedCount = 0;
+    const calendarUpdateFailures = [];
+
+    if (calendarSyncRequests.size) {
+      try {
+        await ensureCscGoogleCalendarLabel();
+      } catch (error) {
+        console.error('Failed to prepare the CSC Google Calendar background:', error);
+        calendarUpdateFailures.push(
+          error?.message || 'Google Calendar background setup failed'
+        );
+        calendarSyncRequests.clear();
+      }
+    }
+
+    for (const [eventId, request] of calendarSyncRequests) {
+      try {
+        calendarAddLockRef.current.add(request.shiftId);
+        setCalendarAddingShiftId(request.shiftId);
+
+        const updatedEvent = await updateGoogleCalendarEvent(
+          eventId,
+          buildShiftCalendarEventPayload(request.shift)
+        );
+        const calendarFields = {
+          googleCalendarEventId: updatedEvent?.id || eventId,
+          googleCalendarEventLink:
+            updatedEvent?.htmlLink || request.shift.googleCalendarEventLink || '',
+          googleCalendarAddedAt: request.shift.googleCalendarAddedAt || '',
+        };
+
+        saveCalendarRegistryEntry(request.shift, calendarFields);
+        setShifts((currentShifts) =>
+          currentShifts.map((shift) =>
+            shift.id === request.shiftId
+              ? normalizeShift({ ...shift, ...calendarFields })
+              : shift
+          )
+        );
+        calendarUpdatedCount += 1;
+      } catch (error) {
+        console.error('Failed to update the linked Google Calendar event:', error);
+        calendarUpdateFailures.push(error?.message || 'Unknown Google Calendar error');
+      } finally {
+        calendarAddLockRef.current.delete(request.shiftId);
+        setCalendarAddingShiftId('');
+      }
+    }
+
     const details = [
       `Updated ${updatedCount}`,
       `added ${addedCount}`,
+      calendarUpdatedCount
+        ? `updated ${calendarUpdatedCount} Google Calendar event${calendarUpdatedCount === 1 ? '' : 's'}`
+        : '',
       removedDuplicateCount ? `removed ${removedDuplicateCount} duplicate${removedDuplicateCount === 1 ? '' : 's'}` : '',
+      reconciledDuplicateCount
+        ? `reconciled ${reconciledDuplicateCount} prior scan duplicate${reconciledDuplicateCount === 1 ? '' : 's'}`
+        : '',
       collisionSafeCount ? `prevented ${collisionSafeCount} ID collision${collisionSafeCount === 1 ? '' : 's'}` : '',
     ].filter(Boolean);
 
-    setSaveMessage(`CSC email imported safely. ${details.join(', ')}.`);
-    setTimeout(() => setSaveMessage(''), 4000);
+    const calendarWarnings = [
+      calendarLinkWithoutIdCount
+        ? `${calendarLinkWithoutIdCount} linked calendar event could not be updated because its Google event ID is missing`
+        : '',
+      calendarUpdateFailures.length
+        ? `${calendarUpdateFailures.length} Google Calendar update${calendarUpdateFailures.length === 1 ? '' : 's'} failed: ${calendarUpdateFailures.join('; ')}`
+        : '',
+    ].filter(Boolean);
+
+    setSaveMessage(
+      `CSC email imported safely. ${details.join(', ')}.${
+        calendarWarnings.length ? ` Calendar warning: ${calendarWarnings.join('. ')}.` : ''
+      }`
+    );
+    setTimeout(() => setSaveMessage(''), calendarWarnings.length ? 8000 : 5000);
   };
 
   const handlePrintPremiumView = () => {
@@ -4744,6 +5282,20 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           body.csc-section-printing .csc-monthly-report td:nth-child(8) {
             width: 9% !important;
           }
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation th:nth-child(1),
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation td:nth-child(1) {
+            width: 34% !important;
+          }
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation th:nth-child(2),
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation td:nth-child(2) {
+            width: 22% !important;
+          }
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation th:nth-child(3),
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation td:nth-child(3),
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation th:nth-child(4),
+          body.csc-section-printing .csc-monthly-report table.csc-paycheck-reconciliation td:nth-child(4) {
+            width: 22% !important;
+          }
           body.csc-section-printing .csc-monthly-report th,
           body.csc-section-printing .csc-monthly-report td {
             padding: 5px 7px !important;
@@ -4853,6 +5405,17 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleApplyCalendarBackground}
+                disabled={calendarColorSyncing}
+                title="Apply a dark yellow background to all CSC Google Calendar events"
+                aria-label="Apply a dark yellow background to all CSC Google Calendar events"
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-yellow-600 px-3 text-sm font-extrabold text-slate-950 shadow-sm hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-70"
+              >
+                <Palette className="h-4 w-4 shrink-0" />
+                <span>{calendarColorSyncing ? 'Applying Background...' : 'Apply Calendar Background'}</span>
+              </button>
               <button
                 type="button"
                 onClick={handleToggleShiftListLength}
@@ -5440,52 +6003,52 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </>
         </section>
 
-        <section className="grid grid-cols-4 gap-3">
-          <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-yellow-950 shadow-sm">
+        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <div className="min-w-0 rounded-2xl border border-yellow-200 bg-yellow-50 p-3 text-yellow-950 shadow-sm sm:p-4">
             <div className="flex items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-bold">Scheduled Shifts</p>
-                <p className="mt-1 text-2xl font-extrabold">{summary.totalShifts}</p>
+                <p className="mt-1 whitespace-nowrap text-2xl font-extrabold">{summary.totalShifts}</p>
               </div>
-              <BriefcaseBusiness className="h-8 w-8 opacity-80" />
+              <BriefcaseBusiness className="hidden h-8 w-8 shrink-0 opacity-80 sm:block" />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-blue-950 shadow-sm">
+          <div className="min-w-0 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-blue-950 shadow-sm sm:p-4">
             <div className="flex items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-bold">Estimated Hours</p>
-                <p className="mt-1 text-2xl font-extrabold">{summary.totalHours.toFixed(1)}</p>
+                <p className="mt-1 whitespace-nowrap text-2xl font-extrabold">{summary.totalHours.toFixed(1)}</p>
                 <p className="mt-1 text-xs font-bold text-blue-800">Done: {summary.workedHours.toFixed(1)}</p>
               </div>
-              <Clock className="h-8 w-8 opacity-80" />
+              <Clock className="hidden h-8 w-8 shrink-0 opacity-80 sm:block" />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 shadow-sm">
+          <div className="min-w-0 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-950 shadow-sm sm:p-4">
             <div className="flex items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-bold">Estimated Pay</p>
-                <p className="mt-1 text-2xl font-extrabold">{formatCurrency(summary.estimatedPay)}</p>
+                <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{formatCurrency(summary.estimatedPay)}</p>
                 <p className="mt-1 text-xs font-bold text-emerald-800">Paid: {formatCurrency(summary.paidAmount)}</p>
               </div>
-              <DollarSign className="h-8 w-8 opacity-80" />
+              <DollarSign className="hidden h-8 w-8 shrink-0 opacity-80 sm:block" />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-950 shadow-sm">
+          <div className="min-w-0 rounded-2xl border border-red-200 bg-red-50 p-3 text-red-950 shadow-sm sm:p-4">
             <div className="flex items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-bold">Still Owed</p>
-                <p className="mt-1 text-2xl font-extrabold">{formatCurrency(summary.owedAmount)}</p>
+                <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{formatCurrency(summary.owedAmount)}</p>
                 <p className="mt-1 text-xs font-bold text-red-800">Done and unpaid only</p>
               </div>
-              <CheckCircle2 className="h-8 w-8 opacity-80" />
+              <CheckCircle2 className="hidden h-8 w-8 shrink-0 opacity-80 sm:block" />
             </div>
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-black shadow-sm">
+        <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 text-black shadow-sm sm:p-4">
           <div className="mb-3">
             <h2 className="text-lg font-extrabold text-black">Hours Worked Summary</h2>
             <p className="text-xs text-black">
@@ -5493,37 +6056,37 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </p>
           </div>
 
-          <div className="grid gap-3 text-black sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-black">
+          <div className="grid min-w-0 grid-cols-2 gap-2 text-black sm:gap-3 xl:grid-cols-4">
+            <div className="min-w-0 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-black sm:p-3">
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Week</p>
               <p className="mt-0.5 text-[11px] font-bold text-blue-900">
                 {hoursAnalytics.currentWeekLabel}
               </p>
-              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.currentWeekWorkedHours.toFixed(1)} hrs</p>
+              <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{hoursAnalytics.currentWeekWorkedHours.toFixed(1)} hrs</p>
               <p className="mt-1 text-xs font-bold text-black">
                 Scheduled: {hoursAnalytics.currentWeekScheduledHours.toFixed(1)}
               </p>
             </div>
 
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-black">
+            <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-black sm:p-3">
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Month</p>
-              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.currentMonthWorkedHours.toFixed(1)} hrs</p>
+              <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{hoursAnalytics.currentMonthWorkedHours.toFixed(1)} hrs</p>
               <p className="mt-1 text-xs font-bold text-black">
                 Scheduled: {hoursAnalytics.currentMonthScheduledHours.toFixed(1)}
               </p>
             </div>
 
-            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-black">
+            <div className="min-w-0 rounded-xl border border-violet-200 bg-violet-50 p-2.5 text-black sm:p-3">
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Year</p>
-              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.currentYearWorkedHours.toFixed(1)} hrs</p>
+              <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{hoursAnalytics.currentYearWorkedHours.toFixed(1)} hrs</p>
               <p className="mt-1 text-xs font-bold text-black">
                 Scheduled: {hoursAnalytics.currentYearScheduledHours.toFixed(1)}
               </p>
             </div>
 
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-black">
+            <div className="min-w-0 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-black sm:p-3">
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">Average Month</p>
-              <p className="mt-1 text-2xl font-extrabold">{hoursAnalytics.averageWorkedMonth.toFixed(1)} hrs</p>
+              <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{hoursAnalytics.averageWorkedMonth.toFixed(1)} hrs</p>
               <p className="mt-1 text-xs font-bold text-black">
                 {hoursAnalytics.workedMonthCount} worked {hoursAnalytics.workedMonthCount === 1 ? 'month' : 'months'}
               </p>
@@ -5983,42 +6546,53 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
         {selectedWorkedWeek && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-2 sm:p-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="worked-week-title"
           >
             <div
               id="csc-worked-week-print"
-              className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              className="flex max-h-[calc(100dvh-1rem)] min-w-0 w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[90vh]"
             >
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-                <div>
-                  <h2 id="worked-week-title" className="text-xl font-extrabold text-slate-950">
+              <div className="flex min-w-0 flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5 sm:py-4">
+                <div className="min-w-0">
+                  <h2 id="worked-week-title" className="text-lg font-extrabold leading-tight text-slate-950 sm:text-xl">
                     Shifts Worked, {selectedWorkedWeek.label}
                   </h2>
                   <p className="mt-1 text-sm text-slate-600">
                     Only shifts marked Done are included.
                   </p>
                 </div>
-                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                <div className="csc-no-print flex w-full flex-shrink-0 items-center gap-2 sm:w-auto">
                   <button
                     type="button"
                     onClick={() => handlePrintSection('csc-worked-week-print', `CSC Shifts Worked - ${selectedWorkedWeek.label}`)}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 sm:h-11 sm:flex-none"
                     aria-label={`Print shifts worked for ${selectedWorkedWeek.label}`}
                     title={`Print shifts worked for ${selectedWorkedWeek.label}`}
                   >
                     <Printer className="h-4 w-4" />
                     Print
                   </button>
-                  <CloseScreenButton onClick={() => setSelectedWeekKey('')} />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWeekKey('')}
+                    className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border-2 border-slate-950 bg-white text-slate-950 shadow-sm hover:bg-slate-100 sm:hidden"
+                    aria-label="Close shifts worked screen"
+                    title="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                  <div className="hidden sm:block">
+                    <CloseScreenButton onClick={() => setSelectedWeekKey('')} />
+                  </div>
                 </div>
               </div>
 
-              <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <div className="border-b border-slate-200 bg-slate-50 px-3 py-3 sm:px-5 sm:py-4">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+                  <div className="col-span-2 rounded-xl border border-slate-200 bg-white p-3 sm:col-span-1">
                     <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Worked Shifts</p>
                     <p className="mt-1 text-xl font-extrabold text-slate-950">
                       {selectedWorkedWeek.workedShiftCount} out of {selectedWorkedWeek.shiftCount}
@@ -6035,7 +6609,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </div>
               </div>
 
-              <div className="csc-print-scroll flex-1 overflow-y-auto p-5">
+              <div className="csc-print-scroll min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
                 {selectedWorkedWeek.workedShifts.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
                     <p className="text-sm font-bold text-slate-700">No shifts were marked Done for this week.</p>
@@ -6045,11 +6619,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     {selectedWorkedWeek.workedShifts.map((shift) => (
                       <article
                         key={`${shift.recordSource}-${shift.id}`}
-                        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                        className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <h3 className="truncate text-lg font-extrabold text-slate-950">{shift.venue || 'CSC Shift'}</h3>
+                            <h3 className="break-words text-base font-extrabold leading-tight text-slate-950 sm:text-lg">{shift.venue || 'CSC Shift'}</h3>
                             <p className="mt-0.5 text-sm font-bold text-slate-700">{shift.event || 'Event not entered'}</p>
                             {shouldShowDistinctJobName(shift) ? <p className="mt-0.5 text-xs font-semibold text-slate-500">{shift.jobName}</p> : null}
                           </div>
@@ -6064,27 +6638,27 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         </div>
 
                         <div className="mt-4 grid gap-2 text-sm text-slate-700">
-                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[100px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Start</span>
-                            <span>{formatDate(shift.startDate)} {formatTime(shift.startTime)}</span>
+                            <span className="min-w-0 break-words">{formatDate(shift.startDate)} {formatTime(shift.startTime)}</span>
                           </div>
-                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[100px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Finish</span>
-                            <span>{formatDate(shift.finishDate)} {formatTime(shift.finishTime)}</span>
+                            <span className="min-w-0 break-words">{formatDate(shift.finishDate)} {formatTime(shift.finishTime)}</span>
                           </div>
-                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[100px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Hours</span>
                             <span>{getShiftHours(shift).toFixed(1)}</span>
                           </div>
-                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[100px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Uniform</span>
                             <span>{shift.uniform || 'Not entered'}</span>
                           </div>
-                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[100px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Est. Pay</span>
                             <span>{formatCurrency(getEstimatedPay(shift))}</span>
                           </div>
-                          <div className="grid grid-cols-[100px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[72px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[100px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Paid Status</span>
                             <span>{getShiftPaymentStatusLabel(shift)}</span>
                           </div>
@@ -6151,10 +6725,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     </p>
                   </header>
 
-                  <section className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  <section className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Shifts Worked</p>
                       <p className="mt-1 text-xl font-black text-slate-950">{selectedPaidMonth.paidShifts.filter((shift) => shift.shiftStatus === 'Done').length}</p>
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-amber-700">Scheduled Hours</p>
+                      <p className="mt-1 text-xl font-black text-amber-950">{selectedPaidMonth.totalHours.toFixed(1)}</p>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Worked Hours</p>
@@ -6165,15 +6743,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <p className="mt-1 text-xl font-black text-blue-950">{formatCurrency(selectedPaidMonth.projectedPay)}</p>
                     </div>
                     <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Earned Pay</p>
-                      <p className="mt-1 text-xl font-black text-violet-950">{formatCurrency(selectedPaidMonth.earnedPay)}</p>
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Actual Gross Paid</p>
+                      <p className="mt-1 text-xl font-black text-violet-950">{formatCurrency(selectedPaidMonth.actualGrossPaid)}</p>
                     </div>
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Paid Amount</p>
-                      <p className="mt-1 text-xl font-black text-emerald-950">{formatCurrency(selectedPaidMonth.totalPay)}</p>
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Actual Net Received</p>
+                      <p className="mt-1 text-xl font-black text-emerald-950">{formatCurrency(selectedPaidMonth.actualNetReceived)}</p>
                     </div>
                     <div className="rounded-xl border border-red-200 bg-red-50 p-3">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-red-700">Still Owed</p>
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-red-700">Estimated Still Owed</p>
                       <p className="mt-1 text-xl font-black text-red-950">{formatCurrency(selectedPaidMonth.owedAmount)}</p>
                     </div>
                   </section>
@@ -6182,9 +6760,65 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     <span>{selectedPaidMonth.paidShifts.length} saved shifts</span>
                     <span>{selectedPaidMonth.paidCount} marked paid</span>
                     <span>{selectedPaidMonth.owedCount} completed and unpaid</span>
+                    <span>{selectedPaidMonth.actualPaychecks.length} matching saved paychecks</span>
                     {selectedPaidMonth.openCount ? <span>{selectedPaidMonth.openCount} scheduled or approved</span> : null}
                     {selectedPaidMonth.cancelledCount ? <span>{selectedPaidMonth.cancelledCount} cancelled</span> : null}
                   </div>
+
+                  <section className="mt-4 overflow-hidden rounded-xl border border-slate-300">
+                    <div className="bg-slate-100 px-4 py-2">
+                      <h2 className="text-xs font-extrabold uppercase tracking-wide text-slate-700">
+                        Saved Paychecks Used for Actual Gross and Net
+                      </h2>
+                    </div>
+                    {selectedPaidMonth.actualPaychecks.length ? (
+                      <div className="overflow-x-auto">
+                        <table className="csc-paycheck-reconciliation w-full border-collapse text-left text-[11px] leading-tight">
+                          <thead className="bg-white text-[9px] font-extrabold uppercase tracking-wide text-slate-600">
+                            <tr>
+                              <th className="px-3 py-2">Pay Period</th>
+                              <th className="px-3 py-2">Check</th>
+                              <th className="px-3 py-2 text-right">Actual Gross</th>
+                              <th className="px-3 py-2 text-right">Actual Net</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {selectedPaidMonth.actualPaychecks.map((paycheck, paycheckIndex) => (
+                              <tr key={getPaycheckIdentity(paycheck, paycheckIndex)}>
+                                <td className="whitespace-nowrap px-3 py-2 font-bold text-slate-800">
+                                  {getPaycheckPeriodDisplay(paycheck)}
+                                </td>
+                                <td className="px-3 py-2 text-slate-700">
+                                  {paycheck.checkNumber ? `#${paycheck.checkNumber}` : formatShortDate(paycheck.checkDate) || 'Saved paycheck'}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-right font-extrabold text-violet-800">
+                                  {formatCurrency(getActualPaycheckGross(paycheck))}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-right font-extrabold text-emerald-800">
+                                  {formatCurrency(getActualPaycheckNet(paycheck))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="border-t-2 border-slate-300 bg-amber-50 font-extrabold text-slate-950">
+                            <tr>
+                              <td colSpan={2} className="px-3 py-2">Actual Paycheck Total</td>
+                              <td className="whitespace-nowrap px-3 py-2 text-right text-violet-800">
+                                {formatCurrency(selectedPaidMonth.actualGrossPaid)}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-right text-emerald-800">
+                                {formatCurrency(selectedPaidMonth.actualNetReceived)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="px-4 py-3 text-xs font-semibold text-slate-600">
+                        No saved paycheck has a pay period matching a completed shift in this report.
+                      </p>
+                    )}
+                  </section>
 
                   {selectedPaidMonth.weeklyBreakdown.length === 0 ? (
                     <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-600">
@@ -6202,18 +6836,26 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                               <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-amber-300">Week {weekIndex + 1}</p>
                               <h2 className="mt-0.5 text-base font-black">{week.label}</h2>
                             </div>
-                            <div className="grid grid-cols-3 gap-x-4 text-right text-[10px]">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-right text-[10px] sm:grid-cols-5">
+                              <div>
+                                <p className="font-bold uppercase text-slate-300">Scheduled</p>
+                                <p className="mt-0.5 text-sm font-black">{week.hours.toFixed(1)} hrs</p>
+                              </div>
                               <div>
                                 <p className="font-bold uppercase text-slate-300">Worked</p>
                                 <p className="mt-0.5 text-sm font-black">{week.workedHours.toFixed(1)} hrs</p>
                               </div>
                               <div>
-                                <p className="font-bold uppercase text-slate-300">Earned</p>
-                                <p className="mt-0.5 text-sm font-black">{formatCurrency(week.earnedPay)}</p>
+                                <p className="font-bold uppercase text-slate-300">Expected Pay</p>
+                                <p className="mt-0.5 text-sm font-black">{formatCurrency(week.expectedPay)}</p>
                               </div>
                               <div>
-                                <p className="font-bold uppercase text-slate-300">Paid</p>
-                                <p className="mt-0.5 text-sm font-black text-emerald-300">{formatCurrency(week.paidAmount)}</p>
+                                <p className="font-bold uppercase text-slate-300">Actual Gross</p>
+                                <p className="mt-0.5 text-sm font-black text-violet-300">{formatCurrency(week.actualGrossPaid)}</p>
+                              </div>
+                              <div>
+                                <p className="font-bold uppercase text-slate-300">Actual Net</p>
+                                <p className="mt-0.5 text-sm font-black text-emerald-300">{formatCurrency(week.actualNetReceived)}</p>
                               </div>
                             </div>
                           </div>
@@ -6238,14 +6880,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                   <th className="px-3 py-2">Shift Name</th>
                                   <th className="px-3 py-2 text-right">Hours</th>
                                   <th className="px-3 py-2 text-right">Expected</th>
-                                  <th className="px-3 py-2 text-right">Paid</th>
+                                  <th className="px-3 py-2 text-right">Paycheck</th>
                                   <th className="px-3 py-2">Status</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200">
                                 {week.shifts.map((shift) => {
                                   const expectedPay = shift.shiftStatus === 'Cancelled' ? 0 : getEstimatedPay(shift);
-                                  const paidAmount = shift.paidStatus === 'Paid' && shift.shiftStatus !== 'Cancelled' ? expectedPay : 0;
+                                  const matchingPaychecks = getPaychecksMatchingShift(shift, paychecks).filter(isCscPaycheck);
 
                                   return (
                                     <tr key={`${shift.recordSource}-${shift.id}`} className={shift.shiftStatus === 'Cancelled' ? 'bg-slate-50 text-slate-500' : 'text-slate-800'}>
@@ -6262,7 +6904,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                       <td className="px-3 py-2 align-top">{shift.shiftName || 'Not entered'}</td>
                                       <td className="whitespace-nowrap px-3 py-2 text-right align-top">{shift.shiftStatus === 'Cancelled' ? '0.0' : getShiftHours(shift).toFixed(1)}</td>
                                       <td className="whitespace-nowrap px-3 py-2 text-right align-top font-bold">{formatCurrency(expectedPay)}</td>
-                                      <td className="whitespace-nowrap px-3 py-2 text-right align-top font-bold text-emerald-800">{formatCurrency(paidAmount)}</td>
+                                      <td className="px-3 py-2 text-right align-top font-bold text-emerald-800">
+                                        {matchingPaychecks.length
+                                          ? matchingPaychecks.map((paycheck) => paycheck.checkNumber ? `#${paycheck.checkNumber}` : 'Saved').join(', ')
+                                          : 'Not saved'}
+                                      </td>
                                       <td className="px-3 py-2 align-top">
                                         <div className="font-bold">{shift.shiftStatus}</div>
                                         <div className={`mt-0.5 text-[9px] font-extrabold uppercase ${shift.paidStatus === 'Paid' ? 'text-emerald-700' : 'text-red-700'}`}>
@@ -6278,7 +6924,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                   <td colSpan={4} className="px-3 py-2">Week Total</td>
                                   <td className="whitespace-nowrap px-3 py-2 text-right">{week.hours.toFixed(1)}</td>
                                   <td className="whitespace-nowrap px-3 py-2 text-right">{formatCurrency(week.expectedPay)}</td>
-                                  <td className="whitespace-nowrap px-3 py-2 text-right text-emerald-800">{formatCurrency(week.paidAmount)}</td>
+                                  <td className="whitespace-nowrap px-3 py-2 text-right text-emerald-800">
+                                    {week.actualPaychecks.length} saved
+                                  </td>
                                   <td className="px-3 py-2">{week.workedCount} worked</td>
                                 </tr>
                               </tfoot>
@@ -6290,7 +6938,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   )}
 
                   <footer className="mt-6 border-t border-slate-300 pt-3 text-[9px] leading-relaxed text-slate-500">
-                    Expected pay is calculated from saved shift hours and rates, including overtime and double time. Earned pay includes shifts marked Done. Paid amount uses the expected pay for shifts marked Paid.
+                    Estimated earned pay is calculated from completed shift hours and saved rates, including overtime and double time. Actual gross and net use each saved CSC paycheck whose pay period matches at least one completed shift in this report. Each paycheck is counted once, and paycheck totals are not assigned to individual shifts. Estimated still owed includes completed shifts not marked Paid.
                   </footer>
                 </div>
               </div>

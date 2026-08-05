@@ -206,9 +206,10 @@ const formatDateForInput = (value = "") => {
   const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
 
-  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const slashMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})$/);
   if (slashMatch) {
-    return `${slashMatch[3]}-${slashMatch[1].padStart(2, "0")}-${slashMatch[2].padStart(2, "0")}`;
+    const year = slashMatch[3].length === 2 ? `20${slashMatch[3]}` : slashMatch[3];
+    return `${year}-${slashMatch[1].padStart(2, "0")}-${slashMatch[2].padStart(2, "0")}`;
   }
 
   const parsed = new Date(text);
@@ -675,9 +676,10 @@ const getWorkLineIsoDate = (lineOrValue = "", paycheck = {}) => {
 
   const periodStart = formatDateForInput(paycheck.payPeriodStart);
   const periodEnd = formatDateForInput(paycheck.payPeriodEnd);
+  const checkDate = formatDateForInput(paycheck.checkDate);
   const years = Array.from(
     new Set(
-      [periodStart, periodEnd]
+      [periodStart, periodEnd, checkDate]
         .filter(Boolean)
         .map((date) => date.slice(0, 4))
     )
@@ -1082,10 +1084,50 @@ const limitScanText = (value = "") => {
   return `${text.slice(0, MAX_PAYCHECK_SCAN_TEXT_LENGTH).trim()}\n\n[Scan text truncated to ${MAX_PAYCHECK_SCAN_TEXT_LENGTH.toLocaleString()} characters.]`;
 };
 
+const PAYCHECK_SCAN_DATE_PATTERN =
+  "(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s*\\d{4}|\\d{1,2}[\\/-]\\d{1,2}[\\/-](?:\\d{4}|\\d{2}))";
+
 const findDateAfterLabel = (text, labelPattern) => {
-  const regex = new RegExp(`${labelPattern}\\s*:?\\s*([A-Za-z]+\\s+\\d{1,2},\\s*\\d{4}|\\d{1,2}/\\d{1,2}/\\d{4})`, "i");
+  const regex = new RegExp(`${labelPattern}\\s*:?\\s*(${PAYCHECK_SCAN_DATE_PATTERN})`, "i");
   const match = text.match(regex);
   return match ? formatDateForInput(match[1]) : "";
+};
+
+const findPayPeriodDates = (text = "") => {
+  const directStart = findDateAfterLabel(
+    text,
+    "(?:Pay\\s+)?Period\\s+(?:Beginning|Begin|Start|From)"
+  );
+  const directEnd = findDateAfterLabel(
+    text,
+    "(?:Pay\\s+)?Period\\s+(?:Ending|End|Through|Thru|To)"
+  );
+
+  if (directStart && directEnd) {
+    return { startDate: directStart, endDate: directEnd };
+  }
+
+  const rangePatterns = [
+    new RegExp(
+      `(?:Pay\\s+)?Period(?:\\s+Dates?)?\\s*:?\\s*(${PAYCHECK_SCAN_DATE_PATTERN})\\s*(?:-|–|—|to|through|thru)\\s*(${PAYCHECK_SCAN_DATE_PATTERN})`,
+      "i"
+    ),
+    new RegExp(
+      `Period\\s+(?:Beginning|Begin|Start)\\s+Period\\s+(?:Ending|End)(?:\\s+Check\\s+Date)?\\s+(${PAYCHECK_SCAN_DATE_PATTERN})\\s+(${PAYCHECK_SCAN_DATE_PATTERN})`,
+      "i"
+    ),
+  ];
+
+  for (const pattern of rangePatterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+
+    const startDate = formatDateForInput(match[1]);
+    const endDate = formatDateForInput(match[2]);
+    if (startDate && endDate) return { startDate, endDate };
+  }
+
+  return { startDate: directStart, endDate: directEnd };
 };
 
 const findMoneyAfterLabel = (text, labelPattern) => {
@@ -1225,8 +1267,9 @@ const parsePaycheckScanText = (rawText = "") => {
   if (employeeMatch) parsed.employeeName = employeeMatch[0].replace(/\s+/g, " ").trim();
 
   parsed.checkDate = findDateAfterLabel(flat, "Check Date");
-  parsed.payPeriodStart = findDateAfterLabel(flat, "Period Beginning");
-  parsed.payPeriodEnd = findDateAfterLabel(flat, "Period Ending");
+  const scannedPayPeriod = findPayPeriodDates(flat);
+  parsed.payPeriodStart = scannedPayPeriod.startDate;
+  parsed.payPeriodEnd = scannedPayPeriod.endDate;
 
   const checkNumberMatch = flat.match(/Check Number\s*:?\s*(\d{5,})/i);
   if (checkNumberMatch) parsed.checkNumber = checkNumberMatch[1];
