@@ -21,7 +21,6 @@ import {
   History,
   ListChecks,
   MapPin,
-  Palette,
   Phone,
   Plus,
   Printer,
@@ -37,7 +36,6 @@ import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
 import CloseScreenButton from '../common/CloseScreenButton.jsx';
 import {
-  getGoogleCalendarAccessToken,
   createGoogleCalendarEvent,
   ensureGoogleCalendarEventLabel,
   updateGoogleCalendarEvent,
@@ -70,8 +68,6 @@ const DEFAULT_VISIBLE_SHIFT_COUNT = 5;
 const CSC_GOOGLE_CALENDAR_LABEL_ID = 'c5c5c5c5-5c5c-4c5c-8c5c-c5c5c5c5c5c5';
 const CSC_GOOGLE_CALENDAR_LABEL_NAME = 'CSC Shifts';
 const CSC_GOOGLE_CALENDAR_BACKGROUND_COLOR = '#B8860B';
-const GOOGLE_PRIMARY_CALENDAR_EVENTS_ENDPOINT =
-  'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 
 const CSC_COMPANY = {
   name: 'Contemporary Services Corporation',
@@ -2737,56 +2733,6 @@ const ensureCscGoogleCalendarLabel = () =>
     name: CSC_GOOGLE_CALENDAR_LABEL_NAME,
   });
 
-const isCscGoogleCalendarEvent = (event = {}) => {
-  const summary = normalizeShiftIdentityText(event.summary);
-  const description = normalizeShiftIdentityText(event.description);
-
-  return summary.startsWith('csc shift') || description.includes('csc shift status');
-};
-
-const findCscGoogleCalendarEventIds = async () => {
-  const token = await getGoogleCalendarAccessToken();
-  const eventIds = new Set();
-  let pageToken = '';
-
-  do {
-    const searchParams = new URLSearchParams({
-      maxResults: '2500',
-      q: 'CSC Shift',
-      showDeleted: 'false',
-      singleEvents: 'true',
-    });
-
-    if (pageToken) searchParams.set('pageToken', pageToken);
-
-    const response = await fetch(
-      `${GOOGLE_PRIMARY_CALENDAR_EVENTS_ENDPOINT}?${searchParams.toString()}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(
-        data?.error?.message ||
-          `Google Calendar event search failed with status ${response.status}.`
-      );
-    }
-
-    (Array.isArray(data?.items) ? data.items : []).forEach((event) => {
-      const eventId = String(event?.id || '').trim();
-      if (eventId && isCscGoogleCalendarEvent(event)) eventIds.add(eventId);
-    });
-
-    pageToken = String(data?.nextPageToken || '').trim();
-  } while (pageToken);
-
-  return Array.from(eventIds);
-};
-
 const CscShiftsTab = ({ searchQuery = '' }) => {
   const [shifts, setShifts] = useState(() => loadSavedShifts());
   const [localSearch, setLocalSearch] = useState('');
@@ -2821,7 +2767,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [movingShiftId, setMovingShiftId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [calendarAddingShiftId, setCalendarAddingShiftId] = useState('');
-  const [calendarColorSyncing, setCalendarColorSyncing] = useState(false);
   const [paychecks, setPaychecks] = useState(() => readStoredPaychecks());
   const [selectedPaidMonthKey, setSelectedPaidMonthKey] = useState('');
   const [selectedWeekKey, setSelectedWeekKey] = useState('');
@@ -3086,87 +3031,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       calendarAddLockRef.current.delete(shift.id);
       setCalendarAddingShiftId('');
     }
-  };
-
-  const handleApplyCalendarBackground = async () => {
-    if (calendarColorSyncing || calendarAddLockRef.current.size) return;
-
-    setCalendarColorSyncing(true);
-
-    const calendarRegistry = readCalendarRegistry();
-    const savedEventIds = [...shifts, ...archivedShifts, ...calendarRegistry]
-      .map((item) => String(item?.googleCalendarEventId || '').trim())
-      .filter(Boolean);
-    let discoveredEventIds = [];
-    let discoveryFailure = '';
-
-    try {
-      await ensureCscGoogleCalendarLabel();
-    } catch (error) {
-      console.error('Failed to prepare the CSC Google Calendar background:', error);
-      setSaveMessage(
-        `Could not prepare the CSC Calendar background: ${
-          error?.message || 'Google Calendar label setup failed.'
-        }`
-      );
-      setTimeout(() => setSaveMessage(''), 8000);
-      setCalendarColorSyncing(false);
-      return;
-    }
-
-    try {
-      discoveredEventIds = await findCscGoogleCalendarEventIds();
-    } catch (error) {
-      console.error('Failed to search Google Calendar for CSC events:', error);
-      discoveryFailure = error?.message || 'Google Calendar event search failed.';
-    }
-
-    const linkedEventIds = Array.from(
-      new Set([...savedEventIds, ...discoveredEventIds])
-    );
-
-    if (!linkedEventIds.length) {
-      setSaveMessage(
-        discoveryFailure
-          ? `Could not search Google Calendar for CSC shifts: ${discoveryFailure}`
-          : 'No CSC Shift events were found in Google Calendar.'
-      );
-      setTimeout(() => setSaveMessage(''), discoveryFailure ? 8000 : 4500);
-      setCalendarColorSyncing(false);
-      return;
-    }
-
-    let updatedCount = 0;
-    const failures = [];
-
-    for (const eventId of linkedEventIds) {
-      try {
-        await updateGoogleCalendarEvent(eventId, {
-          eventLabelId: CSC_GOOGLE_CALENDAR_LABEL_ID,
-        });
-        updatedCount += 1;
-      } catch (error) {
-        console.error('Failed to apply the CSC Google Calendar background:', error);
-        failures.push(error?.message || 'Unknown Google Calendar error');
-      }
-    }
-
-    const successText = updatedCount
-      ? `Applied the dark yellow background to ${updatedCount} CSC Google Calendar event${updatedCount === 1 ? '' : 's'}.`
-      : 'No CSC Google Calendar events were updated.';
-    const failureText = failures.length
-      ? ` ${failures.length} event${failures.length === 1 ? '' : 's'} could not be updated.`
-      : '';
-    const discoveryWarning = discoveryFailure
-      ? ` Calendar search warning: ${discoveryFailure}`
-      : '';
-
-    setSaveMessage(`${successText}${failureText}${discoveryWarning}`);
-    setTimeout(
-      () => setSaveMessage(''),
-      failures.length || discoveryFailure ? 8000 : 4500
-    );
-    setCalendarColorSyncing(false);
   };
 
   const handlePlanOrOpenRide = (shift) => {
@@ -5413,7 +5277,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           ref={shiftBrowserRef}
           className="csc-shift-browser min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"
         >
-          <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h2 className="text-xl font-extrabold text-slate-950">Scheduled Shifts</h2>
               <p className="text-sm text-slate-600">
@@ -5421,18 +5285,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </p>
             </div>
 
-            <div className="grid w-full grid-cols-4 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
-              <button
-                type="button"
-                onClick={handleApplyCalendarBackground}
-                disabled={calendarColorSyncing}
-                title="Apply a dark yellow background to all CSC Google Calendar events"
-                aria-label="Apply a dark yellow background to all CSC Google Calendar events"
-                className="col-span-4 inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg bg-yellow-600 px-3 py-2 text-center text-xs font-extrabold leading-tight text-slate-950 shadow-sm hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-70 sm:col-auto sm:h-10 sm:shrink-0 sm:text-sm"
-              >
-                <Palette className="h-4 w-4 shrink-0" />
-                <span>{calendarColorSyncing ? 'Applying Background...' : 'Apply Calendar Background'}</span>
-              </button>
+            <div className="grid w-full grid-cols-6 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end sm:gap-2">
               <button
                 type="button"
                 onClick={handleToggleShiftListLength}
@@ -5452,14 +5305,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     : 'All matching shifts are already visible'
                 }
                 aria-expanded={allShiftRowsVisible}
-                aria-hidden={filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT}
-                className={`col-span-2 inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg bg-black px-2 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 sm:col-auto sm:w-40 sm:shrink-0 sm:px-3 sm:text-sm ${
-                  filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT ? 'invisible pointer-events-none' : ''
-                }`}
+                className="col-span-2 inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-lg bg-black px-2 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-default disabled:opacity-50 sm:col-auto sm:h-10 sm:w-40 sm:shrink-0 sm:gap-2 sm:px-3 sm:text-sm"
               >
                 <ListChecks className="h-4 w-4 shrink-0" />
                 <span className="truncate">
-                  {allShiftRowsVisible ? `Collapse to ${DEFAULT_VISIBLE_SHIFT_COUNT}` : `Show All ${filteredShifts.length}`}
+                  {filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT
+                    ? `All ${filteredShifts.length}`
+                    : allShiftRowsVisible
+                      ? `Show ${DEFAULT_VISIBLE_SHIFT_COUNT}`
+                      : `Show All ${filteredShifts.length}`}
                 </span>
               </button>
               <button
@@ -5467,10 +5321,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={() => setShowArchiveDrawer(true)}
                 title={`Archive Drawer (${archivedShifts.length})`}
                 aria-label={`Open archive drawer with ${archivedShifts.length} archived CSC shift${archivedShifts.length === 1 ? '' : 's'}`}
-                className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg bg-violet-700 text-white shadow-sm hover:bg-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-400 focus:ring-offset-2"
+                className="relative inline-flex h-9 w-full items-center justify-center rounded-lg bg-orange-700 text-white shadow-sm hover:bg-orange-800 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 sm:h-10 sm:w-10"
               >
                 <Archive className="h-5 w-5" />
-                <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-400 px-1 text-[11px] font-black leading-none text-white">
+                <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-400 px-1 text-[11px] font-black leading-none text-white">
                   {archivedShifts.length}
                 </span>
               </button>
@@ -5484,8 +5338,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 title={showActiveOnly ? 'Show All' : 'Show Active'}
                 aria-label={showActiveOnly ? 'Show all CSC shifts' : 'Show only active CSC shifts'}
                 aria-pressed={showActiveOnly}
-                className={`inline-flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                  showActiveOnly ? 'bg-blue-700 hover:bg-blue-800 focus:ring-blue-400' : 'bg-slate-600 hover:bg-slate-700 focus:ring-slate-400'
+                className={`inline-flex h-9 w-full items-center justify-center rounded-lg text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 sm:h-10 sm:w-10 ${
+                  showActiveOnly ? 'bg-emerald-700 hover:bg-emerald-800 focus:ring-emerald-400' : 'bg-slate-600 hover:bg-slate-700 focus:ring-slate-400'
                 }`}
               >
                 <Check className="h-5 w-5" />
@@ -5495,7 +5349,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={() => setIsShiftTableCollapsed(true)}
                 title="Collapse All"
                 aria-label="Collapse CSC shifts table"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-600 text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+                className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-slate-600 text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 sm:h-10 sm:w-10"
               >
                 <ChevronDown className="h-5 w-5" />
               </button>
@@ -5504,7 +5358,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={handleExpandAllShifts}
                 title="Expand All"
                 aria-label={`Expand all ${filteredShifts.length} CSC shifts`}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-600 text-white shadow-sm hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+                className="inline-flex h-9 w-full items-center justify-center rounded-lg bg-cyan-700 text-white shadow-sm hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 sm:h-10 sm:w-10"
               >
                 <ChevronRight className="h-5 w-5" />
               </button>
@@ -5513,32 +5367,32 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={handleExpandAllActiveShifts}
                 title={`Expand all ${activeShiftCount} active CSC shifts`}
                 aria-label={`Expand all ${activeShiftCount} active CSC shifts`}
-                className="rounded-full bg-blue-700 px-3 py-2 text-xs font-extrabold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+                className="col-span-3 inline-flex h-8 items-center justify-center rounded-lg bg-blue-700 px-2 text-xs font-extrabold text-white shadow-sm transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 sm:col-auto sm:h-10 sm:px-3"
               >
                 Active {activeShiftCount}
               </button>
-              <div className="col-span-2 inline-flex min-w-0 justify-center rounded-full bg-slate-100 px-2 py-2 text-center text-[11px] font-extrabold tabular-nums text-slate-700 sm:col-auto sm:w-32 sm:px-3 sm:text-xs">
+              <div className="col-span-3 inline-flex h-8 min-w-0 items-center justify-center rounded-lg bg-slate-100 px-2 text-center text-[11px] font-extrabold tabular-nums text-slate-700 sm:col-auto sm:h-10 sm:w-32 sm:px-3 sm:text-xs">
                 Showing {visibleShiftCount} of {filteredShifts.length}
               </div>
             </div>
           </div>
 
-          <div className="csc-shift-filter-grid mb-4 flex flex-wrap gap-2">
+          <div className="csc-shift-filter-grid mb-3 flex flex-wrap gap-2">
             <div ref={venueFilterRef} className="csc-shift-filter-venue relative">
               <button
                 type="button"
                 onClick={() => setShowVenueFilter((current) => !current)}
                 aria-haspopup="true"
                 aria-expanded={showVenueFilter}
-                className="csc-shift-filter-control flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-blue-700 bg-blue-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-blue-800 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                className="csc-shift-filter-control flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-teal-700 bg-teal-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-teal-800 focus:border-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-300"
               >
                 <span className="truncate">{venueFilterLabel}</span>
                 <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showVenueFilter ? 'rotate-180' : ''}`} />
               </button>
 
               {showVenueFilter ? (
-                <div className="absolute left-0 top-full z-50 mt-1 w-[20rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-violet-200 bg-white shadow-xl">
-                  <label className="flex cursor-pointer items-center gap-3 border-b border-violet-100 bg-violet-50 px-3 py-2.5 font-extrabold text-violet-950 hover:bg-violet-100">
+                <div className="absolute left-0 top-full z-50 mt-1 w-[20rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-teal-200 bg-white shadow-xl">
+                  <label className="flex cursor-pointer items-center gap-3 border-b border-teal-100 bg-teal-50 px-3 py-2.5 font-extrabold text-teal-950 hover:bg-teal-100">
                     <input
                       ref={(input) => {
                         if (input) input.indeterminate = someVenuesSelected;
@@ -5546,7 +5400,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       type="checkbox"
                       checked={allVenuesSelected}
                       onChange={(event) => setExcludedVenues(event.target.checked ? [] : venueNames)}
-                      className="h-4 w-4 rounded border-violet-300 text-violet-700 focus:ring-violet-500"
+                      className="h-4 w-4 rounded border-teal-300 text-teal-700 focus:ring-teal-500"
                     />
                     <span>All venues</span>
                   </label>
@@ -5557,14 +5411,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       return (
                         <div
                           key={venue}
-                          className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-violet-950 hover:bg-violet-50"
+                          className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-teal-950 hover:bg-teal-50"
                         >
                           <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-0.5">
                             <input
                               type="checkbox"
                               checked={!excludedVenueSet.has(venue)}
                               onChange={() => toggleVenue(venue)}
-                              className="h-4 w-4 shrink-0 rounded border-violet-300 text-violet-700 focus:ring-violet-500"
+                              className="h-4 w-4 shrink-0 rounded border-teal-300 text-teal-700 focus:ring-teal-500"
                             />
                             <span className="min-w-0 break-words">{venue}</span>
                           </label>
@@ -5573,7 +5427,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                               href={eventCalendarUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-violet-200 bg-white px-2 py-1 text-[11px] font-extrabold text-violet-800 no-underline shadow-sm hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-teal-200 bg-white px-2 py-1 text-[11px] font-extrabold text-teal-800 no-underline shadow-sm hover:border-teal-400 hover:bg-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-400"
                               aria-label={`Open ${venue} event calendar`}
                               title={`Open ${venue} event calendar`}
                             >
@@ -5585,12 +5439,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       );
                     })}
                   </div>
-                  <div className="flex items-center justify-between border-t border-violet-100 bg-slate-50 px-3 py-2">
+                  <div className="flex items-center justify-between border-t border-teal-100 bg-slate-50 px-3 py-2">
                     <span className="text-xs font-bold text-slate-600">{selectedVenueCount} selected</span>
                     <button
                       type="button"
                       onClick={() => setShowVenueFilter(false)}
-                      className="rounded-md bg-violet-700 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-violet-800"
+                      className="rounded-md bg-teal-700 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-teal-800"
                     >
                       Done
                     </button>
@@ -5615,7 +5469,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             <select
               value={statusFilter}
               onChange={(event) => handleStatusFilterChange(event.target.value)}
-              className="csc-shift-filter-control csc-shift-filter-status h-10 rounded-lg border border-violet-700 bg-violet-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-violet-800 focus:border-violet-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              className="csc-shift-filter-control csc-shift-filter-status h-10 rounded-lg border border-amber-700 bg-amber-700 px-3 text-sm font-bold text-white shadow-sm transition-colors hover:bg-amber-800 focus:border-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
             >
               <option value="All">All statuses</option>
               {SHIFT_STATUS_OPTIONS.map((status) => (
