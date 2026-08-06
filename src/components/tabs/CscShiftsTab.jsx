@@ -5135,6 +5135,23 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         }
 
         @media (max-width: 639px) {
+          .csc-monthly-report,
+          .csc-monthly-report *,
+          .csc-premium-print,
+          .csc-premium-print *,
+          #csc-shift-details-print,
+          #csc-shift-details-print *,
+          #csc-shift-archive-print,
+          #csc-shift-archive-print * {
+            min-width: 0;
+            overflow-wrap: anywhere;
+          }
+
+          .csc-premium-shift-row {
+            grid-template-columns: 90px minmax(0, 1fr) !important;
+            gap: 0.5rem !important;
+          }
+
           .csc-shift-browser {
             padding: 0.625rem;
             border-radius: 1rem;
@@ -5312,7 +5329,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           }
         }
       `}</style>
-      <div className="flex flex-col gap-3 bg-amber-50 py-3 sm:gap-6 sm:py-6">
+      <div className="flex min-w-0 flex-col gap-3 overflow-x-hidden bg-amber-50 py-3 sm:gap-6 sm:py-6">
         <TabPageHeader
           icon={BriefcaseBusiness}
           title="CSC Shifts"
@@ -5394,7 +5411,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
         <section
           ref={shiftBrowserRef}
-          className="csc-shift-browser scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          className="csc-shift-browser min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5"
         >
           <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
@@ -5404,14 +5421,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="grid w-full grid-cols-4 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
               <button
                 type="button"
                 onClick={handleApplyCalendarBackground}
                 disabled={calendarColorSyncing}
                 title="Apply a dark yellow background to all CSC Google Calendar events"
                 aria-label="Apply a dark yellow background to all CSC Google Calendar events"
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-yellow-600 px-3 text-sm font-extrabold text-slate-950 shadow-sm hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-70"
+                className="col-span-4 inline-flex min-h-10 min-w-0 items-center justify-center gap-2 rounded-lg bg-yellow-600 px-3 py-2 text-center text-xs font-extrabold leading-tight text-slate-950 shadow-sm hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-70 sm:col-auto sm:h-10 sm:shrink-0 sm:text-sm"
               >
                 <Palette className="h-4 w-4 shrink-0" />
                 <span>{calendarColorSyncing ? 'Applying Background...' : 'Apply Calendar Background'}</span>
@@ -5436,7 +5453,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 }
                 aria-expanded={allShiftRowsVisible}
                 aria-hidden={filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT}
-                className={`inline-flex h-10 w-40 shrink-0 items-center justify-center gap-2 rounded-lg bg-black px-3 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                className={`col-span-2 inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg bg-black px-2 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 sm:col-auto sm:w-40 sm:shrink-0 sm:px-3 sm:text-sm ${
                   filteredShifts.length <= DEFAULT_VISIBLE_SHIFT_COUNT ? 'invisible pointer-events-none' : ''
                 }`}
               >
@@ -5500,7 +5517,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               >
                 Active {activeShiftCount}
               </button>
-              <div className="inline-flex w-32 justify-center rounded-full bg-slate-100 px-3 py-2 text-xs font-extrabold tabular-nums text-slate-700">
+              <div className="col-span-2 inline-flex min-w-0 justify-center rounded-full bg-slate-100 px-2 py-2 text-center text-[11px] font-extrabold tabular-nums text-slate-700 sm:col-auto sm:w-32 sm:px-3 sm:text-xs">
                 Showing {visibleShiftCount} of {filteredShifts.length}
               </div>
             </div>
@@ -6003,7 +6020,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </>
         </section>
 
-        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <section className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="min-w-0 rounded-2xl border border-yellow-200 bg-yellow-50 p-3 text-yellow-950 shadow-sm sm:p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -6029,7 +6046,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-bold">Estimated Pay</p>
-                <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{formatCurrency(summary.estimatedPay)}</p>
+                <p className="mt-1 break-words text-xl font-extrabold sm:text-2xl">{formatCurrency(summary.estimatedPay)}</p>
                 <p className="mt-1 text-xs font-bold text-emerald-800">Paid: {formatCurrency(summary.paidAmount)}</p>
               </div>
               <DollarSign className="hidden h-8 w-8 shrink-0 opacity-80 sm:block" />
@@ -6040,7 +6057,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-bold">Still Owed</p>
-                <p className="mt-1 whitespace-nowrap text-xl font-extrabold sm:text-2xl">{formatCurrency(summary.owedAmount)}</p>
+                <p className="mt-1 break-words text-xl font-extrabold sm:text-2xl">{formatCurrency(summary.owedAmount)}</p>
                 <p className="mt-1 text-xs font-bold text-red-800">Done and unpaid only</p>
               </div>
               <CheckCircle2 className="hidden h-8 w-8 shrink-0 opacity-80 sm:block" />
@@ -6056,7 +6073,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             </p>
           </div>
 
-          <div className="grid min-w-0 grid-cols-2 gap-2 text-black sm:gap-3 xl:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-1 gap-2 text-black sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
             <div className="min-w-0 rounded-xl border border-blue-200 bg-blue-50 p-2.5 text-black sm:p-3">
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-black">This Week</p>
               <p className="mt-0.5 text-[11px] font-bold text-blue-900">
@@ -6102,8 +6119,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 <h3 className="text-sm font-extrabold">Weekly Hours</h3>
                 <span className="text-[11px] font-bold text-black">{hoursAnalytics.weekly.length} weeks</span>
               </div>
-              <div className="max-h-[198px] overflow-x-hidden overflow-y-auto">
-                <table className="w-full table-fixed text-left text-xs text-black">
+              <div className="max-h-[240px] overflow-auto sm:max-h-[198px]">
+                <table className="min-w-[500px] table-fixed text-left text-xs text-black sm:w-full sm:min-w-0">
                   <thead className="sticky top-0 bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-black">
                     <tr>
                       <th className="w-[43%] px-2 py-2">Week</th>
@@ -6165,8 +6182,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 <h3 className="text-sm font-extrabold">Monthly Hours</h3>
                 <span className="text-[11px] font-bold text-black">{hoursAnalytics.monthly.length} months</span>
               </div>
-              <div className="max-h-[198px] overflow-x-hidden overflow-y-auto">
-                <table className="w-full table-fixed text-left text-xs text-black">
+              <div className="max-h-[240px] overflow-auto sm:max-h-[198px]">
+                <table className="min-w-[500px] table-fixed text-left text-xs text-black sm:w-full sm:min-w-0">
                   <thead className="sticky top-0 bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-black">
                     <tr>
                       <th className="w-[43%] px-2 py-2">Month</th>
@@ -6203,7 +6220,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
           <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <h2 className="text-lg font-extrabold text-slate-950">Monthly Pay Summary</h2>
@@ -6212,13 +6229,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-800 shadow-sm">
+            <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+              <label className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-extrabold text-slate-800 shadow-sm sm:rounded-full sm:py-1.5">
                 <span>View month range</span>
                 <select
                   value={monthRangeMode}
                   onChange={(event) => setMonthRangeMode(event.target.value)}
-                  className="bg-transparent text-xs font-extrabold text-slate-900 outline-none"
+                  className="min-w-0 flex-1 bg-transparent text-right text-xs font-extrabold text-slate-900 outline-none sm:flex-none sm:text-left"
                   title="View month range"
                   aria-label="View month range"
                 >
@@ -6234,12 +6251,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={() => setMonthRangeMode('historical')}
                 title="Show historical all-time monthly records"
                 aria-label="Show historical all-time monthly records"
-                className="inline-flex items-center gap-1.5 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-950 px-3 py-2 text-xs font-extrabold text-white shadow-sm hover:bg-slate-800 sm:rounded-full sm:py-1.5"
               >
                 <History className="h-4 w-4" />
                 Historical All-Time
               </button>
-              <div className="text-xs font-bold text-slate-700">{monthlySummaryDateLabel}</div>
+              <div className="break-words text-center text-xs font-bold text-slate-700 sm:text-left">{monthlySummaryDateLabel}</div>
             </div>
           </div>
 
@@ -6304,8 +6321,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
+        <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+          <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 sm:p-4">
             <div className="flex items-center gap-2 font-extrabold text-slate-950">
               <Building2 className="h-4 w-4" />
               <span>{CSC_COMPANY.shortName} Torrance</span>
@@ -6339,8 +6356,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       </div>
 
         {deleteConfirm && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 px-4 py-6">
-            <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 shadow-2xl">
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-2 sm:px-4 sm:py-6">
+            <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-4 shadow-2xl sm:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h3 className="text-xl font-black text-slate-950">{deleteConfirm.title}</h3>
@@ -6377,7 +6394,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         )}
 
         {showPremiumOverlay && (
-          <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/70 px-4 py-6 print:static print:overflow-visible print:bg-white print:p-0">
+          <div className="fixed inset-0 z-[70] overflow-x-hidden overflow-y-auto bg-slate-950/70 p-2 sm:px-4 sm:py-6 print:static print:overflow-visible print:bg-white print:p-0">
             <style>{`
               @media print {
                 body * { visibility: hidden !important; }
@@ -6391,13 +6408,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 .csc-premium-shift-row { grid-template-columns: 92px 1fr !important; gap: 8px !important; padding-top: 4px !important; padding-bottom: 4px !important; font-size: 10px !important; line-height: 1.25 !important; }
               }
             `}</style>
-            <div className="csc-premium-actions mx-auto mb-5 flex w-full max-w-6xl items-center justify-between gap-3">
+            <div className="csc-premium-actions mx-auto mb-2 flex w-full max-w-6xl items-center justify-between gap-2 sm:mb-5 sm:gap-3">
               <CloseScreenButton onClick={() => setShowPremiumOverlay(false)} />
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={handlePrintPremiumView}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-6 py-3 text-sm font-extrabold text-white shadow-lg hover:bg-slate-800"
+                  className="inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-slate-950 px-3 py-2 text-xs font-extrabold text-white shadow-lg hover:bg-slate-800 sm:rounded-2xl sm:px-6 sm:py-3 sm:text-sm"
                 >
                   <Printer className="h-4 w-4" />
                   Print
@@ -6405,7 +6422,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 <button
                   type="button"
                   onClick={handleDownloadPremiumView}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-extrabold text-white shadow-lg hover:bg-emerald-700"
+                  className="inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white shadow-lg hover:bg-emerald-700 sm:rounded-2xl sm:px-6 sm:py-3 sm:text-sm"
                 >
                   <Download className="h-4 w-4" />
                   Download
@@ -6413,22 +6430,22 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               </div>
             </div>
 
-            <div className="csc-premium-print mx-auto max-w-6xl rounded-3xl bg-white px-10 py-12 font-serif text-slate-950 shadow-2xl">
+            <div className="csc-premium-print mx-auto min-w-0 max-w-6xl rounded-2xl bg-white px-3 py-5 font-serif text-slate-950 shadow-2xl sm:rounded-3xl sm:px-10 sm:py-12">
               <header className="text-center">
-                <h1 className="text-4xl font-extrabold tracking-tight text-slate-950">CSC Shifts List</h1>
+                <h1 className="text-2xl font-extrabold tracking-tight text-slate-950 sm:text-4xl">CSC Shifts List</h1>
                 <p className="mt-3 text-base font-semibold text-slate-600">
                   Structured shift schedule, generated {new Date().toISOString().slice(0, 10)}
                 </p>
-                <div className="mt-6 border-t-4 border-slate-950" />
+                <div className="mt-4 border-t-4 border-slate-950 sm:mt-6" />
               </header>
 
-              <section className="mt-8 rounded-2xl border-l-8 border-yellow-600 bg-slate-50 p-5">
+              <section className="mt-5 rounded-2xl border-l-4 border-yellow-600 bg-slate-50 p-3 sm:mt-8 sm:border-l-8 sm:p-5">
                 <h2 className="text-xl font-extrabold text-slate-950">{CSC_COMPANY.name} - {CSC_COMPANY.branch}</h2>
                 <p className="mt-2 text-sm font-semibold text-slate-700">{CSC_COMPANY.address}</p>
                 <p className="mt-1 text-sm font-semibold text-slate-700">{CSC_COMPANY.phone} | {CSC_COMPANY.website}</p>
               </section>
 
-              <section className="mt-6 grid gap-3 md:grid-cols-4">
+              <section className="mt-4 grid grid-cols-2 gap-2 sm:mt-6 sm:gap-3 md:grid-cols-4">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-2xl font-extrabold">{summary.totalShifts}</p>
                   <p className="mt-1 text-xs font-extrabold uppercase tracking-wide text-slate-500">Shifts</p>
@@ -6454,8 +6471,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   </div>
                 ) : (
                   filteredShifts.map((shift) => (
-                    <article key={shift.id} className="csc-premium-shift-card break-inside-avoid rounded-2xl border border-slate-200 bg-white p-5 shadow-sm print:p-3 print:shadow-none">
-                      <div className="grid grid-cols-[18px_1fr_auto] items-start gap-4">
+                    <article key={shift.id} className="csc-premium-shift-card min-w-0 break-inside-avoid rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5 print:p-3 print:shadow-none">
+                      <div className="grid min-w-0 grid-cols-[18px_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[18px_minmax(0,1fr)_auto] sm:gap-4">
                         <div className="mt-1 h-4 w-4 border-2 border-slate-950" />
                         <div>
                           <h3 className="csc-premium-shift-title text-xl font-extrabold text-slate-950">{shift.venue || 'CSC Shift'}</h3>
@@ -6464,13 +6481,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           {shift.shiftName ? <p className="csc-premium-shift-meta mt-1 text-xs font-semibold text-slate-500">Shift Name: {shift.shiftName}</p> : null}
                           {shift.roleName ? <p className="csc-premium-shift-meta mt-1 text-xs font-semibold text-slate-500">Role Name: {shift.roleName}</p> : null}
                         </div>
-                        <div className="rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs font-extrabold text-yellow-900">
+                        <div className="col-start-2 w-fit rounded-full border border-yellow-200 bg-yellow-50 px-3 py-1 text-xs font-extrabold text-yellow-900 sm:col-start-auto">
                           {shift.shiftStatus}
                         </div>
                       </div>
 
                       <div className="mt-4 divide-y divide-slate-200 text-sm">
-                        <div className="csc-premium-shift-row grid grid-cols-[135px_1fr] gap-4 py-2">
+                        <div className="csc-premium-shift-row grid min-w-0 grid-cols-[90px_minmax(0,1fr)] gap-2 py-2 sm:grid-cols-[135px_minmax(0,1fr)] sm:gap-4">
                           <div className="font-extrabold text-slate-700">Start</div>
                           <div>{formatDate(shift.startDate)} {formatTime(shift.startTime)}</div>
                         </div>
@@ -6546,14 +6563,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
         {selectedWorkedWeek && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-2 sm:p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-0 sm:p-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="worked-week-title"
           >
             <div
               id="csc-worked-week-print"
-              className="flex max-h-[calc(100dvh-1rem)] min-w-0 w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[90vh]"
+              className="flex h-[100dvh] min-w-0 w-full max-w-5xl flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:rounded-2xl"
             >
               <div className="flex min-w-0 flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5 sm:py-4">
                 <div className="min-w-0">
@@ -6687,38 +6704,39 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         )}
 
         {selectedPaidMonth && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-3">
+          <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-slate-950/50 p-0 sm:p-3">
             <div
               id="csc-monthly-shifts-print"
-              className="flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              className="flex h-[100dvh] min-w-0 w-full max-w-7xl flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-full sm:rounded-2xl"
             >
-              <div className="csc-no-print flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-950">Monthly CSC Work Report</h2>
+              <div className="csc-no-print flex flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-extrabold text-slate-950 sm:text-xl">Monthly CSC Work Report</h2>
                   <p className="mt-1 text-sm text-slate-600">
                     {selectedPaidMonth.label}, monthly totals and Saturday-through-Friday weekly breakdowns.
                   </p>
                 </div>
-                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                <div className="csc-no-print flex w-full flex-shrink-0 items-center gap-2 sm:w-auto">
                   <button
                     type="button"
                     onClick={() => handlePrintSection('csc-monthly-shifts-print', `CSC Shifts - ${selectedPaidMonth.label}`)}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    className="inline-flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 sm:h-11 sm:flex-none sm:px-4"
                     aria-label={`Print CSC shifts for ${selectedPaidMonth.label}`}
                     title={`Print CSC shifts for ${selectedPaidMonth.label}`}
                   >
                     <Printer className="h-4 w-4" />
-                    Print Monthly Report
+                    <span className="sm:hidden">Print Report</span>
+                    <span className="hidden sm:inline">Print Monthly Report</span>
                   </button>
                   <CloseScreenButton onClick={() => setSelectedPaidMonthKey('')} />
                 </div>
               </div>
 
-              <div className="csc-print-scroll flex-1 overflow-y-auto bg-slate-100 p-4 sm:p-6">
-                <div className="csc-monthly-report mx-auto max-w-6xl rounded-2xl border border-slate-200 bg-white px-5 py-6 shadow-sm sm:px-8 sm:py-8">
+              <div className="csc-print-scroll min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-slate-100 p-0 sm:p-6">
+                <div className="csc-monthly-report mx-auto min-w-0 max-w-6xl rounded-none border-0 bg-white px-3 py-4 shadow-none sm:rounded-2xl sm:border sm:border-slate-200 sm:px-8 sm:py-8 sm:shadow-sm">
                   <header className="border-b-4 border-slate-950 pb-5 text-center">
                     <p className="text-xs font-extrabold uppercase tracking-[0.22em] text-amber-700">Contemporary Services Corporation</p>
-                    <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Monthly Work and Pay Report</h1>
+                    <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Monthly Work and Pay Report</h1>
                     <p className="mt-2 text-xl font-extrabold text-slate-700">{selectedPaidMonth.label}</p>
                     <p className="mt-2 text-xs font-semibold text-slate-500">
                       Generated {formatDate(toLocalDateKey(new Date()))}
@@ -6772,7 +6790,48 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       </h2>
                     </div>
                     {selectedPaidMonth.actualPaychecks.length ? (
-                      <div className="overflow-x-auto">
+                      <>
+                      <div className="grid gap-2 p-3 sm:hidden">
+                        {selectedPaidMonth.actualPaychecks.map((paycheck, paycheckIndex) => (
+                          <article
+                            key={`mobile-${getPaycheckIdentity(paycheck, paycheckIndex)}`}
+                            className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+                          >
+                            <div className="flex min-w-0 items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Pay Period</p>
+                                <p className="mt-0.5 break-words text-sm font-extrabold text-slate-900">
+                                  {getPaycheckPeriodDisplay(paycheck)}
+                                </p>
+                              </div>
+                              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-extrabold text-slate-700">
+                                {paycheck.checkNumber ? `#${paycheck.checkNumber}` : formatShortDate(paycheck.checkDate) || 'Saved'}
+                              </span>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <div className="rounded-lg bg-violet-50 p-2">
+                                <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Actual Gross</p>
+                                <p className="mt-0.5 text-sm font-black text-violet-900">{formatCurrency(getActualPaycheckGross(paycheck))}</p>
+                              </div>
+                              <div className="rounded-lg bg-emerald-50 p-2">
+                                <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Actual Net</p>
+                                <p className="mt-0.5 text-sm font-black text-emerald-900">{formatCurrency(getActualPaycheckNet(paycheck))}</p>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                        <div className="grid grid-cols-2 gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                          <div>
+                            <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Gross Total</p>
+                            <p className="mt-0.5 text-sm font-black text-violet-900">{formatCurrency(selectedPaidMonth.actualGrossPaid)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Net Total</p>
+                            <p className="mt-0.5 text-sm font-black text-emerald-900">{formatCurrency(selectedPaidMonth.actualNetReceived)}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="hidden overflow-x-auto sm:block print:block">
                         <table className="csc-paycheck-reconciliation w-full border-collapse text-left text-[11px] leading-tight">
                           <thead className="bg-white text-[9px] font-extrabold uppercase tracking-wide text-slate-600">
                             <tr>
@@ -6813,6 +6872,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                           </tfoot>
                         </table>
                       </div>
+                      </>
                     ) : (
                       <p className="px-4 py-3 text-xs font-semibold text-slate-600">
                         No saved paycheck has a pay period matching a completed shift in this report.
@@ -6853,14 +6913,106 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                 <p className="font-bold uppercase text-slate-300">Actual Gross</p>
                                 <p className="mt-0.5 text-sm font-black text-violet-300">{formatCurrency(week.actualGrossPaid)}</p>
                               </div>
-                              <div>
+                              <div className="col-span-2 sm:col-span-1">
                                 <p className="font-bold uppercase text-slate-300">Actual Net</p>
                                 <p className="mt-0.5 text-sm font-black text-emerald-300">{formatCurrency(week.actualNetReceived)}</p>
                               </div>
                             </div>
                           </div>
 
-                          <div className="overflow-x-auto">
+                          <div className="grid gap-2 bg-slate-50 p-2.5 sm:hidden print:hidden">
+                            {week.shifts.map((shift) => {
+                              const expectedPay = shift.shiftStatus === 'Cancelled' ? 0 : getEstimatedPay(shift);
+                              const matchingPaychecks = getPaychecksMatchingShift(shift, paychecks).filter(isCscPaycheck);
+
+                              return (
+                                <article
+                                  key={`mobile-${shift.recordSource}-${shift.id}`}
+                                  className={`min-w-0 rounded-xl border p-3 shadow-sm ${
+                                    shift.shiftStatus === 'Cancelled'
+                                      ? 'border-slate-200 bg-slate-100 text-slate-500'
+                                      : 'border-slate-200 bg-white text-slate-800'
+                                  }`}
+                                >
+                                  <div className="flex min-w-0 items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="break-words text-sm font-black text-slate-950">
+                                        {shift.event || shift.jobName || 'Event not entered'}
+                                      </p>
+                                      <p className="mt-0.5 break-words text-xs font-bold text-slate-600">
+                                        {shift.venue || 'Venue not entered'}
+                                      </p>
+                                    </div>
+                                    <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-extrabold uppercase ${
+                                      shift.shiftStatus === 'Cancelled'
+                                        ? 'bg-slate-200 text-slate-700'
+                                        : shift.shiftStatus === 'Done'
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : 'bg-blue-100 text-blue-800'
+                                    }`}>
+                                      {shift.shiftStatus}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                                    <div className="col-span-2 rounded-lg bg-slate-50 p-2">
+                                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Date and Time</p>
+                                      <p className="mt-0.5 font-extrabold text-slate-900">
+                                        {formatShortDate(shift.startDate)}, {formatTime(shift.startTime)} - {formatTime(shift.finishTime)}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Shift Name</p>
+                                      <p className="mt-0.5 break-words font-bold">{shift.shiftName || 'Not entered'}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Hours</p>
+                                      <p className="mt-0.5 font-bold">{shift.shiftStatus === 'Cancelled' ? '0.0' : getShiftHours(shift).toFixed(1)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Expected</p>
+                                      <p className="mt-0.5 font-black text-blue-800">{formatCurrency(expectedPay)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Paycheck</p>
+                                      <p className="mt-0.5 font-black text-emerald-800">
+                                        {matchingPaychecks.length
+                                          ? matchingPaychecks.map((paycheck) => paycheck.checkNumber ? `#${paycheck.checkNumber}` : 'Saved').join(', ')
+                                          : 'Not saved'}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className={`mt-3 border-t pt-2 text-[10px] font-extrabold uppercase ${
+                                    shift.paidStatus === 'Paid' ? 'text-emerald-700' : 'text-red-700'
+                                  }`}>
+                                    {getShiftPaymentStatusLabel(shift)}
+                                  </div>
+                                </article>
+                              );
+                            })}
+
+                            <div className="grid grid-cols-2 gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-slate-900">
+                              <div>
+                                <p className="text-[9px] font-extrabold uppercase text-slate-500">Week Hours</p>
+                                <p className="mt-0.5 font-black">{week.hours.toFixed(1)}</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] font-extrabold uppercase text-slate-500">Expected Pay</p>
+                                <p className="mt-0.5 font-black">{formatCurrency(week.expectedPay)}</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] font-extrabold uppercase text-slate-500">Paychecks</p>
+                                <p className="mt-0.5 font-black text-emerald-800">{week.actualPaychecks.length} saved</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] font-extrabold uppercase text-slate-500">Worked</p>
+                                <p className="mt-0.5 font-black">{week.workedCount} shifts</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="hidden overflow-x-auto sm:block print:block">
                             <table className="w-full table-fixed border-collapse text-left text-[11px] leading-tight">
                               <colgroup>
                                 <col style={{ width: '14%' }} />
@@ -6947,21 +7099,21 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         )}
 
         {selectedDetailShift && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4">
+          <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-slate-950/50 p-0 sm:p-4">
             <div
               id="csc-shift-details-print"
-              className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              className="flex h-[100dvh] min-w-0 w-full max-w-3xl flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-full sm:rounded-2xl"
             >
-              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-950">CSC Shift Details</h2>
+              <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-extrabold text-slate-950 sm:text-xl">CSC Shift Details</h2>
                   <p className="text-sm text-slate-600">Full shift record with restore, edit, archive, and delete actions.</p>
                 </div>
-                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                <div className="csc-no-print flex w-full flex-shrink-0 items-center gap-2 sm:w-auto">
                   <button
                     type="button"
                     onClick={() => handlePrintSection('csc-shift-details-print', `CSC Shift Details - ${selectedDetailShift.venue || 'Shift'}`)}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    className="inline-flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 sm:h-11 sm:flex-none"
                     aria-label="Print CSC shift details"
                     title="Print CSC shift details"
                   >
@@ -6972,11 +7124,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </div>
               </div>
 
-              <div className="csc-print-scroll flex-1 overflow-y-auto p-5">
-                <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-5">
+              <div className="csc-print-scroll min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
+                <div className="min-w-0 rounded-2xl border border-yellow-200 bg-yellow-50 p-3 sm:p-5">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
-                      <h3 className="text-2xl font-extrabold text-slate-950">{selectedDetailShift.venue || 'CSC Shift'}</h3>
+                      <h3 className="break-words text-xl font-extrabold text-slate-950 sm:text-2xl">{selectedDetailShift.venue || 'CSC Shift'}</h3>
                       <p className="mt-1 font-bold text-slate-800">{selectedDetailShift.event || 'Event not entered'}</p>
                       {shouldShowDistinctJobName(selectedDetailShift) ? <p className="mt-1 text-sm text-slate-600">{selectedDetailShift.jobName}</p> : null}
                       {selectedDetailShift.shiftName ? <p className="mt-1 text-sm text-slate-600">Shift Name: {selectedDetailShift.shiftName}</p> : null}
@@ -7043,13 +7195,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </div>
               </div>
 
-              <div className="csc-no-print border-t border-slate-200 bg-slate-50 p-4">
+              <div className="csc-no-print border-t border-slate-200 bg-slate-50 p-3 sm:p-4">
                 {selectedDetailShiftIsArchived ? (
                   <div className="grid gap-3">
                     {selectedDetailShift.shiftStatus !== 'Cancelled'
                       ? renderArchivedPaidControls(selectedDetailShift)
                       : null}
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
                     <button
                       type="button"
                       onClick={() => handleRestoreArchivedShift(selectedDetailShift.id)}
@@ -7081,21 +7233,21 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         )}
 
         {showArchiveDrawer && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4">
+          <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-slate-950/50 p-0 sm:p-4">
             <div
               id="csc-shift-archive-print"
-              className="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              className="flex h-[100dvh] min-w-0 w-full max-w-5xl flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-full sm:rounded-2xl"
             >
-              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-950">CSC Shift Archive</h2>
+              <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-extrabold text-slate-950 sm:text-xl">CSC Shift Archive</h2>
                   <p className="text-sm text-slate-600">Restore archived shifts or permanently delete old records.</p>
                 </div>
-                <div className="csc-no-print flex flex-shrink-0 items-center gap-2">
+                <div className="csc-no-print flex w-full flex-shrink-0 items-center gap-2 sm:w-auto">
                   <button
                     type="button"
                     onClick={() => handlePrintSection('csc-shift-archive-print', 'CSC Shift Archive')}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800"
+                    className="inline-flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-slate-800 sm:h-11 sm:flex-none"
                     aria-label="Print CSC shift archive"
                     title="Print CSC shift archive"
                   >
@@ -7106,7 +7258,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </div>
               </div>
 
-              <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+              <div className="border-b border-slate-200 bg-slate-50 px-3 py-3 sm:px-5 sm:py-4">
                 <div className="csc-no-print grid gap-3 lg:grid-cols-[1fr_220px_auto]">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -7146,7 +7298,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 </p>
               </div>
 
-              <div className="csc-print-scroll flex-1 overflow-y-auto p-5">
+              <div className="csc-print-scroll min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
                 {filteredArchivedShifts.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-600">
                     No archived CSC shifts match the current filters.
@@ -7154,7 +7306,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 ) : (
                   <div className="grid gap-4 lg:grid-cols-2">
                     {filteredArchivedShifts.map((shift) => (
-                      <article key={shift.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <article key={shift.id} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <h3 className="text-lg font-extrabold text-slate-950">{shift.venue || 'CSC Shift'}</h3>
@@ -7169,15 +7321,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         </div>
 
                         <div className="mt-4 grid gap-2 text-sm text-slate-700">
-                          <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[78px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[110px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Start</span>
                             <span>{formatDate(shift.startDate)} {formatTime(shift.startTime)}</span>
                           </div>
-                          <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[78px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[110px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Finish</span>
                             <span>{formatDate(shift.finishDate)} {formatTime(shift.finishTime)}</span>
                           </div>
-                          <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[78px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[110px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Pay</span>
                             <span>
                               {formatCurrency(getEstimatedPay(shift))} - {getShiftPaymentStatusLabel(shift)}
@@ -7190,13 +7342,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                               {renderArchivedPaidControls(shift, true)}
                             </div>
                           ) : null}
-                          <div className="grid grid-cols-[110px_1fr] gap-3 border-t border-slate-100 pt-2">
+                          <div className="grid min-w-0 grid-cols-[78px_minmax(0,1fr)] gap-2 border-t border-slate-100 pt-2 sm:grid-cols-[110px_minmax(0,1fr)] sm:gap-3">
                             <span className="font-extrabold text-slate-950">Archived</span>
                             <span>{shift.archivedAt ? new Date(shift.archivedAt).toLocaleString() : 'Date not saved'}</span>
                           </div>
                         </div>
 
-                        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                        <div className="mt-4 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
                           <button
                             type="button"
                             onClick={() => handleOpenShiftDetails(shift)}
@@ -7234,17 +7386,17 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         )}
 
         {showScanDrawer && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4">
-            <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-950">Scan CSC Email</h2>
+          <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-slate-950/50 p-0 sm:p-4">
+            <div className="flex h-[100dvh] min-w-0 w-full max-w-3xl flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-full sm:rounded-2xl">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-3 sm:px-5 sm:py-4">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-extrabold text-slate-950 sm:text-xl">Scan CSC Email</h2>
                   <p className="text-sm text-slate-600">Paste a CSC schedule update, acceptance, courtesy reminder, or Kia Forum schedule email. The scanner fills known fields and saves extra details to notes.</p>
                 </div>
                 <CloseScreenButton onClick={() => setShowScanDrawer(false)} />
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5">
+              <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
                   CSC email text
                   <textarea
@@ -7255,11 +7407,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     }}
                     rows={9}
                     placeholder={'Courtesy Shift Reminder & Important Info\n\nSchedule for : David Gregory Hallstrom II\nVenue: SoFi Stadium and Hollywood Park Shift No: 2 Shift: Vertical - Elevator and Escalator - TC Scheduled Start Time: 6/21/2026 5:30:00 AM Scheduled Finish: 6/21/2026 4:30:00 PM\n\nDNS ROSALIA N1\tThe Forum\t1ST RAMPS\tSecurity Guard\t6/29/2026 4:00:00 PM\t6/29/2026 11:30:00 PM\tENTRY POINT ADDRESS: 3600 Pincay Dr, Inglewood, CA, 90305 Parking will be at SoFi lot D.\tSIGN-IN IS NEXT TO THE BIG WHITE HOUSE ON THE SOUTHEAST CORNER OF THE PROPERTY.\tAll Black Everything.'}
-                    className="resize-y rounded-xl border border-slate-300 px-3 py-2 font-normal text-slate-950 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
+                    className="min-w-0 w-full resize-y rounded-xl border border-slate-300 px-3 py-2 font-normal text-slate-950 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-200"
                   />
                 </label>
 
-                <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
                   <button
                     type="button"
                     onClick={handleScanAcceptanceEmail}
@@ -7281,8 +7433,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
                 {scannedShifts.length > 0 && (
                   <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-slate-900">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <h3 className="text-lg font-extrabold text-slate-950">Scanned Shift Preview</h3>
+                    <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+                      <h3 className="min-w-0 text-base font-extrabold text-slate-950 sm:text-lg">Scanned Shift Preview</h3>
                       <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-extrabold text-amber-800">
                         {scannedShifts.length} shift{scannedShifts.length === 1 ? '' : 's'}
                       </span>
@@ -7316,7 +7468,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+              <div className="grid grid-cols-2 gap-2 border-t border-slate-200 px-3 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-end sm:gap-3 sm:px-5 sm:py-4">
                 <button
                   type="button"
                   onClick={() => setShowScanDrawer(false)}
@@ -7338,14 +7490,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         )}
 
         {showAddDrawer && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-4 sm:items-center">
-            <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-950">{editingShiftId ? 'Edit CSC Shift' : 'Add CSC Shift'}</h2>
+          <div className="fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-slate-950/40 p-0 sm:items-center sm:p-4">
+            <div className="h-[100dvh] min-w-0 w-full max-w-5xl overflow-x-hidden overflow-y-auto rounded-none bg-white p-3 shadow-2xl sm:max-h-[92vh] sm:h-auto sm:rounded-2xl sm:p-5">
+              <div className="mb-4 flex items-start justify-between gap-3 sm:gap-4">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-extrabold text-slate-950 sm:text-xl">{editingShiftId ? 'Edit CSC Shift' : 'Add CSC Shift'}</h2>
                   <p className="text-sm text-slate-600">Create a new CSC shift and save it to this browser.</p>
                 </div>
-                <div className="flex flex-shrink-0 items-center gap-2">
+                <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
                   {!editingShiftId && (
                     <button
                       type="button"
@@ -7355,11 +7507,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                         setNewShift(createBlankShift());
                         setShowScanDrawer(true);
                       }}
-                      className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-2.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-700 sm:gap-2 sm:px-4 sm:text-sm"
                       title="Scan CSC shift email"
                     >
                       <StickyNote className="h-4 w-4" />
-                      Scan Email
+                      <span className="hidden min-[360px]:inline">Scan Email</span>
                     </button>
                   )}
                   <CloseScreenButton onClick={() => { setShowAddDrawer(false); setEditingShiftId(null); setNewShift(createBlankShift()); }} />
