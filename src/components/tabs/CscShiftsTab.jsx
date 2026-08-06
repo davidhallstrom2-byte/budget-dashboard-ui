@@ -2498,6 +2498,19 @@ const getActualPaycheckGross = (paycheck = {}) => {
 const getActualPaycheckNet = (paycheck = {}) =>
   parsePaycheckMoney(paycheck.netPay || paycheck.checkAmount);
 
+const roundPaycheckCurrency = (value = 0) =>
+  Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+const getReportPaycheckGross = (paycheck = {}) =>
+  Number.isFinite(paycheck.reportActualGross)
+    ? paycheck.reportActualGross
+    : getActualPaycheckGross(paycheck);
+
+const getReportPaycheckNet = (paycheck = {}) =>
+  Number.isFinite(paycheck.reportActualNet)
+    ? paycheck.reportActualNet
+    : getActualPaycheckNet(paycheck);
+
 const normalizePaycheckDate = (value = '') => {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -2641,6 +2654,175 @@ const getPaycheckWorkDates = (paycheck = {}) => {
   });
 
   return workDates;
+};
+
+const getPaycheckEarningsLineDate = (line = {}, paycheck = {}) => {
+  const savedDate = normalizePaycheckDate(
+    line?.workDate || line?.dateWorked || line?.date || ''
+  );
+  if (savedDate) return savedDate;
+
+  const workLine = String(line?.workLine || '');
+  const explicitDateMatch = workLine.match(
+    /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})|(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})/
+  );
+  if (explicitDateMatch) {
+    const explicitDate = explicitDateMatch[1]
+      ? `${explicitDateMatch[1]}-${explicitDateMatch[2].padStart(2, '0')}-${explicitDateMatch[3].padStart(2, '0')}`
+      : `${explicitDateMatch[6]}-${explicitDateMatch[4].padStart(2, '0')}-${explicitDateMatch[5].padStart(2, '0')}`;
+    return parseLocalDate(explicitDate) ? explicitDate : '';
+  }
+
+  const compactMonthDay = workLine.match(/(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/);
+  if (!compactMonthDay) return '';
+
+  const periodRange = getPaycheckPeriodRange(paycheck);
+  const checkDate = normalizePaycheckDate(paycheck.checkDate);
+  const candidateYears = Array.from(
+    new Set(
+      [periodRange?.startDate, periodRange?.endDate, checkDate]
+        .filter(Boolean)
+        .map((dateValue) => dateValue.slice(0, 4))
+    )
+  );
+
+  for (const year of candidateYears) {
+    const candidate = `${year}-${compactMonthDay[1]}-${compactMonthDay[2]}`;
+    if (!parseLocalDate(candidate)) continue;
+    if (
+      periodRange &&
+      (candidate < periodRange.startDate || candidate > periodRange.endDate)
+    ) {
+      continue;
+    }
+    return candidate;
+  }
+
+  return '';
+};
+
+const getPaycheckEarningsLineAmount = (line = {}) =>
+  parsePaycheckMoney(
+    line?.amount ||
+      line?.grossPay ||
+      line?.earningsAmount ||
+      line?.currentAmount ||
+      0
+  );
+
+const getPaycheckEarningsLineHours = (line = {}) =>
+  parsePaycheckMoney(
+    line?.hours ||
+      line?.totalHours ||
+      line?.quantity ||
+      line?.units ||
+      0
+  );
+
+const getPaycheckReportAllocation = (
+  paycheck = {},
+  reportDoneShifts = [],
+  allDoneShifts = [],
+  reportStartDate = '',
+  reportEndDate = ''
+) => {
+  const fullGross = getActualPaycheckGross(paycheck);
+  const fullNet = getActualPaycheckNet(paycheck);
+  const matchingReportShifts = reportDoneShifts.filter(
+    (shift) => getPaychecksMatchingShift(shift, [paycheck]).length > 0
+  );
+  const reportShiftDates = new Set(
+    matchingReportShifts
+      .map((shift) => normalizePaycheckDate(shift.startDate))
+      .filter(Boolean)
+  );
+  const periodRange = getPaycheckPeriodRange(paycheck);
+  const earningsLines = Array.isArray(paycheck.earningsLines)
+    ? paycheck.earningsLines
+    : [];
+  const datedLines = earningsLines
+    .map((line) => ({
+      date: getPaycheckEarningsLineDate(line, paycheck),
+      amount: getPaycheckEarningsLineAmount(line),
+      hours: getPaycheckEarningsLineHours(line),
+    }))
+    .filter((line) => line.date);
+  const selectedDatedLines = datedLines.filter((line) =>
+    reportShiftDates.has(line.date)
+  );
+  const totalDatedAmount = datedLines.reduce((sum, line) => sum + line.amount, 0);
+  const selectedDatedAmount = selectedDatedLines.reduce(
+    (sum, line) => sum + line.amount,
+    0
+  );
+  const totalDatedHours = datedLines.reduce((sum, line) => sum + line.hours, 0);
+  const selectedDatedHours = selectedDatedLines.reduce(
+    (sum, line) => sum + line.hours,
+    0
+  );
+  const allWorkDates = getPaycheckWorkDates(paycheck);
+  const selectedWorkDateCount = Array.from(allWorkDates).filter((date) =>
+    reportShiftDates.has(date)
+  ).length;
+  const paycheckTotalHours = parsePaycheckMoney(paycheck.totalHours);
+  const selectedShiftHours = matchingReportShifts.reduce(
+    (sum, shift) => sum + getShiftHours(shift),
+    0
+  );
+  const allMatchingShifts = allDoneShifts.filter(
+    (shift) => getPaychecksMatchingShift(shift, [paycheck]).length > 0
+  );
+  const selectedEstimatedPay = matchingReportShifts.reduce(
+    (sum, shift) => sum + getEstimatedPay(shift),
+    0
+  );
+  const totalEstimatedPay = allMatchingShifts.reduce(
+    (sum, shift) => sum + getEstimatedPay(shift),
+    0
+  );
+  const paycheckFallsInsideReport = Boolean(
+    periodRange &&
+      reportStartDate &&
+      reportEndDate &&
+      periodRange.startDate >= reportStartDate &&
+      periodRange.endDate <= reportEndDate
+  );
+
+  let allocationRatio = 0;
+  let allocationMethod = 'matched paycheck';
+
+  if (totalDatedAmount > 0 && selectedDatedAmount > 0) {
+    allocationRatio = selectedDatedAmount / totalDatedAmount;
+    allocationMethod = 'dated earnings lines';
+  } else if (totalDatedHours > 0 && selectedDatedHours > 0) {
+    allocationRatio = selectedDatedHours / totalDatedHours;
+    allocationMethod = 'dated earnings hours';
+  } else if (allWorkDates.size > 0 && selectedWorkDateCount > 0) {
+    allocationRatio = selectedWorkDateCount / allWorkDates.size;
+    allocationMethod = 'scanned work dates';
+  } else if (paycheckTotalHours > 0 && selectedShiftHours > 0) {
+    allocationRatio = selectedShiftHours / paycheckTotalHours;
+    allocationMethod = 'worked hours';
+  } else if (totalEstimatedPay > 0 && selectedEstimatedPay > 0) {
+    allocationRatio = selectedEstimatedPay / totalEstimatedPay;
+    allocationMethod = 'matched shift earnings';
+  } else if (paycheckFallsInsideReport) {
+    allocationRatio = 1;
+  } else if (fullGross > 0 && selectedEstimatedPay > 0) {
+    allocationRatio = selectedEstimatedPay / fullGross;
+    allocationMethod = 'selected shift estimate';
+  }
+
+  allocationRatio = Math.max(0, Math.min(1, allocationRatio));
+
+  return {
+    ...paycheck,
+    reportActualGross: roundPaycheckCurrency(fullGross * allocationRatio),
+    reportActualNet: roundPaycheckCurrency(fullNet * allocationRatio),
+    reportAllocationRatio: allocationRatio,
+    reportAllocationMethod: allocationMethod,
+    reportIsPartial: allocationRatio > 0 && allocationRatio < 0.999999,
+  };
 };
 
 const getPaycheckPeriodDisplay = (paycheck = {}) => {
@@ -4108,20 +4290,34 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     if (!selectedPaidMonthKey) return null;
 
     const monthSummary = monthlySummary.find((month) => month.monthKey === selectedPaidMonthKey);
-    const monthShifts = [
+    const allStoredShifts = [
       ...shifts.map((shift) => ({ ...shift, recordSource: 'active' })),
       ...archivedShifts.map((shift) => ({ ...shift, recordSource: 'archived' })),
-    ]
+    ];
+    const monthShifts = allStoredShifts
       .filter((shift) => getMonthKey(shift.startDate) === selectedPaidMonthKey)
       .sort((a, b) => `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`));
 
     const payableShifts = monthShifts.filter((shift) => shift.shiftStatus !== 'Cancelled');
     const doneShifts = payableShifts.filter((shift) => shift.shiftStatus === 'Done');
+    const allDoneShifts = allStoredShifts.filter((shift) => shift.shiftStatus === 'Done');
     const paidShifts = payableShifts.filter((shift) => shift.paidStatus === 'Paid');
     const owedShifts = doneShifts.filter((shift) => shift.paidStatus !== 'Paid');
     const openShifts = payableShifts.filter((shift) => !['Done', 'Cancelled'].includes(shift.shiftStatus));
     const cancelledShifts = monthShifts.filter((shift) => shift.shiftStatus === 'Cancelled');
-    const actualPaychecks = getUniquePaychecksMatchingShifts(doneShifts, paychecks);
+    const reportStartDate = `${selectedPaidMonthKey}-01`;
+    const [reportYear, reportMonth] = selectedPaidMonthKey.split('-').map(Number);
+    const reportEndDate = toLocalDateKey(new Date(reportYear, reportMonth, 0));
+    const actualPaychecks = getUniquePaychecksMatchingShifts(doneShifts, paychecks).map(
+      (paycheck) =>
+        getPaycheckReportAllocation(
+          paycheck,
+          doneShifts,
+          allDoneShifts,
+          reportStartDate,
+          reportEndDate
+        )
+    );
     const weeklyGroups = new Map();
 
     monthShifts.forEach((shift) => {
@@ -4162,9 +4358,18 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
     const weeklyBreakdown = Array.from(weeklyGroups.values())
       .map((week) => {
+        const weekDoneShifts = week.shifts.filter((shift) => shift.shiftStatus === 'Done');
         const weekPaychecks = getUniquePaychecksMatchingShifts(
-          week.shifts.filter((shift) => shift.shiftStatus === 'Done'),
+          weekDoneShifts,
           paychecks
+        ).map((paycheck) =>
+          getPaycheckReportAllocation(
+            paycheck,
+            weekDoneShifts,
+            allDoneShifts,
+            week.startDate,
+            week.endDate
+          )
         );
 
         return {
@@ -4175,11 +4380,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           ),
           actualPaychecks: weekPaychecks,
           actualGrossPaid: weekPaychecks.reduce(
-            (sum, paycheck) => sum + getActualPaycheckGross(paycheck),
+            (sum, paycheck) => sum + getReportPaycheckGross(paycheck),
             0
           ),
           actualNetReceived: weekPaychecks.reduce(
-            (sum, paycheck) => sum + getActualPaycheckNet(paycheck),
+            (sum, paycheck) => sum + getReportPaycheckNet(paycheck),
             0
           ),
         };
@@ -4203,11 +4408,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       projectedPay: payableShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
       earnedPay: doneShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
       actualGrossPaid: actualPaychecks.reduce(
-        (sum, paycheck) => sum + getActualPaycheckGross(paycheck),
+        (sum, paycheck) => sum + getReportPaycheckGross(paycheck),
         0
       ),
       actualNetReceived: actualPaychecks.reduce(
-        (sum, paycheck) => sum + getActualPaycheckNet(paycheck),
+        (sum, paycheck) => sum + getReportPaycheckNet(paycheck),
         0
       ),
       owedAmount: owedShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
@@ -6611,20 +6816,20 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                       <p className="mt-1 text-xl font-black text-slate-950">{selectedPaidMonth.workedHours.toFixed(1)}</p>
                     </div>
                     <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-blue-700">Expected Pay</p>
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-blue-700">Expected Gross Pay</p>
                       <p className="mt-1 text-xl font-black text-blue-950">{formatCurrency(selectedPaidMonth.projectedPay)}</p>
                     </div>
                     <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Actual Gross Paid</p>
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Actual Gross Pay</p>
                       <p className="mt-1 text-xl font-black text-violet-950">{formatCurrency(selectedPaidMonth.actualGrossPaid)}</p>
                     </div>
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Actual Net Received</p>
-                      <p className="mt-1 text-xl font-black text-emerald-950">{formatCurrency(selectedPaidMonth.actualNetReceived)}</p>
-                    </div>
                     <div className="rounded-xl border border-red-200 bg-red-50 p-3">
-                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-red-700">Estimated Still Owed</p>
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-red-700">Gross Still Owed</p>
                       <p className="mt-1 text-xl font-black text-red-950">{formatCurrency(selectedPaidMonth.owedAmount)}</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-900 bg-emerald-800 p-3 shadow-sm">
+                      <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-100">Actual Net Paid</p>
+                      <p className="mt-1 text-xl font-black text-white">{formatCurrency(selectedPaidMonth.actualNetReceived)}</p>
                     </div>
                   </section>
 
@@ -6657,6 +6862,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                 <p className="mt-0.5 break-words text-sm font-extrabold text-slate-900">
                                   {getPaycheckPeriodDisplay(paycheck)}
                                 </p>
+                                {paycheck.reportIsPartial ? (
+                                  <p className="mt-1 text-[9px] font-extrabold uppercase tracking-wide text-amber-700">
+                                    Selected work dates only
+                                  </p>
+                                ) : null}
                               </div>
                               <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-extrabold text-slate-700">
                                 {paycheck.checkNumber ? `#${paycheck.checkNumber}` : formatShortDate(paycheck.checkDate) || 'Saved'}
@@ -6665,25 +6875,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                             <div className="mt-3 grid grid-cols-2 gap-2">
                               <div className="rounded-lg bg-violet-50 p-2">
                                 <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Actual Gross</p>
-                                <p className="mt-0.5 text-sm font-black text-violet-900">{formatCurrency(getActualPaycheckGross(paycheck))}</p>
+                                <p className="mt-0.5 text-sm font-black text-violet-900">{formatCurrency(getReportPaycheckGross(paycheck))}</p>
                               </div>
                               <div className="rounded-lg bg-emerald-50 p-2">
                                 <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Actual Net</p>
-                                <p className="mt-0.5 text-sm font-black text-emerald-900">{formatCurrency(getActualPaycheckNet(paycheck))}</p>
+                                <p className="mt-0.5 text-sm font-black text-emerald-900">{formatCurrency(getReportPaycheckNet(paycheck))}</p>
                               </div>
                             </div>
                           </article>
                         ))}
-                        <div className="grid grid-cols-2 gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                          <div>
-                            <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-700">Gross Total</p>
-                            <p className="mt-0.5 text-sm font-black text-violet-900">{formatCurrency(selectedPaidMonth.actualGrossPaid)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Net Total</p>
-                            <p className="mt-0.5 text-sm font-black text-emerald-900">{formatCurrency(selectedPaidMonth.actualNetReceived)}</p>
-                          </div>
-                        </div>
                       </div>
                       <div className="hidden overflow-x-auto sm:block print:block">
                         <table className="csc-paycheck-reconciliation w-full border-collapse text-left text-[11px] leading-tight">
@@ -6700,30 +6900,24 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                               <tr key={getPaycheckIdentity(paycheck, paycheckIndex)}>
                                 <td className="whitespace-nowrap px-3 py-2 font-bold text-slate-800">
                                   {getPaycheckPeriodDisplay(paycheck)}
+                                  {paycheck.reportIsPartial ? (
+                                    <div className="mt-0.5 text-[8px] font-extrabold uppercase tracking-wide text-amber-700">
+                                      Selected work dates only
+                                    </div>
+                                  ) : null}
                                 </td>
                                 <td className="px-3 py-2 text-slate-700">
                                   {paycheck.checkNumber ? `#${paycheck.checkNumber}` : formatShortDate(paycheck.checkDate) || 'Saved paycheck'}
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-2 text-right font-extrabold text-violet-800">
-                                  {formatCurrency(getActualPaycheckGross(paycheck))}
+                                  {formatCurrency(getReportPaycheckGross(paycheck))}
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-2 text-right font-extrabold text-emerald-800">
-                                  {formatCurrency(getActualPaycheckNet(paycheck))}
+                                  {formatCurrency(getReportPaycheckNet(paycheck))}
                                 </td>
                               </tr>
                             ))}
                           </tbody>
-                          <tfoot className="border-t-2 border-slate-300 bg-amber-50 font-extrabold text-slate-950">
-                            <tr>
-                              <td colSpan={2} className="px-3 py-2">Actual Paycheck Total</td>
-                              <td className="whitespace-nowrap px-3 py-2 text-right text-violet-800">
-                                {formatCurrency(selectedPaidMonth.actualGrossPaid)}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-2 text-right text-emerald-800">
-                                {formatCurrency(selectedPaidMonth.actualNetReceived)}
-                              </td>
-                            </tr>
-                          </tfoot>
                         </table>
                       </div>
                       </>
@@ -6944,7 +7138,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   )}
 
                   <footer className="mt-6 border-t border-slate-300 pt-3 text-[9px] leading-relaxed text-slate-500">
-                    Estimated earned pay is calculated from completed shift hours and saved rates, including overtime and double time. Actual gross and net use each saved CSC paycheck whose pay period matches at least one completed shift in this report. Each paycheck is counted once, and paycheck totals are not assigned to individual shifts. Estimated still owed includes completed shifts not marked Paid.
+                    Estimated earned pay is calculated from completed shift hours and saved rates, including overtime and double time. Actual gross and net use saved CSC paychecks whose pay periods match completed shifts in this report. When a pay period crosses a month or report boundary, only the earnings tied to completed shifts inside this report are included, and net pay uses the same share. Each paycheck is counted once. Estimated still owed includes completed shifts not marked Paid.
                   </footer>
                 </div>
               </div>
