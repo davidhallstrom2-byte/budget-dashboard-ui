@@ -1,23 +1,32 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  Archive,
   Check,
   ChevronDown,
   ChevronRight,
   CircleDollarSign,
+  Clock3,
   Download,
   Eye,
+  FileText,
+  MoreHorizontal,
   Pencil,
   Plus,
   Printer,
+  ReceiptText,
+  RotateCcw,
   ScanLine,
+  Search,
   Trash2,
+  WalletCards,
   X,
 } from "lucide-react";
 import PageContainer from "../common/PageContainer";
-import TabPageHeader from "../common/TabPageHeader.jsx";
+import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
 
 const PAYCHECK_STORAGE_KEY = "paychecksTab.paychecks.v1";
+const PAYCHECK_ARCHIVE_STORAGE_KEY = "paychecksTab.archived.v1";
 const CSC_SHIFT_STORAGE_KEY = "cscShifts.v1";
 const CSC_SHIFT_ARCHIVE_STORAGE_KEY = "cscShifts.archived.v1";
 const PAYCHECK_UPLOAD_ENDPOINT = "/budget-dashboard-fs/upload-paycheck-file.php";
@@ -143,6 +152,20 @@ const formatOptionalMoney = (value) => {
   return formatMoney(value);
 };
 
+const formatDashboardCurrency = (value) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
+
+const formatDashboardNumber = (value) =>
+  new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
+
 const formatPaycheckAmount = (value, referenceAmount = "") => {
   const number = money(value);
   if (number === null) return "";
@@ -206,10 +229,9 @@ const formatDateForInput = (value = "") => {
   const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
 
-  const slashMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})$/);
+  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (slashMatch) {
-    const year = slashMatch[3].length === 2 ? `20${slashMatch[3]}` : slashMatch[3];
-    return `${year}-${slashMatch[1].padStart(2, "0")}-${slashMatch[2].padStart(2, "0")}`;
+    return `${slashMatch[3]}-${slashMatch[1].padStart(2, "0")}-${slashMatch[2].padStart(2, "0")}`;
   }
 
   const parsed = new Date(text);
@@ -676,10 +698,9 @@ const getWorkLineIsoDate = (lineOrValue = "", paycheck = {}) => {
 
   const periodStart = formatDateForInput(paycheck.payPeriodStart);
   const periodEnd = formatDateForInput(paycheck.payPeriodEnd);
-  const checkDate = formatDateForInput(paycheck.checkDate);
   const years = Array.from(
     new Set(
-      [periodStart, periodEnd, checkDate]
+      [periodStart, periodEnd]
         .filter(Boolean)
         .map((date) => date.slice(0, 4))
     )
@@ -899,6 +920,20 @@ const writeStoredPaychecks = (paychecks = []) => {
   localStorage.setItem(PAYCHECK_STORAGE_KEY, JSON.stringify(paychecks.map(normalizePaycheck)));
 };
 
+const readStoredArchivedPaychecks = () => {
+  if (typeof localStorage === "undefined") return [];
+  const parsed = safeJsonParse(localStorage.getItem(PAYCHECK_ARCHIVE_STORAGE_KEY), []);
+  return Array.isArray(parsed) ? parsed.map(normalizePaycheck) : [];
+};
+
+const writeStoredArchivedPaychecks = (paychecks = []) => {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(
+    PAYCHECK_ARCHIVE_STORAGE_KEY,
+    JSON.stringify(paychecks.map(normalizePaycheck))
+  );
+};
+
 const getUploadEndpointCandidates = () => {
   if (typeof window === "undefined") return [PAYCHECK_UPLOAD_ENDPOINT];
 
@@ -1084,50 +1119,10 @@ const limitScanText = (value = "") => {
   return `${text.slice(0, MAX_PAYCHECK_SCAN_TEXT_LENGTH).trim()}\n\n[Scan text truncated to ${MAX_PAYCHECK_SCAN_TEXT_LENGTH.toLocaleString()} characters.]`;
 };
 
-const PAYCHECK_SCAN_DATE_PATTERN =
-  "(?:[A-Za-z]{3,9}\\s+\\d{1,2},\\s*\\d{4}|\\d{1,2}[\\/-]\\d{1,2}[\\/-](?:\\d{4}|\\d{2}))";
-
 const findDateAfterLabel = (text, labelPattern) => {
-  const regex = new RegExp(`${labelPattern}\\s*:?\\s*(${PAYCHECK_SCAN_DATE_PATTERN})`, "i");
+  const regex = new RegExp(`${labelPattern}\\s*:?\\s*([A-Za-z]+\\s+\\d{1,2},\\s*\\d{4}|\\d{1,2}/\\d{1,2}/\\d{4})`, "i");
   const match = text.match(regex);
   return match ? formatDateForInput(match[1]) : "";
-};
-
-const findPayPeriodDates = (text = "") => {
-  const directStart = findDateAfterLabel(
-    text,
-    "(?:Pay\\s+)?Period\\s+(?:Beginning|Begin|Start|From)"
-  );
-  const directEnd = findDateAfterLabel(
-    text,
-    "(?:Pay\\s+)?Period\\s+(?:Ending|End|Through|Thru|To)"
-  );
-
-  if (directStart && directEnd) {
-    return { startDate: directStart, endDate: directEnd };
-  }
-
-  const rangePatterns = [
-    new RegExp(
-      `(?:Pay\\s+)?Period(?:\\s+Dates?)?\\s*:?\\s*(${PAYCHECK_SCAN_DATE_PATTERN})\\s*(?:-|–|—|to|through|thru)\\s*(${PAYCHECK_SCAN_DATE_PATTERN})`,
-      "i"
-    ),
-    new RegExp(
-      `Period\\s+(?:Beginning|Begin|Start)\\s+Period\\s+(?:Ending|End)(?:\\s+Check\\s+Date)?\\s+(${PAYCHECK_SCAN_DATE_PATTERN})\\s+(${PAYCHECK_SCAN_DATE_PATTERN})`,
-      "i"
-    ),
-  ];
-
-  for (const pattern of rangePatterns) {
-    const match = text.match(pattern);
-    if (!match) continue;
-
-    const startDate = formatDateForInput(match[1]);
-    const endDate = formatDateForInput(match[2]);
-    if (startDate && endDate) return { startDate, endDate };
-  }
-
-  return { startDate: directStart, endDate: directEnd };
 };
 
 const findMoneyAfterLabel = (text, labelPattern) => {
@@ -1267,9 +1262,8 @@ const parsePaycheckScanText = (rawText = "") => {
   if (employeeMatch) parsed.employeeName = employeeMatch[0].replace(/\s+/g, " ").trim();
 
   parsed.checkDate = findDateAfterLabel(flat, "Check Date");
-  const scannedPayPeriod = findPayPeriodDates(flat);
-  parsed.payPeriodStart = scannedPayPeriod.startDate;
-  parsed.payPeriodEnd = scannedPayPeriod.endDate;
+  parsed.payPeriodStart = findDateAfterLabel(flat, "Period Beginning");
+  parsed.payPeriodEnd = findDateAfterLabel(flat, "Period Ending");
 
   const checkNumberMatch = flat.match(/Check Number\s*:?\s*(\d{5,})/i);
   if (checkNumberMatch) parsed.checkNumber = checkNumberMatch[1];
@@ -1429,6 +1423,7 @@ const extractTextFromFile = async (file) => {
 
 export default function PaychecksTab() {
   const [paychecks, setPaychecks] = useState(readStoredPaychecks);
+  const [archivedPaychecks, setArchivedPaychecks] = useState(readStoredArchivedPaychecks);
   const [form, setForm] = useState(() => normalizePaycheck({ id: createId() }));
   const [editingId, setEditingId] = useState("");
   const [scanText, setScanText] = useState("");
@@ -1439,7 +1434,11 @@ export default function PaychecksTab() {
   const [isScanning, setIsScanning] = useState(false);
   const [isScanSectionOpen, setIsScanSectionOpen] = useState(false);
   const [isPaycheckFormOpen, setIsPaycheckFormOpen] = useState(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
   const [selectedWorkedPayPeriod, setSelectedWorkedPayPeriod] = useState(null);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historySort, setHistorySort] = useState("newest");
+  const [openActionMenuId, setOpenActionMenuId] = useState("");
 
   useEffect(() => {
     if (!selectedWorkedPayPeriod) return undefined;
@@ -1458,6 +1457,36 @@ export default function PaychecksTab() {
     };
   }, [selectedWorkedPayPeriod]);
 
+  useEffect(() => {
+    if (!isArchiveOpen) return undefined;
+
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setIsArchiveOpen(false);
+    };
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isArchiveOpen]);
+
+  useEffect(() => {
+    if (!isScanSectionOpen && !isPaycheckFormOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      setIsScanSectionOpen(false);
+      setIsPaycheckFormOpen(false);
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isPaycheckFormOpen, isScanSectionOpen]);
+
   const totals = useMemo(() => {
     return paychecks.reduce(
       (sum, item) => ({
@@ -1469,6 +1498,50 @@ export default function PaychecksTab() {
       { grossPay: 0, taxes: 0, netPay: 0, hours: 0 }
     );
   }, [paychecks]);
+
+  const visiblePaychecks = useMemo(() => {
+    const query = historyQuery.trim().toLowerCase();
+    const filtered = query
+      ? paychecks.filter((paycheck) => {
+          const earningsText = getPaycheckEarningsRows(paycheck)
+            .map((line) => [line.type, line.dateWorked, line.rate, line.hours, line.amount].join(" "))
+            .join(" ");
+          return [
+            paycheck.checkDate,
+            paycheck.payPeriodStart,
+            paycheck.payPeriodEnd,
+            paycheck.checkNumber,
+            paycheck.grossPay,
+            paycheck.taxes,
+            paycheck.netPay,
+            paycheck.notes,
+            earningsText,
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(query);
+        })
+      : [...paychecks];
+
+    return filtered.sort((a, b) => {
+      if (historySort === "oldest") {
+        return String(a.checkDate || "").localeCompare(String(b.checkDate || ""));
+      }
+      if (historySort === "highest-net") {
+        return (money(b.netPay) || 0) - (money(a.netPay) || 0);
+      }
+      return String(b.checkDate || "").localeCompare(String(a.checkDate || ""));
+    });
+  }, [historyQuery, historySort, paychecks]);
+
+  useEffect(() => {
+    if (!openActionMenuId) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setOpenActionMenuId("");
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [openActionMenuId]);
 
   const duplicateCheckNumbers = useMemo(() => {
     const counts = new Map();
@@ -1654,6 +1727,7 @@ export default function PaychecksTab() {
       }
       setUploadStatus(`${file.name} saved locally.`);
       setIsPaycheckFormOpen(true);
+      setIsScanSectionOpen(false);
     } catch (error) {
       setScanError(error?.message || "Could not scan paycheck.");
     } finally {
@@ -1676,6 +1750,8 @@ export default function PaychecksTab() {
     setScanStatus(
       "Edited scan text applied. The paycheck file remains saved. Open Add Paycheck to review the populated fields."
     );
+    setIsScanSectionOpen(false);
+    setIsPaycheckFormOpen(true);
   };
 
   const savePaycheck = () => {
@@ -1779,6 +1855,146 @@ export default function PaychecksTab() {
 
     updatePaychecks((current) => current.filter((item) => item.id !== paycheck.id));
   };
+
+  const updateArchivedPaychecks = (updater) => {
+    setArchivedPaychecks((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      const normalized = next
+        .map(normalizePaycheck)
+        .sort((a, b) => String(b.checkDate).localeCompare(String(a.checkDate)));
+      writeStoredArchivedPaychecks(normalized);
+      window.dispatchEvent(new Event("paychecksChanged"));
+      return normalized;
+    });
+  };
+
+  const archivePaycheck = (paycheck) => {
+    if (!window.confirm(`Archive paycheck ${paycheck.checkNumber || paycheck.checkDate || ""}?`)) return;
+
+    updateArchivedPaychecks((current) => [
+      { ...paycheck, archivedAt: new Date().toISOString() },
+      ...current.filter((item) => item.id !== paycheck.id),
+    ]);
+    updatePaychecks((current) => current.filter((item) => item.id !== paycheck.id));
+
+    if (editingId === paycheck.id) resetForm();
+  };
+
+  const restoreArchivedPaycheck = (paycheck) => {
+    updatePaychecks((current) => [
+      { ...paycheck, archivedAt: "", updatedAt: new Date().toISOString() },
+      ...current.filter((item) => item.id !== paycheck.id),
+    ]);
+    updateArchivedPaychecks((current) => current.filter((item) => item.id !== paycheck.id));
+  };
+
+  const deleteArchivedPaycheck = async (paycheck) => {
+    if (!window.confirm(`Permanently delete archived paycheck ${paycheck.checkNumber || paycheck.checkDate || ""}?`)) return;
+
+    if (paycheck.attachment && window.confirm("Also delete the saved paycheck file from local storage?")) {
+      try {
+        await deletePaycheckFile(paycheck.attachment);
+      } catch (error) {
+        setUploadError(error?.message || "Could not delete saved paycheck file.");
+      }
+    }
+
+    updateArchivedPaychecks((current) => current.filter((item) => item.id !== paycheck.id));
+  };
+
+  const downloadPaychecksJson = (type, filenamePrefix, successMessage) => {
+    const payload = {
+      type,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      paychecks,
+      archivedPaychecks,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    setScanStatus(successMessage);
+    window.setTimeout(() => setScanStatus(""), 3000);
+  };
+
+  const createPaychecksSafetySnapshot = () => {
+    downloadPaychecksJson(
+      "paychecks-safety-snapshot",
+      "paychecks-safety-snapshot",
+      "Paychecks safety snapshot downloaded."
+    );
+  };
+
+  const exportPaychecks = () => {
+    downloadPaychecksJson(
+      "paychecks-export",
+      "paychecks-export",
+      "Paychecks JSON exported."
+    );
+  };
+
+  const importPaychecks = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      try {
+        const imported = JSON.parse(await file.text());
+        const importedPaychecks = Array.isArray(imported)
+          ? imported
+          : imported?.paychecks || imported?.activePaychecks;
+        const importedArchived = Array.isArray(imported?.archivedPaychecks)
+          ? imported.archivedPaychecks
+          : Array.isArray(imported?.archived)
+            ? imported.archived
+            : [];
+
+        if (!Array.isArray(importedPaychecks)) {
+          throw new Error("The selected file does not contain paycheck data.");
+        }
+
+        const confirmed = window.confirm(
+          `Import ${importedPaychecks.length} active and ${importedArchived.length} archived paychecks? This replaces the current Paychecks tab data.`
+        );
+        if (!confirmed) return;
+
+        updatePaychecks(importedPaychecks);
+        updateArchivedPaychecks(importedArchived);
+        setScanStatus("Paychecks imported successfully.");
+        window.setTimeout(() => setScanStatus(""), 3000);
+      } catch (error) {
+        setScanError(error?.message || "Could not import paycheck data.");
+      }
+    };
+    input.click();
+  };
+
+  useEffect(() => {
+    const openArchive = () => setIsArchiveOpen(true);
+
+    window.addEventListener("paychecks-toolbar:archive", openArchive);
+    window.addEventListener("paychecks-toolbar:snapshot", createPaychecksSafetySnapshot);
+    window.addEventListener("paychecks-toolbar:export", exportPaychecks);
+    window.addEventListener("paychecks-toolbar:import", importPaychecks);
+
+    return () => {
+      window.removeEventListener("paychecks-toolbar:archive", openArchive);
+      window.removeEventListener("paychecks-toolbar:snapshot", createPaychecksSafetySnapshot);
+      window.removeEventListener("paychecks-toolbar:export", exportPaychecks);
+      window.removeEventListener("paychecks-toolbar:import", importPaychecks);
+    };
+  }, [paychecks, archivedPaychecks]);
 
   const removeAttachmentFromForm = async () => {
     if (!form.attachment) return;
@@ -2002,7 +2218,7 @@ export default function PaychecksTab() {
         {!form.earningsLines?.length ? renderTextInput("rate", "Rate") : null}
         {renderTextInput("hours", "Total Hours")}
         {renderTextInput("grossPay", "Gross Pay")}
-        {renderTextInput("taxes", "Taxes")}
+        {renderTextInput("taxes", "Taxes Withheld")}
         {renderTextInput("deductions", "Deductions")}
         {renderTextInput("netPay", "Net Pay")}
       </div>
@@ -2047,19 +2263,32 @@ export default function PaychecksTab() {
             {form.earningsLines.map((line) => (
               <div
                 key={line.id}
-                className="grid grid-cols-[minmax(120px,1fr)_70px_48px_68px] items-center gap-1 rounded-md bg-white px-2 py-1.5 text-xs text-slate-700"
+                className="rounded-lg bg-white px-2.5 py-2 text-xs text-slate-700"
               >
-                <span className="min-w-0 whitespace-normal break-words text-slate-950">
-                  {formatEarningsTypeLabel(line.type)}
-                  {getEarningsLineWorkDateDisplay(line, form) ? (
-                    <span className="ml-1 text-slate-500">
-                      {getEarningsLineWorkDateDisplay(line, form)}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="text-right">${line.rate || "0.00"}/hr</span>
-                <span className="text-right">{line.hours || "0.00"}h</span>
-                <span className="text-right">${line.amount || "0.00"}</span>
+                <div className="flex items-start justify-between gap-3 md:hidden">
+                  <span className="min-w-0 font-bold text-slate-950">
+                    {formatEarningsTypeLabel(line.type)}
+                    {getEarningsLineWorkDateDisplay(line, form) ? (
+                      <span className="ml-1 font-normal text-slate-500">{getEarningsLineWorkDateDisplay(line, form)}</span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 font-black text-slate-950">${line.amount || "0.00"}</span>
+                </div>
+                <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-600 md:hidden">
+                  <span>${line.rate || "0.00"}/hr</span>
+                  <span>{line.hours || "0.00"} hours</span>
+                </div>
+                <div className="hidden grid-cols-[minmax(120px,1fr)_70px_48px_68px] items-center gap-1 md:grid">
+                  <span className="min-w-0 whitespace-normal break-words text-slate-950">
+                    {formatEarningsTypeLabel(line.type)}
+                    {getEarningsLineWorkDateDisplay(line, form) ? (
+                      <span className="ml-1 text-slate-500">{getEarningsLineWorkDateDisplay(line, form)}</span>
+                    ) : null}
+                  </span>
+                  <span className="text-right">${line.rate || "0.00"}/hr</span>
+                  <span className="text-right">{line.hours || "0.00"}h</span>
+                  <span className="text-right">${line.amount || "0.00"}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -2126,8 +2355,21 @@ export default function PaychecksTab() {
   );
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-slate-100 sm:bg-teal-50" className="flex flex-col gap-2 bg-slate-100 py-2 sm:gap-3 sm:bg-teal-50 sm:py-3">
+    <PageContainer surfaceClassName="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-cyan-50" className="paychecks-page flex flex-col gap-2.5 bg-transparent py-2 sm:gap-3.5 sm:py-3">
       <style>{`
+        .paychecks-page button:focus-visible,
+        .paychecks-page input:focus-visible,
+        .paychecks-page select:focus-visible,
+        .paychecks-page textarea:focus-visible {
+          outline: 3px solid rgba(13, 148, 136, 0.35);
+          outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .paychecks-page * {
+            scroll-behavior: auto !important;
+            transition-duration: 0.01ms !important;
+          }
+        }
         @media print {
           @page { margin: 0.45in; }
           body.paycheck-worked-period-printing * { visibility: hidden !important; }
@@ -2184,44 +2426,119 @@ export default function PaychecksTab() {
         subtitle="Scan paycheck stubs, preserve the original file, and track rates, hours, gross pay, taxes, and net pay."
         theme="teal"
         className="budget-mobile-header"
+        actions={
+          <div className="flex w-max flex-nowrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setIsPaycheckFormOpen(false);
+                setIsScanSectionOpen(true);
+              }}
+              className={`${TAB_HEADER_ACTION_CLASS} bg-slate-950 text-white hover:bg-slate-800`}
+              title="Scan a paycheck PDF or image"
+              aria-label="Scan a paycheck PDF or image"
+            >
+              <ScanLine className="h-4 w-4" aria-hidden="true" />
+              Scan Paycheck
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsScanSectionOpen(false);
+                setIsPaycheckFormOpen(true);
+              }}
+              className={`${TAB_HEADER_ACTION_CLASS} bg-white text-teal-950 hover:bg-teal-50`}
+              title="Add a paycheck manually"
+              aria-label="Add a paycheck manually"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Add Paycheck
+            </button>
+          </div>
+        }
       />
 
-      <section className="grid grid-cols-2 gap-1.5 sm:gap-2 md:grid-cols-4" aria-label="Paycheck totals">
-        <div className="rounded-xl border border-cyan-200 bg-white p-2.5 shadow-sm sm:p-3">
-          <p className="text-[10px] font-black uppercase tracking-wide text-cyan-700 sm:text-xs">Hours</p>
-          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">{totals.hours.toFixed(2)}</p>
-        </div>
-        <div className="rounded-xl border border-blue-200 bg-white p-2.5 shadow-sm sm:p-3">
-          <p className="text-[10px] font-black uppercase tracking-wide text-blue-700 sm:text-xs">Gross</p>
-          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">${totals.grossPay.toFixed(2)}</p>
-        </div>
-        <div className="rounded-xl border border-amber-200 bg-white p-2.5 shadow-sm sm:p-3">
-          <p className="text-[10px] font-black uppercase tracking-wide text-amber-700 sm:text-xs">Taxes</p>
-          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">${totals.taxes.toFixed(2)}</p>
-        </div>
-        <div className="rounded-xl border border-emerald-200 bg-white p-2.5 shadow-sm sm:p-3">
-          <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:text-xs">Net</p>
-          <p className="mt-0.5 text-lg font-black leading-none text-slate-950 sm:mt-1 sm:text-2xl">${totals.netPay.toFixed(2)}</p>
-        </div>
+      <section className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4" aria-label="Paycheck totals">
+        <article className="group relative overflow-hidden rounded-2xl border border-cyan-200 bg-gradient-to-br from-white to-cyan-50 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-4">
+          <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full bg-cyan-100/70" aria-hidden="true" />
+          <div className="relative flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-800 sm:text-xs">Total Hours</p>
+              <p className="mt-1.5 text-xl font-black leading-none text-slate-950 sm:text-3xl">{formatDashboardNumber(totals.hours)}</p>
+            </div>
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-100 text-cyan-800 sm:h-10 sm:w-10">
+              <Clock3 className="h-4 w-4 sm:h-5 sm:w-5" />
+            </span>
+          </div>
+        </article>
+        <article className="group relative overflow-hidden rounded-2xl border border-blue-200 bg-gradient-to-br from-white to-blue-50 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-4">
+          <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full bg-blue-100/70" aria-hidden="true" />
+          <div className="relative flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-800 sm:text-xs">Gross Pay</p>
+              <p className="mt-1.5 text-xl font-black leading-none text-slate-950 sm:text-3xl">{formatDashboardCurrency(totals.grossPay)}</p>
+            </div>
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-800 sm:h-10 sm:w-10">
+              <WalletCards className="h-4 w-4 sm:h-5 sm:w-5" />
+            </span>
+          </div>
+        </article>
+        <article className="group relative overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-white to-amber-50 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-4">
+          <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full bg-amber-100/70" aria-hidden="true" />
+          <div className="relative flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-800 sm:text-xs">Taxes Withheld</p>
+              <p className="mt-1.5 text-xl font-black leading-none text-slate-950 sm:text-3xl">{formatDashboardCurrency(totals.taxes)}</p>
+            </div>
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-800 sm:h-10 sm:w-10">
+              <ReceiptText className="h-4 w-4 sm:h-5 sm:w-5" />
+            </span>
+          </div>
+        </article>
+        <article className="group relative overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-white to-emerald-50 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-4">
+          <div className="absolute -right-5 -top-5 h-20 w-20 rounded-full bg-emerald-100/70" aria-hidden="true" />
+          <div className="relative flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-emerald-800 sm:text-xs">Net Pay</p>
+              <p className="mt-1.5 text-xl font-black leading-none text-emerald-800 sm:text-3xl">{formatDashboardCurrency(totals.netPay)}</p>
+            </div>
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 sm:h-10 sm:w-10">
+              <CircleDollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
+            </span>
+          </div>
+        </article>
       </section>
 
-      <div className="overflow-hidden rounded-xl border border-blue-200 bg-blue-50">
-        <button
-          type="button"
-          onClick={() => setIsScanSectionOpen((current) => !current)}
-          className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-black uppercase tracking-wide text-blue-950 hover:bg-blue-100/70 sm:px-4 sm:py-3 sm:text-sm"
-          aria-expanded={isScanSectionOpen}
-          aria-controls="paycheck-scan-section"
+      {isScanSectionOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex justify-end bg-slate-950/60"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="paycheck-scan-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsScanSectionOpen(false);
+          }}
         >
-          <span className="flex items-center gap-2">
-            <ScanLine className="h-4 w-4" />
-            Scan Paycheck
-          </span>
-          {isScanSectionOpen ? <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5" /> : <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />}
-        </button>
-
-        {isScanSectionOpen && (
-          <div id="paycheck-scan-section" className="border-t border-blue-200 p-3 sm:p-4">
+          <aside className="flex h-full w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl">
+            <header className="flex items-start justify-between gap-4 border-b border-blue-200 bg-gradient-to-r from-blue-950 to-cyan-800 px-4 py-4 text-white sm:px-6">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <ScanLine className="h-5 w-5 shrink-0" aria-hidden="true" />
+                  <h2 id="paycheck-scan-title" className="text-xl font-black">Scan a Paycheck</h2>
+                </div>
+                <p className="mt-1 text-sm font-semibold text-blue-50">Upload a PDF or image and fill the paycheck form automatically.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsScanSectionOpen(false)}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                title="Close paycheck scanner"
+                aria-label="Close paycheck scanner"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </header>
+            <div id="paycheck-scan-section" className="min-h-0 flex-1 overflow-y-auto bg-blue-50/40 p-4 sm:p-6">
             <div className="grid gap-2 sm:gap-3 md:grid-cols-3">
           <label className="text-xs font-bold text-blue-950 sm:text-sm md:col-span-2">
             Paycheck PDF or image
@@ -2247,11 +2564,11 @@ export default function PaychecksTab() {
           </div>
             </div>
 
-            {isScanning && <div className="mt-2 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-bold text-blue-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">Scanning paycheck and saving file...</div>}
-            {scanStatus && <div className="mt-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1.5 text-xs font-bold text-green-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{scanStatus}</div>}
-            {uploadStatus && <div className="mt-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1.5 text-xs font-bold text-green-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{uploadStatus}</div>}
-            {scanError && <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{scanError}</div>}
-            {uploadError && <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{uploadError}</div>}
+            {isScanning && <div role="status" aria-live="polite" className="mt-2 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-bold text-blue-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">Scanning paycheck and saving file...</div>}
+            {scanStatus && <div role="status" aria-live="polite" className="mt-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1.5 text-xs font-bold text-green-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{scanStatus}</div>}
+            {uploadStatus && <div role="status" aria-live="polite" className="mt-2 rounded-lg border border-green-200 bg-green-50 px-2.5 py-1.5 text-xs font-bold text-green-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{uploadStatus}</div>}
+            {scanError && <div role="alert" className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{scanError}</div>}
+            {uploadError && <div role="alert" className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-900 sm:mt-3 sm:px-3 sm:py-2 sm:text-sm">{uploadError}</div>}
 
             <label className="mt-2 block text-xs font-bold text-blue-950 sm:mt-3 sm:text-sm">
               Extracted scan text
@@ -2263,70 +2580,131 @@ export default function PaychecksTab() {
                 className="mt-0.5 w-full rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-base sm:mt-1 sm:px-3 sm:py-2 sm:text-sm"
               />
             </label>
-          </div>
-        )}
-      </div>
-
-      {!editingId ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <button
-            type="button"
-            onClick={() => setIsPaycheckFormOpen((current) => !current)}
-            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-black text-slate-900 hover:bg-slate-50 sm:px-4 sm:py-3 sm:text-base"
-            aria-expanded={isPaycheckFormOpen}
-            aria-controls="paycheck-form-section"
-          >
-            <span>Add Paycheck</span>
-            {isPaycheckFormOpen ? <ChevronDown className="h-4 w-4 sm:h-5 sm:w-5" /> : <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />}
-          </button>
-          {isPaycheckFormOpen ? (
-            <div id="paycheck-form-section" className="border-t border-slate-200">
-              {renderPaycheckEditor()}
             </div>
-          ) : null}
+          </aside>
         </div>
       ) : null}
 
-      <section className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm" aria-labelledby="paycheck-history-title">
-        <div className="flex items-center justify-between gap-2 bg-slate-900 px-3 py-2 text-white sm:px-4 sm:py-2.5">
-          <h2 id="paycheck-history-title" className="text-sm font-black sm:text-base">Paycheck History</h2>
-          <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-bold sm:text-xs">
-            {paychecks.length} {paychecks.length === 1 ? "check" : "checks"}
+      {!editingId && isPaycheckFormOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex justify-end bg-slate-950/60"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="paycheck-form-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsPaycheckFormOpen(false);
+          }}
+        >
+          <aside className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-white shadow-2xl">
+            <header className="flex items-start justify-between gap-4 border-b border-teal-200 bg-gradient-to-r from-teal-950 to-emerald-800 px-4 py-4 text-white sm:px-6">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Plus className="h-5 w-5 shrink-0" aria-hidden="true" />
+                  <h2 id="paycheck-form-title" className="text-xl font-black">Add a Paycheck Manually</h2>
+                </div>
+                <p className="mt-1 text-sm font-semibold text-teal-50">Enter check details without scanning a file.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPaycheckFormOpen(false)}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                title="Close paycheck form"
+                aria-label="Close paycheck form"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </header>
+            <div id="paycheck-form-section" className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-3 sm:p-5">
+              {renderPaycheckEditor()}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      <section className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-lg shadow-slate-200/60" aria-labelledby="paycheck-history-title">
+        <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-slate-950 via-slate-900 to-teal-900 px-3.5 py-3 text-white sm:px-4 sm:py-3.5">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15">
+              <FileText className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <h2 id="paycheck-history-title" className="text-sm font-black sm:text-base">Paycheck History</h2>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-300 sm:text-xs">Review earnings, open saved stubs, and manage each check</p>
+            </div>
+          </div>
+          <span className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-bold ring-1 ring-white/10 sm:text-xs">
+            {historyQuery.trim() ? `${visiblePaychecks.length} of ${paychecks.length}` : paychecks.length} {paychecks.length === 1 ? "check" : "checks"}
           </span>
         </div>
-        <div className="overflow-visible md:overflow-x-auto">
-        <table className="block w-full text-sm md:table md:min-w-[720px] md:table-fixed">
+
+        <div className="grid gap-2 border-b border-slate-200 bg-slate-50 p-2.5 sm:grid-cols-[minmax(0,1fr)_180px] sm:p-3">
+          <label className="relative block">
+            <span className="sr-only">Search paycheck history</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={historyQuery}
+              onChange={(event) => {
+                setHistoryQuery(event.target.value);
+                setOpenActionMenuId("");
+              }}
+              placeholder="Search check number, date, or earnings"
+              className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-base text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100 sm:h-10 sm:text-sm"
+            />
+          </label>
+          <label>
+            <span className="sr-only">Sort paycheck history</span>
+            <select
+              value={historySort}
+              onChange={(event) => {
+                setHistorySort(event.target.value);
+                setOpenActionMenuId("");
+              }}
+              className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base font-bold text-slate-700 outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-100 sm:h-10 sm:text-sm"
+            >
+              <option value="newest">Newest checks first</option>
+              <option value="oldest">Oldest checks first</option>
+              <option value="highest-net">Highest net pay</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="overflow-visible">
+        <table className="block w-full text-sm md:table md:table-fixed">
           <colgroup className="hidden md:table-column-group">
-            <col className="w-[76px]" />
-            <col className="w-[58px]" />
-            <col className="w-[290px]" />
-            <col className="w-[58px]" />
-            <col className="w-[54px]" />
-            <col className="w-[62px]" />
-            <col className="w-[144px]" />
+            <col className="w-[10%]" />
+            <col className="w-[8%]" />
+            <col className="w-[36%]" />
+            <col className="w-[9%]" />
+            <col className="w-[8%]" />
+            <col className="w-[10%]" />
+            <col className="w-[19%]" />
           </colgroup>
           <thead className="hidden bg-slate-100 text-slate-700 md:table-header-group">
             <tr>
-              <th className="px-1.5 py-2 text-left font-bold">Date / Period</th>
-              <th className="px-1.5 py-2 text-left font-bold">Check #</th>
+              <th className="px-2.5 py-2.5 text-left font-bold">Check Date</th>
+              <th className="px-2 py-2.5 text-left font-bold">Check #</th>
               <th className="px-2 py-2 text-left font-bold">Earnings</th>
-              <th className="px-1.5 py-2 text-right font-bold">Gross</th>
-              <th className="px-1.5 py-2 text-right font-bold">Taxes</th>
-              <th className="px-1.5 py-2 text-right font-bold">Net</th>
-              <th className="px-2.5 py-2 text-left font-bold">Actions</th>
+              <th className="px-2 py-2.5 text-right font-bold">Gross Pay</th>
+              <th className="px-2 py-2.5 text-right font-bold">Taxes</th>
+              <th className="px-2 py-2.5 text-right font-bold">Net Pay</th>
+              <th className="px-2.5 py-2.5 text-center font-bold">Actions</th>
             </tr>
           </thead>
-          <tbody className="block divide-y divide-slate-200 md:table-row-group md:divide-y-0">
-            {paychecks.length === 0 ? (
+          <tbody className="block space-y-2 bg-slate-100/70 p-2 md:table-row-group md:space-y-0 md:bg-white md:p-0">
+            {visiblePaychecks.length === 0 ? (
               <tr className="block md:table-row">
                 <td colSpan={7} className="block px-4 py-5 text-center text-sm text-slate-500 md:table-cell md:py-6">
-                  No paychecks saved yet.
+                  {paychecks.length === 0 ? "No paychecks saved yet." : "No paychecks match your search."}
                 </td>
               </tr>
             ) : (
-              paychecks.map((paycheck, paycheckIndex) => {
+              visiblePaychecks.map((paycheck, paycheckIndex) => {
                 const earningsRows = getPaycheckEarningsRows(paycheck);
                 const paycheckAttachment = getStoredPaycheckAttachment(paycheck);
+                const hasPaycheckAttachment = Boolean(
+                  paycheckAttachment?.savedName || paycheckAttachment?.originalName
+                );
                 const isDuplicateCheckNumber =
                   Boolean(paycheck.checkNumber) &&
                   duplicateCheckNumbers.has(String(paycheck.checkNumber).trim());
@@ -2346,11 +2724,11 @@ export default function PaychecksTab() {
 
                 return (
                   <React.Fragment key={paycheck.id}>
-                  <tr className={`grid grid-cols-6 gap-2 p-3 align-top md:table-row md:border-t md:border-slate-200 md:p-0 ${paycheckBackgroundClass}`}>
-                    <td className="col-span-4 block text-slate-900 md:table-cell md:px-1.5 md:py-2">
+                  <tr className={`grid grid-cols-6 gap-2 overflow-hidden rounded-2xl border border-slate-200 p-3 align-top shadow-sm md:table-row md:rounded-none md:border-x-0 md:border-b-0 md:border-t md:shadow-none md:p-0 ${paycheckBackgroundClass}`}>
+                    <td className="col-span-4 block text-slate-900 md:table-cell md:px-2.5 md:py-3">
                       <div className="leading-tight">
                         <div className="mb-0.5 text-[10px] font-black uppercase tracking-wide text-slate-500 md:hidden">Check Date</div>
-                        <div className="tabular-nums">{formatCompactDate(paycheck.checkDate)}</div>
+                        <div className="text-base font-black tabular-nums md:text-sm md:font-normal">{formatCompactDate(paycheck.checkDate)}</div>
                         {paycheck.payPeriodStart || paycheck.payPeriodEnd ? (
                           <button
                             type="button"
@@ -2364,9 +2742,9 @@ export default function PaychecksTab() {
                         ) : null}
                       </div>
                     </td>
-                    <td className="col-span-2 block text-right text-slate-700 tabular-nums md:table-cell md:px-1.5 md:py-2 md:text-left">
+                    <td className="col-span-2 block text-right text-slate-700 tabular-nums md:table-cell md:px-2 md:py-3 md:text-left">
                       <div className="mb-0.5 text-[10px] font-black uppercase tracking-wide text-slate-500 md:hidden">Check #</div>
-                      <div>{paycheck.checkNumber || "—"}</div>
+                      <div className="font-bold md:font-normal">{paycheck.checkNumber || "—"}</div>
                       {isDuplicateCheckNumber ? (
                         <div className="mt-1 inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-black text-red-800">
                           <AlertCircle className="h-3 w-3" />
@@ -2374,47 +2752,74 @@ export default function PaychecksTab() {
                         </div>
                       ) : null}
                     </td>
-                    <td className="col-span-6 block md:table-cell md:px-2 md:py-2">
+                    <td className="col-span-6 block border-y border-slate-200/80 py-2 md:table-cell md:border-0 md:px-2 md:py-3">
                       <div className="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-500 md:hidden">Earnings</div>
-                      <div className="space-y-1 md:space-y-0.5">
+                      <div className="space-y-1.5 md:space-y-1">
                         {earningsRows.map((line, index) => (
                             <div
                               key={`${paycheck.id}-earnings-${line.id || index}`}
-                              className={`grid grid-cols-[minmax(120px,1fr)_72px_48px_66px] items-center gap-1 rounded px-1.5 py-1 text-xs leading-tight text-slate-700 sm:text-sm md:grid-cols-[minmax(120px,1fr)_72px_50px_66px] ${earningsBackgroundClass}`}
+                              className={`rounded-lg px-2 py-1.5 text-xs leading-tight text-slate-700 sm:text-sm md:rounded-md md:px-2 ${earningsBackgroundClass}`}
                             >
-                              <span className="min-w-0 whitespace-normal break-words text-slate-950">
-                                {formatEarningsTypeLabel(line.type)}
-                                {line.dateWorked ? (
-                                  <span className="ml-1 text-slate-500">
-                                    {line.dateWorked}
+                              <div className="md:hidden">
+                                <div className="flex items-start justify-between gap-3">
+                                  <span className="min-w-0 font-bold text-slate-950">
+                                    {formatEarningsTypeLabel(line.type)}
+                                    {line.dateWorked ? <span className="ml-1 font-normal text-slate-500">{line.dateWorked}</span> : null}
                                   </span>
-                                ) : null}
-                              </span>
-                              <span className="text-right">${line.rate || "0.00"}/hr</span>
-                              <span className="text-right">{line.hours || "0.00"}h</span>
-                              <span className="text-right">${line.amount || "0.00"}</span>
+                                  <span className="shrink-0 font-black text-slate-950">${line.amount || "0.00"}</span>
+                                </div>
+                                <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-600">
+                                  <span>${line.rate || "0.00"}/hr</span>
+                                  <span>{line.hours || "0.00"} hours</span>
+                                </div>
+                              </div>
+                              <div className="hidden grid-cols-[minmax(120px,1fr)_72px_50px_66px] items-center gap-1 md:grid">
+                                <span className="min-w-0 whitespace-normal break-words text-slate-950">
+                                  {formatEarningsTypeLabel(line.type)}
+                                  {line.dateWorked ? <span className="ml-1 text-slate-500">{line.dateWorked}</span> : null}
+                                </span>
+                                <span className="text-right">${line.rate || "0.00"}/hr</span>
+                                <span className="text-right">{line.hours || "0.00"}h</span>
+                                <span className="text-right">${line.amount || "0.00"}</span>
+                              </div>
                             </div>
                         ))}
                       </div>
                     </td>
-                    <td className="col-span-2 block rounded-lg bg-blue-50 p-2 text-center text-slate-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-1.5 md:py-2 md:text-right">
-                      <div className="text-[10px] font-black uppercase tracking-wide text-blue-700 md:hidden">Gross</div>
-                      <div className="font-bold md:font-normal">${paycheck.grossPay || "0.00"}</div>
+                    <td className="col-span-2 block rounded-xl bg-blue-50 p-2.5 text-center text-slate-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-2 md:py-3 md:text-right">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-blue-700 md:hidden">Gross Pay</div>
+                      <div className="mt-0.5 font-black md:mt-0 md:font-normal">${paycheck.grossPay || "0.00"}</div>
                     </td>
-                    <td className="col-span-2 block rounded-lg bg-amber-50 p-2 text-center text-slate-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-1.5 md:py-2 md:text-right">
+                    <td className="col-span-2 block rounded-xl bg-amber-50 p-2.5 text-center text-slate-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-2 md:py-3 md:text-right">
                       <div className="text-[10px] font-black uppercase tracking-wide text-amber-700 md:hidden">Taxes</div>
-                      <div className="font-bold md:font-normal">${paycheck.taxes || "0.00"}</div>
+                      <div className="mt-0.5 font-black md:mt-0 md:font-normal">${paycheck.taxes || "0.00"}</div>
                     </td>
-                    <td className="col-span-2 block rounded-lg bg-emerald-50 p-2 text-center font-bold text-green-700 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-1.5 md:py-2 md:text-right">
-                      <div className="text-[10px] font-black uppercase tracking-wide text-emerald-700 md:hidden">Net</div>
-                      <div>${paycheck.netPay || "0.00"}</div>
+                    <td className="col-span-2 block rounded-xl bg-emerald-50 p-2.5 text-center font-bold text-emerald-800 tabular-nums md:table-cell md:rounded-none md:bg-transparent md:px-2 md:py-3 md:text-right">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-emerald-700 md:hidden">Net Pay</div>
+                      <div className="mt-0.5 font-black md:mt-0">${paycheck.netPay || "0.00"}</div>
                     </td>
-                    <td className="col-span-6 block md:table-cell md:px-2.5 md:py-2.5">
-                      <div className="grid w-full grid-cols-2 gap-1.5 sm:grid-cols-4 md:w-fit md:grid-cols-4 md:gap-2">
+                    <td className="col-span-6 block pt-1 md:table-cell md:px-2.5 md:py-3">
+                      <div className={`grid w-full gap-2 md:mx-auto md:w-fit md:gap-1 ${hasPaycheckAttachment ? "grid-cols-3" : "grid-cols-2"}`}>
+                        {hasPaycheckAttachment ? (
+                          <button
+                            type="button"
+                            onClick={() => viewAttachment(paycheckAttachment)}
+                            className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-2 text-xs font-bold text-white shadow-sm hover:bg-slate-800 md:h-10 md:w-9 md:rounded-lg md:px-0"
+                            title="View paycheck file"
+                            aria-label="View paycheck file"
+                          >
+                            <Eye className="h-4 w-4" />
+                            <span className="md:hidden">View</span>
+                          </button>
+                        ) : null}
                         <button
                           type="button"
-                          onClick={() => editingId === paycheck.id ? resetForm() : editPaycheck(paycheck)}
-                          className={`inline-flex h-9 items-center justify-center rounded-md px-2 text-white md:w-9 md:px-0 ${
+                          onClick={() => {
+                            setOpenActionMenuId("");
+                            if (editingId === paycheck.id) resetForm();
+                            else editPaycheck(paycheck);
+                          }}
+                          className={`inline-flex h-11 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold text-white shadow-sm md:h-10 md:w-9 md:rounded-lg md:px-0 ${
                             editingId === paycheck.id
                               ? "bg-slate-600 hover:bg-slate-700"
                               : "bg-blue-700 hover:bg-blue-800"
@@ -2423,47 +2828,70 @@ export default function PaychecksTab() {
                           aria-label={editingId === paycheck.id ? "Cancel editing" : "Edit paycheck"}
                         >
                           {editingId === paycheck.id ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                          <span className="ml-1 text-[11px] font-bold md:hidden">
+                          <span className="md:hidden">
                             {editingId === paycheck.id ? "Cancel" : "Edit"}
                           </span>
                         </button>
-                        {paycheckAttachment?.savedName || paycheckAttachment?.originalName ? (
-                          <button
-                            type="button"
-                            onClick={() => viewAttachment(paycheckAttachment)}
-                            className="inline-flex h-9 items-center justify-center rounded-md bg-slate-900 px-2 text-white hover:bg-slate-800 md:w-9 md:px-0"
-                            title="View paycheck file"
-                            aria-label="View paycheck file"
-                          >
-                            <Eye className="h-4 w-4" />
-                            <span className="ml-1 text-[11px] font-bold md:hidden">View</span>
-                          </button>
-                        ) : null}
-                        {paycheckAttachment?.savedName || paycheckAttachment?.originalName ? (
-                          <button
-                            type="button"
-                            onClick={() => downloadAttachment(paycheckAttachment)}
-                            className="inline-flex h-9 items-center justify-center rounded-md bg-slate-700 px-2 text-white hover:bg-slate-800 md:w-9 md:px-0"
-                            title="Download paycheck file"
-                            aria-label="Download paycheck file"
-                          >
-                            <Download className="h-4 w-4" />
-                            <span className="ml-1 text-[11px] font-bold md:hidden">Download</span>
-                          </button>
-                        ) : null}
                         <button
                           type="button"
-                          onClick={() => removePaycheck(paycheck)}
-                          className="inline-flex h-9 items-center justify-center rounded-md bg-red-700 px-2 text-white hover:bg-red-800 md:w-9 md:px-0"
-                          title="Delete paycheck"
-                          aria-label="Delete paycheck"
+                          onClick={() => setOpenActionMenuId((current) => current === paycheck.id ? "" : paycheck.id)}
+                          className={`inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border px-2 text-xs font-bold shadow-sm transition md:h-10 md:w-9 md:rounded-lg md:px-0 ${
+                            openActionMenuId === paycheck.id
+                              ? "border-teal-700 bg-teal-700 text-white"
+                              : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-100"
+                          }`}
+                          title="More paycheck actions"
+                          aria-label="More paycheck actions"
+                          aria-expanded={openActionMenuId === paycheck.id}
+                          aria-controls={`paycheck-more-actions-${paycheck.id}`}
                         >
-                          <Trash2 className="h-4 w-4" />
-                          <span className="ml-1 text-[11px] font-bold md:hidden">Delete Check</span>
+                          <MoreHorizontal className="h-4 w-4" />
+                          <span className="md:hidden">More</span>
                         </button>
                       </div>
                     </td>
                   </tr>
+                  {openActionMenuId === paycheck.id ? (
+                    <tr id={`paycheck-more-actions-${paycheck.id}`} className="block rounded-2xl border border-teal-200 bg-teal-50 shadow-sm md:table-row md:rounded-none md:border-x-0 md:border-b-0 md:border-t">
+                      <td colSpan={7} className="block p-2.5 md:table-cell md:px-3 md:py-2.5">
+                        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                          <span className="mr-auto hidden text-xs font-bold text-slate-600 md:block">More actions for check #{paycheck.checkNumber || "Not entered"}</span>
+                          {hasPaycheckAttachment ? (
+                            <button
+                              type="button"
+                              onClick={() => downloadAttachment(paycheckAttachment)}
+                              className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-100 sm:flex-none md:h-10 md:rounded-lg"
+                            >
+                              <Download className="h-4 w-4" />
+                              Download Stub
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenActionMenuId("");
+                              archivePaycheck(paycheck);
+                            }}
+                            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-purple-200 bg-white px-3 text-xs font-bold text-purple-800 hover:bg-purple-50 sm:flex-none md:h-10 md:rounded-lg"
+                          >
+                            <Archive className="h-4 w-4" />
+                            Archive
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenActionMenuId("");
+                              removePaycheck(paycheck);
+                            }}
+                            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 text-xs font-bold text-red-800 hover:bg-red-50 sm:w-auto md:h-10 md:rounded-lg"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete Check
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
                   {editingId === paycheck.id ? (
                     <tr className="block border-t border-blue-200 bg-blue-50/70 md:table-row">
                       <td colSpan={7} className="block p-0 md:table-cell">
@@ -2479,6 +2907,85 @@ export default function PaychecksTab() {
         </table>
         </div>
       </section>
+
+      {isArchiveOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="paycheck-archive-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsArchiveOpen(false);
+          }}
+        >
+          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-purple-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 bg-purple-700 px-4 py-3 text-white">
+              <div>
+                <h2 id="paycheck-archive-title" className="text-lg font-black">Archived Paychecks</h2>
+                <p className="text-xs font-semibold text-purple-100">
+                  {archivedPaychecks.length} archived {archivedPaychecks.length === 1 ? "check" : "checks"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsArchiveOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-white hover:bg-white/25"
+                title="Close paycheck archives"
+                aria-label="Close paycheck archives"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-3 sm:p-4">
+              {archivedPaychecks.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-purple-300 bg-purple-50 px-4 py-8 text-center text-sm font-semibold text-purple-900">
+                  No archived paychecks.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {archivedPaychecks.map((paycheck) => (
+                    <article
+                      key={paycheck.id}
+                      className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[1fr_auto] sm:items-center"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-black text-slate-950">
+                          Check #{paycheck.checkNumber || "Not entered"}
+                        </div>
+                        <div className="mt-0.5 text-sm text-slate-700">
+                          {formatDateForDisplay(paycheck.checkDate) || "No check date"}
+                          {paycheck.netPay ? `, Net $${paycheck.netPay}` : ""}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => restoreArchivedPaycheck(paycheck)}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-3 text-xs font-bold text-white hover:bg-emerald-800"
+                          title="Restore paycheck"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Restore
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteArchivedPaycheck(paycheck)}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-red-700 px-3 text-xs font-bold text-white hover:bg-red-800"
+                          title="Delete archived paycheck permanently"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedWorkedPayPeriod ? (
         <div

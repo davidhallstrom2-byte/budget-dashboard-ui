@@ -32,6 +32,9 @@ import {
   Car,
   CircleDollarSign,
   ListTodo,
+  LayoutDashboard,
+  Pencil,
+  Calculator,
   Menu,
   Monitor,
 } from 'lucide-react';
@@ -41,6 +44,8 @@ const TODO_ARCHIVE_STORAGE_KEY = 'todoTab.tasks.archived.v1';
 const TODO_CONTACTS_STORAGE_KEY = 'todoTab.contacts.v1';
 const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
 const RIDES_STORAGE_EVENT = 'modivcareRides:updated';
+const PAYCHECK_ARCHIVE_STORAGE_KEY = 'paychecksTab.archived.v1';
+const PAYCHECK_STORAGE_EVENT = 'paychecksChanged';
 
 const getTodoTaskType = (task = {}) => task.typeOverride || task.type || '';
 
@@ -540,10 +545,12 @@ const BudgetDashboard = () => {
     const refreshToolbarCounts = () => setToolbarRefreshKey((current) => current + 1);
 
     window.addEventListener(RIDES_STORAGE_EVENT, refreshToolbarCounts);
+    window.addEventListener(PAYCHECK_STORAGE_EVENT, refreshToolbarCounts);
     window.addEventListener('storage', refreshToolbarCounts);
 
     return () => {
       window.removeEventListener(RIDES_STORAGE_EVENT, refreshToolbarCounts);
+      window.removeEventListener(PAYCHECK_STORAGE_EVENT, refreshToolbarCounts);
       window.removeEventListener('storage', refreshToolbarCounts);
     };
   }, []);
@@ -699,25 +706,37 @@ const BudgetDashboard = () => {
           ? 'bg-gradient-to-r from-amber-900 via-amber-700 to-orange-700 text-white border-amber-500 shadow-md shadow-amber-300/40'
           : 'bg-gradient-to-r from-blue-900 via-blue-700 to-indigo-700 text-white border-blue-500 shadow-md shadow-blue-300/40';
 
+  const budgetSubnavIcons = {
+    overview: LayoutDashboard,
+    editor: Pencil,
+    analysis: BarChart3,
+    calculator: Calculator,
+  };
+
   const renderBudgetSubnav = () => (
-    <div className="budget-mobile-subnav inline-flex max-w-full flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-white/80 p-2 shadow-sm">
-      {budgetTabs.map((tab) => (
+    <div className="budget-mobile-subnav inline-flex max-w-full flex-nowrap items-center gap-2">
+      {budgetTabs.map((tab) => {
+        const TabIcon = budgetSubnavIcons[tab.id] || WalletCards;
+
+        return (
         <button
           key={tab.id}
           type="button"
           onClick={() => setActiveBudgetTab(tab.id)}
           title={`Open Budget ${tab.label}`}
           aria-label={`Open Budget ${tab.label}`}
-          className={`budget-mobile-subnav-button rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+          className={`budget-mobile-subnav-button inline-flex h-11 items-center gap-2 rounded-lg px-3 text-sm font-bold transition-colors ${
             activeBudgetTab === tab.id
               ? 'bg-blue-700 text-white shadow-sm'
               : tab.inactiveClass
           }`}
           aria-pressed={activeBudgetTab === tab.id}
         >
+          <TabIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
           {tab.label}
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -901,7 +920,7 @@ const BudgetDashboard = () => {
     saveBudget(updatedState, 'Item marked as paid!');
   };
 
-  const handleExportJSON = () => {
+  const handleBudgetExportJSON = () => {
     const filename = exportFilename.trim() || 'budget-data';
     const dataStr = JSON.stringify(state, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
@@ -920,6 +939,70 @@ const BudgetDashboard = () => {
     setShowExportDialog(false);
     setSaveStatus({ type: 'success', message: `Exported ${filename}.json` });
     setTimeout(() => setSaveStatus(null), 3000);
+  };
+
+  const handleFullDashboardExportJSON = () => {
+    if (typeof localStorage === 'undefined') {
+      setSaveStatus({ type: 'error', message: 'Export failed: browser storage is unavailable.' });
+      setTimeout(() => setSaveStatus(null), 3000);
+      return;
+    }
+
+    try {
+      const items = {};
+
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+
+        if (
+          !key ||
+          key === 'budgetMobileSync.keyMeta.v1' ||
+          key.startsWith('budgetMobileSync.') ||
+          key.startsWith('googleCalendar.') ||
+          /(?:accessToken|tokenExpiresAt|openLinked|returnContext|createDraft)/i.test(key)
+        ) {
+          continue;
+        }
+
+        items[key] = localStorage.getItem(key);
+      }
+
+      if (state) {
+        items['budget-dashboard-state-v2'] = JSON.stringify(state);
+      }
+
+      const exportedAt = new Date().toISOString();
+      const exportData = {
+        type: 'budget-dashboard-mobile-migration',
+        version: 1,
+        exportedAt,
+        items,
+      };
+      const filename = `budget-dashboard-mobile-data-${exportedAt.slice(0, 10)}.json`;
+      const dataBlob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = filename;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      URL.revokeObjectURL(url);
+
+      setSaveStatus({
+        type: 'success',
+        message: `Exported ${Object.keys(items).length} dashboard data items.`,
+      });
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error) {
+      setSaveStatus({ type: 'error', message: `Export failed: ${error.message}` });
+      setTimeout(() => setSaveStatus(null), 3000);
+    }
   };
 
   const handleBudgetSafetySnapshot = () => {
@@ -985,6 +1068,39 @@ const BudgetDashboard = () => {
     window.dispatchEvent(new CustomEvent(eventName));
   };
 
+  const printActiveTab = () => {
+    if (typeof window === 'undefined') return;
+
+    if (activeTab === 'rides') {
+      dispatchToolbarEvent('rides-toolbar:print');
+      return;
+    }
+
+    if (activeTab === 'cscOpportunities') {
+      dispatchToolbarEvent('csc-opportunities-toolbar:print');
+      return;
+    }
+
+    window.print();
+  };
+
+  const openPaychecksAction = (buttonLabel) => {
+    if (typeof document === 'undefined') return;
+
+    const normalizedLabel = String(buttonLabel || '').trim().toLowerCase();
+    const matchingButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => String(button.textContent || '').trim().toLowerCase() === normalizedLabel
+    );
+
+    if (matchingButton) {
+      matchingButton.click();
+      matchingButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    setSaveStatus({ type: 'error', message: `${buttonLabel} is not available.` });
+  };
+
   const getStoredArrayLength = (storageKey) => {
     if (typeof localStorage === 'undefined') return 0;
 
@@ -997,10 +1113,13 @@ const BudgetDashboard = () => {
   };
 
   const toolbarIconButtonClass =
-    'h-10 w-10 p-0 rounded-lg transition-colors flex items-center justify-center flex-shrink-0';
+    'h-10 w-10 p-0 rounded-lg shadow-sm transition-colors flex items-center justify-center flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2';
 
   const toolbarCountButtonClass =
-    'h-10 w-16 p-0 rounded-lg transition-colors flex items-center justify-center gap-1 flex-shrink-0 text-xs font-semibold';
+    'relative h-10 w-10 p-0 rounded-lg shadow-sm transition-colors flex items-center justify-center flex-shrink-0 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2';
+
+  const toolbarCountBadgeClass =
+    'absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full bg-white text-slate-900 border border-slate-300 text-[10px] font-bold leading-none flex items-center justify-center shadow-sm';
 
   const renderArchiveIcon = () => (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -1035,17 +1154,6 @@ const BudgetDashboard = () => {
     </svg>
   );
 
-  const renderSaveIcon = () => (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-      />
-    </svg>
-  );
-
   const renderPlusIcon = () => (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
@@ -1056,6 +1164,48 @@ const BudgetDashboard = () => {
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12a9 9 0 109-9m0 0V1m0 2H8m4 4v5l3 2" />
     </svg>
+  );
+
+  const renderPrintIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z" />
+    </svg>
+  );
+
+  const renderScheduleListIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16v14H4V5zm0 5h16M9 5v14" />
+    </svg>
+  );
+
+  const renderScanIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7V5a1 1 0 011-1h2M17 4h2a1 1 0 011 1v2M20 17v2a1 1 0 01-1 1h-2M7 20H5a1 1 0 01-1-1v-2M7 9h10M7 12h10M7 15h6" />
+    </svg>
+  );
+
+  const renderPrintButton = (title) => (
+    <button
+      type="button"
+      onClick={printActiveTab}
+      className={`${toolbarIconButtonClass} bg-indigo-500 text-white hover:bg-indigo-600`}
+      title={title}
+      aria-label={title}
+    >
+      {renderPrintIcon()}
+    </button>
+  );
+
+  const renderFullDashboardExportButton = () => (
+    <button
+      type="button"
+      onClick={handleFullDashboardExportJSON}
+      className={`${toolbarIconButtonClass} bg-blue-500 text-white hover:bg-blue-600`}
+      title="Export Complete Dashboard JSON"
+      aria-label="Export Complete Dashboard JSON"
+    >
+      {renderDownloadIcon()}
+    </button>
   );
 
   const renderTabToolbarActions = () => {
@@ -1069,8 +1219,9 @@ const BudgetDashboard = () => {
           </button>
           <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:archive')} className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`} title="To-Do Archive Drawer" aria-label="Open To-Do Archive Drawer">
             {renderArchiveIcon()}
-            <span>({todoArchiveCount})</span>
+            <span className={toolbarCountBadgeClass}>{todoArchiveCount}</span>
           </button>
+          {renderPrintButton('Print To-Do List')}
           <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="To-Do Safety Snapshot" aria-label="Create To-Do Safety Snapshot">
             {renderHistoryIcon()}
           </button>
@@ -1080,9 +1231,7 @@ const BudgetDashboard = () => {
           <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import To-Do" aria-label="Import To-Do">
             {renderUploadIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('todo-toolbar:save')} className={`${toolbarIconButtonClass} bg-blue-500 text-white hover:bg-blue-600`} title="Save To-Do Safety Snapshot" aria-label="Save To-Do Safety Snapshot">
-            {renderSaveIcon()}
-          </button>
+          {renderFullDashboardExportButton()}
         </>
       );
     }
@@ -1097,7 +1246,17 @@ const BudgetDashboard = () => {
           </button>
           <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:archive')} className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`} title="CSC Archive Drawer" aria-label="Open CSC Archive Drawer">
             {renderArchiveIcon()}
-            <span>({cscArchiveCount})</span>
+            <span className={toolbarCountBadgeClass}>{cscArchiveCount}</span>
+          </button>
+          {renderPrintButton('Print CSC Shifts')}
+          <button
+            type="button"
+            onClick={() => dispatchToolbarEvent('csc-toolbar:upcoming-schedules')}
+            className={`${toolbarIconButtonClass} bg-cyan-600 text-white hover:bg-cyan-700`}
+            title="Preview and Print Upcoming Schedules"
+            aria-label="Preview and Print Upcoming Schedules"
+          >
+            {renderScheduleListIcon()}
           </button>
           <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="CSC Safety Snapshot" aria-label="Create CSC Safety Snapshot">
             {renderHistoryIcon()}
@@ -1108,9 +1267,7 @@ const BudgetDashboard = () => {
           <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import CSC Shifts" aria-label="Import CSC Shifts">
             {renderUploadIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-toolbar:save')} className={`${toolbarIconButtonClass} bg-blue-500 text-white hover:bg-blue-600`} title="Save CSC Safety Snapshot" aria-label="Save CSC Safety Snapshot">
-            {renderSaveIcon()}
-          </button>
+          {renderFullDashboardExportButton()}
         </>
       );
     }
@@ -1121,6 +1278,7 @@ const BudgetDashboard = () => {
           <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:add')} className={`${toolbarIconButtonClass} bg-slate-900 text-white hover:bg-slate-800`} title="Add CSC Opportunity" aria-label="Add CSC Opportunity">
             {renderPlusIcon()}
           </button>
+          {renderPrintButton('Print CSC Opportunities')}
           <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="CSC Opportunities Safety Snapshot" aria-label="Create CSC Opportunities Safety Snapshot">
             {renderHistoryIcon()}
           </button>
@@ -1130,9 +1288,7 @@ const BudgetDashboard = () => {
           <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import CSC Opportunities" aria-label="Import CSC Opportunities">
             {renderUploadIcon()}
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('csc-opportunities-toolbar:save')} className={`${toolbarIconButtonClass} bg-blue-500 text-white hover:bg-blue-600`} title="Save CSC Opportunities Snapshot" aria-label="Save CSC Opportunities Snapshot">
-            {renderSaveIcon()}
-          </button>
+          {renderFullDashboardExportButton()}
         </>
       );
     }
@@ -1147,13 +1303,9 @@ const BudgetDashboard = () => {
           </button>
           <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:archive')} className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`} title="Rides Archive Drawer" aria-label="Open Rides Archive Drawer">
             {renderArchiveIcon()}
-            <span>({ridesArchiveCount})</span>
+            <span className={toolbarCountBadgeClass}>{ridesArchiveCount}</span>
           </button>
-          <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:print')} className={`${toolbarIconButtonClass} bg-blue-600 text-white hover:bg-blue-700`} title="Print Rides" aria-label="Print Rides">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z" />
-            </svg>
-          </button>
+          {renderPrintButton('Print Rides')}
           <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="Rides Safety Snapshot" aria-label="Create Rides Safety Snapshot">
             {renderHistoryIcon()}
           </button>
@@ -1163,13 +1315,49 @@ const BudgetDashboard = () => {
           <button type="button" onClick={() => dispatchToolbarEvent('rides-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import Rides" aria-label="Import Rides">
             {renderUploadIcon()}
           </button>
+          {renderFullDashboardExportButton()}
         </>
       );
+    }
+
+    if (activeTab === 'paychecks') {
+      const paycheckArchiveCount = getStoredArrayLength(PAYCHECK_ARCHIVE_STORAGE_KEY);
+
+      return (
+        <>
+          <button type="button" onClick={() => openPaychecksAction('Add Paycheck')} className={`${toolbarIconButtonClass} bg-slate-900 text-white hover:bg-slate-800`} title="Add Paycheck" aria-label="Add Paycheck">
+            {renderPlusIcon()}
+          </button>
+          <button type="button" onClick={() => openPaychecksAction('Scan Paycheck')} className={`${toolbarIconButtonClass} bg-indigo-500 text-white hover:bg-indigo-600`} title="Scan Paycheck" aria-label="Scan Paycheck">
+            {renderScanIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('paychecks-toolbar:archive')} className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`} title="Paycheck Archive Drawer" aria-label="Open Paycheck Archive Drawer">
+            {renderArchiveIcon()}
+            <span className={toolbarCountBadgeClass}>{paycheckArchiveCount}</span>
+          </button>
+          {renderPrintButton('Print Paycheck History')}
+          <button type="button" onClick={() => dispatchToolbarEvent('paychecks-toolbar:snapshot')} className={`${toolbarIconButtonClass} bg-emerald-700 text-white hover:bg-emerald-800`} title="Paychecks Safety Snapshot" aria-label="Create Paychecks Safety Snapshot">
+            {renderHistoryIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('paychecks-toolbar:export')} className={`${toolbarIconButtonClass} bg-green-500 text-white hover:bg-green-600`} title="Export Paychecks" aria-label="Export Paychecks">
+            {renderDownloadIcon()}
+          </button>
+          <button type="button" onClick={() => dispatchToolbarEvent('paychecks-toolbar:import')} className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600`} title="Import Paychecks" aria-label="Import Paychecks">
+            {renderUploadIcon()}
+          </button>
+          {renderFullDashboardExportButton()}
+        </>
+      );
+    }
+
+    if (activeTab !== 'budget') {
+      return renderFullDashboardExportButton();
     }
 
     return (
       <>
         <button
+          type="button"
           onClick={() => setIsStatementScannerOpen(true)}
           className={`${toolbarIconButtonClass} bg-indigo-500 text-white hover:bg-indigo-600`}
           title="Scan Statement"
@@ -1179,14 +1367,17 @@ const BudgetDashboard = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => setIsBudgetArchiveDrawerOpen(true)}
           className={`${toolbarCountButtonClass} bg-purple-500 text-white hover:bg-purple-600`}
           title="Budget Archives"
           aria-label="Open Budget Archives"
         >
           {renderArchiveIcon()}
-          <span>({state.archived?.length || 0})</span>
+          <span className={toolbarCountBadgeClass}>{state.archived?.length || 0}</span>
         </button>
+
+        {renderPrintButton('Print Budget')}
 
         <button
           type="button"
@@ -1199,18 +1390,19 @@ const BudgetDashboard = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => setShowExportDialog(true)}
           className={`${toolbarIconButtonClass} bg-green-500 text-white hover:bg-green-600`}
-          title="Export JSON"
-          aria-label="Export JSON"
+          title="Export Budget Only"
+          aria-label="Export Budget Only"
         >
           {renderDownloadIcon()}
         </button>
 
         <label
           className={`${toolbarIconButtonClass} bg-amber-500 text-white hover:bg-amber-600 cursor-pointer`}
-          title="Import JSON"
-          aria-label="Import JSON"
+          title="Import Budget JSON"
+          aria-label="Import Budget JSON"
         >
           <input
             type="file"
@@ -1221,30 +1413,7 @@ const BudgetDashboard = () => {
           {renderUploadIcon()}
         </label>
 
-        <button
-          onClick={() => saveBudget()}
-          disabled={isSaving}
-          className={`${toolbarIconButtonClass} ${
-            isSaving
-              ? 'bg-gray-400 text-white cursor-not-allowed'
-              : 'bg-blue-500 text-white hover:bg-blue-600'
-          }`}
-          title="Save Budget"
-          aria-label="Save Budget"
-        >
-          {isSaving ? (
-            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
-          ) : (
-            renderSaveIcon()
-          )}
-        </button>
+        {renderFullDashboardExportButton()}
       </>
     );
   };
@@ -1269,71 +1438,6 @@ const BudgetDashboard = () => {
             padding-bottom: 0.75rem;
           }
 
-          .budget-mobile-header {
-            min-height: 0;
-            padding: 0.75rem;
-            border-radius: 1rem;
-          }
-
-          .budget-mobile-header > div {
-            min-height: 0;
-            gap: 0.625rem;
-          }
-
-          .budget-mobile-header > div > div:first-child > div:first-child {
-            gap: 0.625rem;
-          }
-
-          .budget-mobile-header > div > div:first-child > div:first-child > span {
-            width: 2.25rem;
-            height: 2.25rem;
-            border-radius: 0.625rem;
-          }
-
-          .budget-mobile-header > div > div:first-child > div:first-child > span svg {
-            width: 1.25rem;
-            height: 1.25rem;
-          }
-
-          .budget-mobile-header > div > div:first-child > div:first-child > h1 {
-            font-size: 1.375rem;
-            line-height: 1.5rem;
-          }
-
-          .budget-mobile-header > div > div:first-child > p {
-            margin-top: 0.375rem;
-            font-size: 0.8125rem;
-            line-height: 1.125rem;
-          }
-
-          .budget-mobile-header > div > div:first-child > div:last-child {
-            display: none;
-          }
-
-          .budget-mobile-header > div > div:last-child {
-            width: 100%;
-            min-height: 0;
-            gap: 0;
-          }
-
-          .budget-mobile-subnav {
-            display: grid;
-            width: 100%;
-            max-width: none;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 0.375rem;
-            padding: 0.375rem;
-            border-radius: 0.75rem;
-          }
-
-          .budget-mobile-subnav-button {
-            min-width: 0;
-            height: 2.25rem;
-            padding: 0 0.25rem;
-            font-size: 0.6875rem;
-            line-height: 1;
-            white-space: nowrap;
-          }
         }
       `}</style>
 
@@ -1355,9 +1459,9 @@ const BudgetDashboard = () => {
       )}
 
       <StickyToolbar bgTint={activeContentBackgroundClass} contentClassName="w-full px-3 sm:px-4 lg:px-6">
-        <div className="flex flex-col gap-0 py-2 xl:min-h-14 xl:flex-row xl:items-center xl:justify-between xl:gap-2">
-          <div className="relative w-full min-w-0 xl:w-auto xl:flex-1">
-            <div className="xl:hidden">
+        <div className="flex flex-col gap-0 py-2 lg:min-h-14 lg:flex-row lg:items-center lg:justify-between lg:gap-2">
+          <div className="relative w-full min-w-0 lg:w-auto lg:flex-1">
+            <div className="lg:hidden">
               <button
                 type="button"
                 onClick={() => setIsMobileNavOpen((current) => !current)}
@@ -1437,7 +1541,7 @@ const BudgetDashboard = () => {
               )}
             </div>
 
-            <div className="hidden w-full min-w-0 flex-nowrap items-center gap-1.5 xl:flex">
+            <div className="hidden w-full min-w-0 flex-nowrap items-center gap-1 lg:flex xl:gap-1.5">
               {tabs.map((tab) => {
                 const TabIcon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -1454,7 +1558,7 @@ const BudgetDashboard = () => {
                     }}
                     title={`Open ${tab.label} tab`}
                     aria-label={`Open ${tab.label} tab`}
-                    className={`inline-flex min-h-10 w-auto shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border-2 !border-black px-3 py-1.5 text-center text-sm font-black leading-tight transition-all duration-200 active:scale-95 ${
+                    className={`inline-flex min-h-10 w-auto shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-xl border-2 !border-black px-2 py-1.5 text-center text-xs font-black leading-tight transition-all duration-200 active:scale-95 xl:gap-1.5 xl:px-3 xl:text-sm ${
                       isActive
                         ? tab.id === 'budget'
                           ? activeBudgetTabClass
@@ -1472,7 +1576,7 @@ const BudgetDashboard = () => {
           </div>
 
           <div
-            className={`mobile-horizontal-scroll ${activeContentBackgroundClass} flex w-full flex-shrink-0 flex-nowrap items-center gap-1 overflow-y-hidden rounded-xl px-2 py-1.5 transition-colors sm:gap-2 xl:w-auto xl:rounded-none xl:bg-transparent xl:p-0`}
+            className={`mobile-horizontal-scroll ${activeContentBackgroundClass} flex w-full flex-shrink-0 flex-nowrap items-center gap-1 overflow-y-hidden rounded-xl px-2 py-1.5 transition-colors sm:gap-2 lg:w-auto lg:rounded-none lg:bg-transparent lg:p-0`}
           >
             {activeTab === 'budget' &&
             (activeBudgetTab === 'overview' || activeBudgetTab === 'editor') ? (
@@ -1608,7 +1712,7 @@ const BudgetDashboard = () => {
         <div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black bg-opacity-50 px-3 py-4 sm:px-4 sm:py-6">
           <div className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-lg bg-white p-4 shadow-xl sm:max-h-[calc(100vh-3rem)] sm:p-6">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 className="text-lg font-bold">Export Budget</h3>
+              <h3 className="text-lg font-bold">Export Budget Only</h3>
               <CloseScreenButton onClick={() => setShowExportDialog(false)} />
             </div>
 
@@ -1636,8 +1740,8 @@ const BudgetDashboard = () => {
               </button>
 
               <button
-                onClick={handleExportJSON}
-                title="Export budget JSON file"
+                onClick={handleBudgetExportJSON}
+                title="Export budget-only JSON file"
                 className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
               >
                 Export

@@ -1438,77 +1438,6 @@ const PremiumRidesListView = ({ rides = [], onClose }) => {
   );
 };
 
-const RidesSideDrawer = ({ title, subtitle, onClose, children }) => {
-  const titleId = `rides-drawer-${String(title || 'panel').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-  const subtitleId = `${titleId}-description`;
-  const drawerRef = useRef(null);
-  const onCloseRef = useRef(onClose);
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const previouslyFocusedElement = document.activeElement;
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') onCloseRef.current();
-    };
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', handleKeyDown);
-    drawerRef.current?.focus();
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-      if (previouslyFocusedElement instanceof HTMLElement && previouslyFocusedElement.isConnected) {
-        previouslyFocusedElement.focus();
-      }
-    };
-  }, []);
-
-  return (
-    <div className="fixed inset-0 z-[9998]">
-      <button
-        type="button"
-        className="absolute inset-0 bg-slate-950/40"
-        onClick={onClose}
-        aria-label={`Close ${title}`}
-        tabIndex={-1}
-      />
-      <aside
-        ref={drawerRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={subtitle ? subtitleId : undefined}
-        tabIndex={-1}
-        className="absolute right-0 top-0 flex h-full w-full max-w-[52rem] flex-col bg-white shadow-2xl"
-      >
-        <div className="flex min-h-[78px] items-center justify-between gap-4 border-b border-slate-200 px-4 py-3 sm:px-6 sm:py-4">
-          <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="break-words text-lg font-black leading-tight text-slate-900 sm:text-xl">
-              {title}
-            </h2>
-            {subtitle && (
-              <p id={subtitleId} className="mt-1 max-w-[60ch] break-words text-xs leading-5 text-slate-600 sm:text-sm">
-                {subtitle}
-              </p>
-            )}
-          </div>
-          <div className="shrink-0">
-            <CloseScreenButton onClick={onClose} />
-          </div>
-        </div>
-        <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6">
-          {children}
-        </div>
-      </aside>
-    </div>
-  );
-};
-
 const RidesTab = ({ searchQuery = '' }) => {
   const [rides, setRides] = useState(readStoredRides);
   const [archivedRides, setArchivedRides] = useState(readArchivedRides);
@@ -1522,32 +1451,8 @@ const RidesTab = ({ searchQuery = '' }) => {
   const [reportRange, setReportRange] = useState(getDefaultRideReportRange);
   const [isRideImportOpen, setIsRideImportOpen] = useState(false);
   const [isRideReportOpen, setIsRideReportOpen] = useState(false);
-  const [isRideDataOpen, setIsRideDataOpen] = useState(false);
   const [showPremiumRidesView, setShowPremiumRidesView] = useState(false);
   const fileInputRef = useRef(null);
-  const rideEditorRef = useRef(null);
-  const isRideEditorOpen = Boolean(editingRide);
-
-  useEffect(() => {
-    if (!editingRide) return undefined;
-
-    const previouslyFocusedElement = document.activeElement;
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') setEditingRide(null);
-    };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', handleKeyDown);
-    rideEditorRef.current?.focus();
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-      if (previouslyFocusedElement instanceof HTMLElement && previouslyFocusedElement.isConnected) {
-        previouslyFocusedElement.focus();
-      }
-    };
-  }, [isRideEditorOpen]);
 
   useEffect(() => {
     let rawDraft = '';
@@ -1937,7 +1842,6 @@ const RidesTab = ({ searchQuery = '' }) => {
       return next;
     });
     setScanText('');
-    setIsRideImportOpen(false);
   };
 
   const addBlankRide = () => {
@@ -1963,10 +1867,8 @@ const RidesTab = ({ searchQuery = '' }) => {
       ],
     });
 
-    setIsRideImportOpen(false);
-    setIsRideReportOpen(false);
-    setIsRideDataOpen(false);
-    setEditingRide(ride);
+    saveRides([...rides, ride], 'Blank ride added.');
+    setExpandedRideIds((current) => ({ ...current, [ride.id]: true }));
   };
 
   const deleteRide = (rideId) => {
@@ -2006,7 +1908,6 @@ const RidesTab = ({ searchQuery = '' }) => {
         if (!Array.isArray(importedRides)) throw new Error('Invalid rides file.');
         saveRides(importedRides, 'Rides imported.');
         if (importedArchivedRides.length) saveArchivedRides(importedArchivedRides, 'Rides and archive imported.');
-        setIsRideDataOpen(false);
       } catch (error) {
         setStatusMessage(`Import failed: ${error.message}`);
       }
@@ -2206,44 +2107,8 @@ const RidesTab = ({ searchQuery = '' }) => {
   return (
     <PageContainer surfaceClassName="min-h-screen bg-sky-100/70" className="rides-mobile-page flex flex-col gap-1.5 bg-sky-100/70 py-1.5 sm:gap-3 sm:bg-sky-50 sm:py-3">
       <style>{`
-        .rides-header-actions {
-          display: flex;
-          width: max-content;
-          min-width: max-content;
-          flex-wrap: nowrap;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .rides-header-action {
-          min-width: 0 !important;
-          padding-left: 0.625rem !important;
-          padding-right: 0.625rem !important;
-        }
-
         .rides-summary-title-mobile {
           display: none;
-        }
-
-        @media (max-width: 1199px) {
-          .rides-header-action {
-            width: 2.75rem !important;
-            min-width: 2.75rem !important;
-            padding-left: 0 !important;
-            padding-right: 0 !important;
-          }
-
-          .rides-header-action-label {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            padding: 0;
-            margin: -1px;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            white-space: nowrap;
-            border: 0;
-          }
         }
 
         @media (max-width: 639px) {
@@ -2295,7 +2160,6 @@ const RidesTab = ({ searchQuery = '' }) => {
           .rides-mobile-page textarea {
             line-height: 1.35;
           }
-
         }
       `}</style>
       <input ref={fileInputRef} type="file" accept=".json" onChange={importRides} className="hidden" />
@@ -2303,71 +2167,34 @@ const RidesTab = ({ searchQuery = '' }) => {
       <TabPageHeader
         icon={Car}
         title="Rides"
-        subtitle="Manage ride confirmations, receipts, fares, tips, and calendar status."
+        subtitle="Scan Modivcare and Lyft confirmations or Uber receipts, then manage ride details and calendar status."
         theme="sky"
         message={statusMessage}
         className="budget-mobile-header"
         actions={
-          <div className="rides-header-actions">
-            <button type="button" onClick={addBlankRide} title="Add a new ride" aria-label="Add a new ride" aria-haspopup="dialog" aria-expanded={isRideEditorOpen} className={`${TAB_HEADER_ACTION_CLASS} rides-header-action !h-11 !w-auto !gap-2 !text-sm bg-slate-950 text-white hover:bg-slate-800`}>
+          <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:gap-2">
+            <button type="button" onClick={addBlankRide} title="Add a new ride" aria-label="Add a new ride" className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-slate-950 text-white hover:bg-slate-800`}>
               <Plus className="h-4 w-4" />
-              <span className="rides-header-action-label">Add Ride</span>
+              <span className="sm:hidden">Add</span>
+              <span className="hidden sm:inline">Add Ride</span>
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsRideReportOpen(false);
-                setIsRideDataOpen(false);
-                setIsRideImportOpen(true);
-              }}
-              title="Import a ride email or Uber activity"
-              aria-label="Open Import Ride Email or Uber Activity"
-              aria-haspopup="dialog"
-              aria-expanded={isRideImportOpen}
-              className={`${TAB_HEADER_ACTION_CLASS} rides-header-action !h-11 !w-auto !gap-2 !text-sm bg-blue-700 text-white hover:bg-blue-600`}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              <span className="rides-header-action-label">Scan Ride</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsRideImportOpen(false);
-                setIsRideDataOpen(false);
-                setIsRideReportOpen(true);
-              }}
-              title="Open the ride fare and tip report"
-              aria-label="Open Ride Fare and Tip Report"
-              aria-haspopup="dialog"
-              aria-expanded={isRideReportOpen}
-              className={`${TAB_HEADER_ACTION_CLASS} rides-header-action !h-11 !w-auto !gap-2 !text-sm bg-emerald-700 text-white hover:bg-emerald-600`}
-            >
-              <DollarSign className="h-4 w-4" />
-              <span className="rides-header-action-label">Fare Report</span>
-            </button>
-            <button type="button" onClick={printRides} title="Print the rides list" aria-label="Print the rides list" className={`${TAB_HEADER_ACTION_CLASS} rides-header-action !h-11 !w-auto !gap-2 !text-sm bg-blue-700 text-white hover:bg-blue-600`}>
+            <button type="button" onClick={printRides} title="Print the rides list" aria-label="Print the rides list" className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-blue-600 text-white hover:bg-blue-500`}>
               <Printer className="h-4 w-4" />
-              <span className="rides-header-action-label">Print Rides</span>
+              <span className="sm:hidden">Print</span>
+              <span className="hidden sm:inline">Print Rides</span>
             </button>
-            <button type="button" onClick={() => setIsArchiveOpen(true)} title="Open the rides archive" aria-label={`Open the rides archive with ${summary.archivedCount} rides`} aria-haspopup="dialog" aria-expanded={isArchiveOpen} className={`${TAB_HEADER_ACTION_CLASS} rides-header-action !h-11 !w-auto !gap-2 !text-sm bg-violet-700 text-white hover:bg-violet-600`}>
+            <button type="button" onClick={() => setIsArchiveOpen(true)} title="Open the rides archive" aria-label={`Open the rides archive with ${summary.archivedCount} rides`} className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-violet-600 text-white hover:bg-violet-500`}>
               <Archive className="h-4 w-4" />
-              <span className="rides-header-action-label">Archive ({summary.archivedCount})</span>
+              <span className="sm:hidden">Archive {summary.archivedCount}</span>
+              <span className="hidden sm:inline">Archive ({summary.archivedCount})</span>
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsRideImportOpen(false);
-                setIsRideReportOpen(false);
-                setIsRideDataOpen(true);
-              }}
-              title="Open ride backup and data tools"
-              aria-label="Open ride backup and data tools"
-              aria-haspopup="dialog"
-              aria-expanded={isRideDataOpen}
-              className={`${TAB_HEADER_ACTION_CLASS} rides-header-action !h-11 !w-auto !gap-2 !text-sm bg-white text-sky-950 hover:bg-sky-50`}
-            >
+            <button type="button" onClick={exportRides} title="Export rides as JSON" aria-label="Export rides as JSON" className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm border border-white/30 bg-white/15 text-white hover:bg-white/25`}>
+              <Download className="h-4 w-4" />
+              Export
+            </button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} title="Import rides from JSON" aria-label="Import rides from JSON" className={`${TAB_HEADER_ACTION_CLASS} !h-9 !min-w-0 !gap-1 !px-1.5 !text-[10px] sm:!h-10 sm:!gap-2 sm:!px-4 sm:!text-sm bg-white text-sky-900 hover:bg-sky-50`}>
               <FileUp className="h-4 w-4" />
-              <span className="rides-header-action-label">Data</span>
+              Import
             </button>
           </div>
         }
@@ -2409,6 +2236,134 @@ const RidesTab = ({ searchQuery = '' }) => {
           </p>
           <p className="rides-summary-count mt-1 text-3xl font-black text-slate-950">{summary.archivedCount}</p>
         </div>
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
+        <button
+          type="button"
+          onClick={() => setIsRideImportOpen((current) => !current)}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-slate-50 sm:gap-3 sm:px-5 sm:py-3"
+          aria-expanded={isRideImportOpen}
+          aria-controls="ride-import-section"
+        >
+          <span className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 shrink-0 text-blue-700" />
+            <span className="text-base font-black leading-tight text-slate-900 sm:text-lg">Import Ride Email or Uber Activity</span>
+          </span>
+          {isRideImportOpen ? <ChevronDown className="h-5 w-5 shrink-0 text-slate-600" /> : <ChevronRight className="h-5 w-5 shrink-0 text-slate-600" />}
+        </button>
+
+        {isRideImportOpen && (
+          <div id="ride-import-section" className="border-t border-slate-200 p-3 sm:p-5">
+            <textarea
+              value={scanText}
+              onChange={(event) => setScanText(event.target.value)}
+              rows={6}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              placeholder={"Paste a Modivcare/Lyft confirmation, Uber receipt, or Uber Activity history list here.\n\nExample:\nPincay Dr & Kareem Ct\nJul 3 • 12:55 PM\n$13.74\nHelp"}
+            />
+            <div className="mt-2 flex flex-wrap gap-2 sm:mt-3">
+              <button type="button" onClick={addRideFromScan} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700 sm:px-4 sm:py-2 sm:text-sm">
+                Import Ride Text
+              </button>
+              <button type="button" onClick={() => setScanText('')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 sm:px-4 sm:py-2 sm:text-sm">
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-sky-200 bg-gradient-to-br from-white to-sky-50 shadow-sm sm:rounded-2xl">
+        <button
+          type="button"
+          onClick={() => setIsRideReportOpen((current) => !current)}
+          className="flex w-full items-start justify-between gap-2 px-3 py-2.5 text-left hover:bg-sky-50 sm:gap-3 sm:px-5 sm:py-3"
+          aria-expanded={isRideReportOpen}
+          aria-controls="ride-fare-report-section"
+        >
+          <span>
+            <span className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-sky-700" />
+              <span className="text-base font-black leading-tight text-slate-900 sm:text-lg">Ride Fare and Tip Report</span>
+            </span>
+            <span className="mt-0.5 block text-xs leading-4 text-slate-600 sm:mt-1 sm:text-sm">
+              Includes active and archived rides. Choose a weekly, monthly, all-time, or custom date range.
+            </span>
+          </span>
+          {isRideReportOpen ? <ChevronDown className="mt-0.5 h-5 w-5 shrink-0 text-slate-600" /> : <ChevronRight className="mt-0.5 h-5 w-5 shrink-0 text-slate-600" />}
+        </button>
+
+        {isRideReportOpen && (
+          <div id="ride-fare-report-section" className="border-t border-sky-200 p-3 sm:p-5">
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
+              <button type="button" onClick={() => applyRideReportPreset('week')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                This Week
+              </button>
+              <button type="button" onClick={() => applyRideReportPreset('month')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                This Month
+              </button>
+              <button type="button" onClick={() => applyRideReportPreset('last30')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                Last 30 Days
+              </button>
+              <button type="button" onClick={() => applyRideReportPreset('all')} className="rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-black text-sky-800 hover:bg-sky-100 sm:px-3 sm:py-2">
+                All Rides
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-2 xl:mt-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+              <label className="text-sm font-bold text-slate-700">
+                Start Date
+                <input
+                  type="date"
+                  value={reportRange.start}
+                  onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                />
+              </label>
+              <label className="text-sm font-bold text-slate-700">
+                End Date
+                <input
+                  type="date"
+                  value={reportRange.end}
+                  onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                />
+              </label>
+              <button type="button" onClick={printRideExpenseReport} className="mt-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-blue-700 px-2 text-xs font-black text-white hover:bg-blue-800 sm:h-10 sm:gap-2 sm:px-4 sm:text-sm">
+                <Printer className="h-4 w-4" />
+                Print Report
+              </button>
+              <button type="button" onClick={exportRideExpenseReport} className="mt-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-2 text-xs font-black text-white hover:bg-emerald-800 sm:h-10 sm:gap-2 sm:px-4 sm:text-sm">
+                <Download className="h-4 w-4" />
+                Export CSV
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-3 xl:grid-cols-5">
+              <div className="col-span-2 rounded-xl border border-slate-200 bg-white p-2 sm:col-span-1 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-xs">Rides</p>
+                <p className="mt-1 text-lg font-black text-slate-950 sm:text-2xl">{reportSummary.rideCount}</p>
+              </div>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-blue-700 sm:text-xs">Fares</p>
+                <p className="mt-1 text-lg font-black text-blue-950 sm:text-2xl">{formatRideCurrency(reportSummary.fare)}</p>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-amber-700 sm:text-xs">Fees</p>
+                <p className="mt-1 text-lg font-black text-amber-950 sm:text-2xl">{formatRideCurrency(reportSummary.fees)}</p>
+              </div>
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-violet-700 sm:text-xs">Tips</p>
+                <p className="mt-1 text-lg font-black text-violet-950 sm:text-2xl">{formatRideCurrency(reportSummary.tip)}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2 sm:p-3">
+                <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:text-xs">Total</p>
+                <p className="mt-1 text-lg font-black text-emerald-950 sm:text-2xl">{formatRideCurrency(reportSummary.total)}</p>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
@@ -2677,15 +2632,12 @@ const RidesTab = ({ searchQuery = '' }) => {
             className="absolute inset-0 bg-slate-950/40"
             onClick={() => setEditingRide(null)}
             aria-label="Close Ride Editor"
-            tabIndex={-1}
           />
-          <aside ref={rideEditorRef} role="dialog" aria-modal="true" aria-labelledby="ride-editor-title" aria-describedby="ride-editor-description" tabIndex={-1} className="absolute right-0 top-0 flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
+          <aside className="absolute right-0 top-0 flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5 sm:px-5 sm:py-4">
-              <div className="min-w-0 flex-1 pr-3">
-                <h2 id="ride-editor-title" className="break-words text-lg font-black leading-tight text-slate-900 sm:text-xl">
-                  {rides.some((ride) => ride.id === editingRide.id) ? 'Edit Ride' : 'Add Ride'}
-                </h2>
-                <p id="ride-editor-description" className="mt-1 max-w-[60ch] break-words text-xs leading-5 text-slate-600 sm:text-sm">Update ride details, leg times, locations, phone numbers, provider, and notes.</p>
+              <div>
+                <h2 className="text-lg font-black text-slate-900 sm:text-xl">Edit Ride</h2>
+                <p className="text-xs leading-4 text-slate-600 sm:text-sm">Update ride details, leg times, locations, phone numbers, provider, and notes.</p>
               </div>
               <CloseScreenButton onClick={() => setEditingRide(null)} />
             </div>
@@ -3007,196 +2959,24 @@ const RidesTab = ({ searchQuery = '' }) => {
         </div>
       )}
 
-      {isRideDataOpen && (
-        <RidesSideDrawer
-          title="Ride Data and Backups"
-          subtitle="Export or import your complete rides file, or download a dated safety snapshot before making major changes."
-          onClose={() => setIsRideDataOpen(false)}
-        >
-          <div className="mx-auto grid w-full max-w-[46rem] gap-4 sm:grid-cols-2">
-            <section className="min-w-0 rounded-2xl border border-sky-200 bg-sky-50 p-4 sm:p-5">
-              <Download className="h-6 w-6 text-sky-800" aria-hidden="true" />
-              <h3 className="mt-3 text-base font-black text-slate-950">Export Rides</h3>
-              <p className="mt-1 break-words text-sm leading-6 text-slate-700">
-                Download active and archived rides as one JSON backup file.
-              </p>
-              <button
-                type="button"
-                onClick={exportRides}
-                title="Export active and archived rides as JSON"
-                className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-sky-800 px-4 text-sm font-black text-white hover:bg-sky-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-700 focus-visible:ring-offset-2"
-              >
-                <Download className="h-4 w-4" aria-hidden="true" />
-                Export Rides
-              </button>
-            </section>
-
-            <section className="min-w-0 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 sm:p-5">
-              <FileUp className="h-6 w-6 text-indigo-800" aria-hidden="true" />
-              <h3 className="mt-3 text-base font-black text-slate-950">Import Backup</h3>
-              <p className="mt-1 break-words text-sm leading-6 text-slate-700">
-                Restore active and archived rides from a previously exported JSON file.
-              </p>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                title="Choose a rides JSON backup to import"
-                className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-indigo-800 px-4 text-sm font-black text-white hover:bg-indigo-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-700 focus-visible:ring-offset-2"
-              >
-                <FileUp className="h-4 w-4" aria-hidden="true" />
-                Choose Backup File
-              </button>
-            </section>
-
-            <section className="min-w-0 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 sm:col-span-2 sm:p-5">
-              <ShieldCheck className="h-6 w-6 text-emerald-800" aria-hidden="true" />
-              <h3 className="mt-3 text-base font-black text-slate-950">Safety Snapshot</h3>
-              <p className="mt-1 max-w-[60ch] break-words text-sm leading-6 text-slate-700">
-                Save a dated local snapshot and download a copy before bulk imports or other major updates.
-              </p>
-              <button
-                type="button"
-                onClick={saveSnapshot}
-                title="Download a dated rides safety snapshot"
-                className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-800 px-4 text-sm font-black text-white hover:bg-emerald-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"
-              >
-                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                Download Safety Snapshot
-              </button>
-            </section>
-          </div>
-        </RidesSideDrawer>
-      )}
-
-      {isRideImportOpen && (
-        <RidesSideDrawer
-          title="Import Ride Email or Uber Activity"
-          subtitle="Paste a Modivcare or Lyft confirmation, Uber receipt, or Uber Activity history to create or update a ride."
-          onClose={() => setIsRideImportOpen(false)}
-        >
-          <div className="mx-auto w-full max-w-[46rem]">
-            <label className="block text-sm font-black text-slate-800" htmlFor="ride-import-text">
-              Ride email or activity text
-            </label>
-            <textarea
-              id="ride-import-text"
-              value={scanText}
-              onChange={(event) => setScanText(event.target.value)}
-              rows={14}
-              className="mt-2 min-h-[18rem] w-full resize-y rounded-xl border border-slate-300 px-4 py-3 text-base leading-6 text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              placeholder={"Paste a Modivcare/Lyft confirmation, Uber receipt, or Uber Activity history list here.\n\nExample:\nPincay Dr & Kareem Ct\nJul 3 • 12:55 PM\n$13.74\nHelp"}
-            />
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setScanText('')}
-                title="Clear the pasted ride text"
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 hover:bg-slate-50"
-              >
-                <X className="h-4 w-4" />
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={addRideFromScan}
-                title="Import the pasted ride text"
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 text-sm font-black text-white hover:bg-blue-800"
-              >
-                <ShieldCheck className="h-4 w-4" />
-                Import Ride Text
-              </button>
-            </div>
-          </div>
-        </RidesSideDrawer>
-      )}
-
-      {isRideReportOpen && (
-        <RidesSideDrawer
-          title="Ride Fare and Tip Report"
-          subtitle="Includes active and archived rides. Choose a weekly, monthly, all-time, or custom date range."
-          onClose={() => setIsRideReportOpen(false)}
-        >
-          <div className="mx-auto w-full max-w-[46rem] space-y-5">
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-              <button type="button" onClick={() => applyRideReportPreset('week')} className="inline-flex h-11 items-center justify-center rounded-lg border border-sky-200 bg-white px-4 text-sm font-black text-sky-800 hover:bg-sky-100">
-                This Week
-              </button>
-              <button type="button" onClick={() => applyRideReportPreset('month')} className="inline-flex h-11 items-center justify-center rounded-lg border border-sky-200 bg-white px-4 text-sm font-black text-sky-800 hover:bg-sky-100">
-                This Month
-              </button>
-              <button type="button" onClick={() => applyRideReportPreset('last30')} className="inline-flex h-11 items-center justify-center rounded-lg border border-sky-200 bg-white px-4 text-sm font-black text-sky-800 hover:bg-sky-100">
-                Last 30 Days
-              </button>
-              <button type="button" onClick={() => applyRideReportPreset('all')} className="inline-flex h-11 items-center justify-center rounded-lg border border-sky-200 bg-white px-4 text-sm font-black text-sky-800 hover:bg-sky-100">
-                All Rides
-              </button>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm font-bold text-slate-700">
-                Start Date
-                <input
-                  type="date"
-                  value={reportRange.start}
-                  onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
-                  className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base"
-                />
-              </label>
-              <label className="text-sm font-bold text-slate-700">
-                End Date
-                <input
-                  type="date"
-                  value={reportRange.end}
-                  onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
-                  className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base"
-                />
-              </label>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <div className="col-span-2 rounded-xl border border-slate-200 bg-white p-3 sm:col-span-1">
-                <p className="text-xs font-black uppercase tracking-wide text-slate-500">Rides</p>
-                <p className="mt-1 text-2xl font-black text-slate-950">{reportSummary.rideCount}</p>
-              </div>
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                <p className="text-xs font-black uppercase tracking-wide text-blue-700">Fares</p>
-                <p className="mt-1 break-words text-xl font-black text-blue-950">{formatRideCurrency(reportSummary.fare)}</p>
-              </div>
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <p className="text-xs font-black uppercase tracking-wide text-amber-700">Fees</p>
-                <p className="mt-1 break-words text-xl font-black text-amber-950">{formatRideCurrency(reportSummary.fees)}</p>
-              </div>
-              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
-                <p className="text-xs font-black uppercase tracking-wide text-violet-700">Tips</p>
-                <p className="mt-1 break-words text-xl font-black text-violet-950">{formatRideCurrency(reportSummary.tip)}</p>
-              </div>
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Total</p>
-                <p className="mt-1 break-words text-xl font-black text-emerald-950">{formatRideCurrency(reportSummary.total)}</p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
-              <button type="button" onClick={printRideExpenseReport} title="Print the selected fare and tip report" className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 text-sm font-black text-white hover:bg-blue-800">
-                <Printer className="h-4 w-4" />
-                Print Report
-              </button>
-              <button type="button" onClick={exportRideExpenseReport} title="Export the selected fare and tip report as CSV" className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 text-sm font-black text-white hover:bg-emerald-800">
-                <Download className="h-4 w-4" />
-                Export CSV
-              </button>
-            </div>
-          </div>
-        </RidesSideDrawer>
-      )}
-
       {isArchiveOpen && (
-        <RidesSideDrawer
-          title="Rides Archive"
-          subtitle={`${archivedRides.length} completed ride${archivedRides.length === 1 ? '' : 's'}`}
-          onClose={() => setIsArchiveOpen(false)}
-        >
-          <div className="mx-auto w-full max-w-[46rem]">
+        <div className="fixed inset-0 z-[9998]">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/40"
+            onClick={() => setIsArchiveOpen(false)}
+            aria-label="Close Rides Archive"
+          />
+          <aside className="absolute right-0 top-0 flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5 sm:px-5 sm:py-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-900 sm:text-xl">Rides Archive</h2>
+                <p className="text-xs text-slate-600 sm:text-sm">{archivedRides.length} completed ride{archivedRides.length === 1 ? '' : 's'}</p>
+              </div>
+              <CloseScreenButton onClick={() => setIsArchiveOpen(false)} />
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 sm:p-5">
               {archivedRides.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm font-semibold text-slate-500 sm:p-8">
                   No completed rides archived yet.
@@ -3206,7 +2986,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                   {sortRides(archivedRides).map((ride) => (
                     <article key={ride.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0 flex-1">
+                        <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-black text-slate-700">
                               {formatDateForDisplay(ride.rideDate)}
@@ -3215,13 +2995,13 @@ const RidesTab = ({ searchQuery = '' }) => {
                               {ride.status || 'Completed'}
                             </span>
                           </div>
-                          <p className="mt-2 break-words text-sm font-bold leading-5 text-slate-900">
+                          <p className="mt-2 text-sm font-bold text-slate-900">
                             Confirmation #{ride.confirmationNumber || 'N/A'} · {ride.legs.length} leg{ride.legs.length === 1 ? '' : 's'}
                           </p>
-                          <p className="break-words text-sm leading-5 text-slate-600">{ride.provider || 'Provider not listed'}</p>
+                          <p className="text-sm text-slate-600">{ride.provider || 'Provider not listed'}</p>
                         </div>
 
-                        <div className="flex shrink-0 flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() => restoreRide(ride.id)}
@@ -3243,12 +3023,12 @@ const RidesTab = ({ searchQuery = '' }) => {
 
                       <div className="mt-3 space-y-2">
                         {ride.legs.map((leg) => (
-                          <div key={leg.id} className="min-w-0 rounded-lg bg-white p-3 text-sm">
-                            <p className="break-words font-black text-slate-900">{leg.leg}</p>
-                            <p className="break-words text-slate-700">
+                          <div key={leg.id} className="rounded-lg bg-white p-3 text-sm">
+                            <p className="font-black text-slate-900">{leg.leg}</p>
+                            <p className="text-slate-700">
                               Pickup: {leg.pickupTime || 'N/A'}{leg.pickupWindow ? `, window ${leg.pickupWindow}` : ''}
                             </p>
-                            <p className="break-words text-slate-600">
+                            <p className="text-slate-600">
                               {leg.pickupName || 'N/A'} to {leg.dropoffName || 'N/A'}
                             </p>
                           </div>
@@ -3258,8 +3038,9 @@ const RidesTab = ({ searchQuery = '' }) => {
                   ))}
                 </div>
               )}
-          </div>
-        </RidesSideDrawer>
+            </div>
+          </aside>
+        </div>
       )}
 
       {showPremiumRidesView && (

@@ -5705,13 +5705,13 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           message={saveMessage}
           className="budget-mobile-header"
           actions={
-            <div className="flex w-max flex-nowrap items-center gap-2">
+            <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-5 sm:gap-1.5 lg:gap-2">
               <button
                 type="button"
                 onClick={() => setShowScanDrawer(true)}
                 title="Scan CSC shift email"
                 aria-label="Scan CSC shift email"
-                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-blue-800 bg-blue-700 text-white hover:bg-blue-600`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-10 !w-full !min-w-0 !gap-1.5 !px-2 !text-xs sm:!gap-1 sm:!px-1.5 sm:!text-[11px] lg:!gap-1.5 lg:!px-2 lg:!text-xs xl:!gap-2 xl:!px-3 xl:!text-sm border border-white/30 bg-white/15 text-white hover:bg-white/25`}
               >
                 <StickyNote className="h-4 w-4" />
                 <span>Scan Email</span>
@@ -5720,7 +5720,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <label
                 title="Import CSC shifts from CSV"
                 aria-label="Import CSC shifts from CSV"
-                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm cursor-pointer bg-white text-amber-950 hover:bg-amber-50`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-10 !w-full !min-w-0 !gap-1.5 !px-2 !text-xs sm:!gap-1 sm:!px-1.5 sm:!text-[11px] lg:!gap-1.5 lg:!px-2 lg:!text-xs xl:!gap-2 xl:!px-3 xl:!text-sm cursor-pointer bg-white text-amber-900 hover:bg-amber-50`}
               >
                 <FileUp className="h-4 w-4" />
                 Import
@@ -5732,7 +5732,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={handleExportCsv}
                 title="Export CSC shifts"
                 aria-label="Export CSC shifts"
-                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm bg-indigo-700 text-white hover:bg-indigo-600`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-10 !w-full !min-w-0 !gap-1.5 !px-2 !text-xs sm:!gap-1 sm:!px-1.5 sm:!text-[11px] lg:!gap-1.5 lg:!px-2 lg:!text-xs xl:!gap-2 xl:!px-3 xl:!text-sm bg-indigo-600 text-white hover:bg-indigo-500`}
               >
                 <Download className="h-4 w-4" />
                 Export
@@ -5743,7 +5743,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={handleTogglePremiumView}
                 title="Print CSC events"
                 aria-label="Print CSC events"
-                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm bg-violet-700 text-white hover:bg-violet-600`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-10 !w-full !min-w-0 !gap-1.5 !px-2 !text-xs sm:!gap-1 sm:!px-1.5 sm:!text-[11px] lg:!gap-1.5 lg:!px-2 lg:!text-xs xl:!gap-2 xl:!px-3 xl:!text-sm bg-violet-600 text-white hover:bg-violet-500`}
               >
                 <ListChecks className="h-4 w-4" />
                 <span>Print Events</span>
@@ -5754,7 +5754,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 onClick={() => setShowUpcomingScheduleOverlay(true)}
                 title="Preview and print CSC shifts list"
                 aria-label="Preview and print CSC shifts list"
-                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm bg-cyan-800 text-white hover:bg-cyan-700`}
+                className={`${TAB_HEADER_ACTION_CLASS} !col-span-2 !h-10 !w-full !min-w-0 !gap-1.5 !px-2 !text-xs sm:!col-span-1 sm:!gap-1 sm:!px-1.5 sm:!text-[11px] lg:!gap-1.5 lg:!px-2 lg:!text-xs xl:!gap-2 xl:!px-3 xl:!text-sm bg-cyan-700 text-white hover:bg-cyan-600`}
               >
                 <Table2 className="h-4 w-4" />
                 <span>Print List</span>
@@ -5888,6 +5888,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               >
                 Active {activeShiftCount}
               </button>
+              <div className="col-span-3 inline-flex h-8 min-w-0 items-center justify-center rounded-lg bg-slate-100 px-2 text-center text-[11px] font-extrabold tabular-nums text-slate-700 sm:col-auto sm:h-10 sm:w-32 sm:px-3 sm:text-xs">
+                Showing {visibleShiftCount} of {filteredShifts.length}
+              </div>
             </div>
           </div>
 
@@ -6124,6 +6127,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   >
                     Active {activeShiftCount}
                   </button>
+                  <span className="hidden w-32 shrink-0 text-xs font-semibold tabular-nums text-slate-400 sm:inline-block">
+                    Showing {visibleShiftCount} of {filteredShifts.length}
+                  </span>
                 </div>
               </div>
 

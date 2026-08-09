@@ -4403,7 +4403,7 @@ const addParsedTasks = () => {
         theme="emerald"
         className="budget-mobile-header"
         actions={
-          <div className="flex w-max flex-nowrap items-center gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
             <button
               type="button"
               onClick={() => {
@@ -4414,7 +4414,7 @@ const addParsedTasks = () => {
               }}
               title="Add task"
               aria-label="Add task"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-4 !text-sm bg-amber-400 text-slate-950 shadow-lg shadow-slate-950/20 hover:bg-amber-300`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-full !gap-2 !px-4 !text-sm sm:!w-auto bg-amber-400 text-slate-950 shadow-lg shadow-slate-950/20 hover:bg-amber-300`}
             >
               <Plus className="h-4 w-4" />
               <span>Add Task</span>
@@ -4425,7 +4425,7 @@ const addParsedTasks = () => {
               onClick={() => setIsImportOpen(true)}
               title="Import structured task text"
               aria-label="Import structured task text"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-white/35 bg-white text-emerald-950 hover:bg-emerald-50`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-full !gap-2 !px-3 !text-sm sm:!w-auto border border-white/35 bg-white text-emerald-950 hover:bg-emerald-50`}
             >
               <FileText className="h-4 w-4" />
               <span>Import</span>
@@ -4436,7 +4436,7 @@ const addParsedTasks = () => {
               onClick={() => setShowPremiumTodoView(true)}
               title="Open the print and on-the-go task list"
               aria-label="Open the print and on-the-go task list"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-white/35 bg-white/15 text-white hover:bg-white/25`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-full !gap-2 !px-3 !text-sm sm:!w-auto border border-white/35 bg-white/15 text-white hover:bg-white/25`}
             >
               <ListTodo className="h-4 w-4" />
               <span>Print List</span>
@@ -4447,7 +4447,7 @@ const addParsedTasks = () => {
               onClick={() => setIsExportOpen(true)}
               title="Open export options"
               aria-label="Open export options"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-white/35 bg-white/15 text-white hover:bg-white/25`}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-full !gap-2 !px-3 !text-sm sm:!w-auto border border-white/35 bg-white/15 text-white hover:bg-white/25`}
             >
               <Download className="h-4 w-4" />
               <span>Export</span>
@@ -4457,99 +4457,40 @@ const addParsedTasks = () => {
       />
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/5">
-        <div className="border-b border-slate-200 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 px-3 py-3 text-white sm:px-4">
-          <div className="flex min-h-9 items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-base font-black leading-tight tracking-tight">Task overview</h3>
-              <p className="mt-0.5 text-xs font-medium leading-4 text-slate-300">Filter active tasks by status.</p>
+        <div className="border-b border-slate-200 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 px-4 py-4 text-white sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-black tracking-tight sm:text-lg">Task overview</h3>
+              <p className="mt-0.5 text-xs font-medium text-slate-300">Select a card to filter the list.</p>
             </div>
-            <span className="shrink-0 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-bold leading-5 text-white">
+            <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-bold text-white">
               {tasks.length} total
             </span>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Filter tasks by status">
+          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
             {[
-              {
-                key: "all",
-                label: "Active",
-                count: taskSummary.active,
-                icon: Check,
-                accent: "border-emerald-400",
-                countClass: "text-emerald-300",
-                selectedClass: "border-emerald-300 bg-emerald-50 text-slate-950",
-                selectedCountClass: "text-emerald-700",
-              },
-              {
-                key: "overdue",
-                label: "Overdue",
-                count: taskSummary.overdue,
-                icon: AlertCircle,
-                accent: "border-red-400",
-                countClass: "text-red-300",
-                selectedClass: "border-red-300 bg-red-50 text-slate-950",
-                selectedCountClass: "text-red-700",
-              },
-              {
-                key: "dueSoon",
-                label: "Due soon",
-                count: taskSummary.dueSoon,
-                icon: Clock,
-                accent: "border-amber-400",
-                countClass: "text-amber-300",
-                selectedClass: "border-amber-300 bg-amber-50 text-slate-950",
-                selectedCountClass: "text-amber-700",
-              },
-              {
-                key: "followUpDue",
-                label: "Follow-up due",
-                count: taskSummary.followUpDue,
-                icon: History,
-                accent: "border-fuchsia-400",
-                countClass: "text-fuchsia-300",
-                selectedClass: "border-fuchsia-300 bg-fuchsia-50 text-slate-950",
-                selectedCountClass: "text-fuchsia-700",
-              },
-            ].map((item) => {
-              const isSelected = taskViewFilter === item.key && showActiveOnly;
-              const StatusIcon = item.icon;
-
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => {
-                    setShowActiveOnly(true);
-                    setTaskViewFilter(item.key);
-                  }}
-                  title={`Show ${item.label.toLowerCase()} tasks`}
-                  aria-label={`Show ${item.count} ${item.label.toLowerCase()} tasks`}
-                  aria-pressed={isSelected}
-                  className={`group flex min-h-12 min-w-0 items-center gap-2.5 rounded-xl border border-l-4 px-3 py-1.5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-slate-950 ${
-                    isSelected
-                      ? `${item.selectedClass} shadow-md shadow-slate-950/20`
-                      : `${item.accent} border-y-white/10 border-r-white/10 bg-white/10 text-white hover:bg-white/[0.16]`
-                  }`}
-                >
-                  <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                      isSelected ? "bg-white/80" : "bg-white/10"
-                    }`}
-                    aria-hidden="true"
-                  >
-                    <StatusIcon className={`h-4 w-4 ${isSelected ? item.selectedCountClass : item.countClass}`} />
-                  </span>
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className={`shrink-0 text-xl font-black leading-none ${isSelected ? item.selectedCountClass : item.countClass}`}>
-                      {item.count}
-                    </span>
-                    <span className={`min-w-0 truncate text-sm font-bold leading-5 ${isSelected ? "text-slate-800" : "text-white"}`}>
-                      {item.label}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+              { key: "all", label: "Active", count: taskSummary.active, accent: "border-emerald-400", countClass: "text-emerald-300" },
+              { key: "overdue", label: "Overdue", count: taskSummary.overdue, accent: "border-red-400", countClass: "text-red-300" },
+              { key: "dueSoon", label: "Due soon", count: taskSummary.dueSoon, accent: "border-amber-400", countClass: "text-amber-300" },
+              { key: "followUpDue", label: "Follow-up due", count: taskSummary.followUpDue, accent: "border-fuchsia-400", countClass: "text-fuchsia-300" },
+            ].map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => {
+                  setShowActiveOnly(true);
+                  setTaskViewFilter(item.key);
+                }}
+                aria-pressed={taskViewFilter === item.key && showActiveOnly}
+                className={`min-h-16 rounded-xl border-l-4 bg-white/10 px-3 py-2 text-left transition hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white ${item.accent} ${
+                  taskViewFilter === item.key && showActiveOnly ? "ring-2 ring-white" : ""
+                }`}
+              >
+                <span className={`block text-2xl font-black leading-none ${item.countClass}`}>{item.count}</span>
+                <span className="mt-1 block text-xs font-bold text-white">{item.label}</span>
+              </button>
+            ))}
           </div>
         </div>
 

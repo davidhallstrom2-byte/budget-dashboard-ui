@@ -1,4 +1,4 @@
-const CACHE_NAME = "budget-dashboard-shell-v2-mobile-tabs";
+const CACHE_NAME = "budget-dashboard-shell-v3-v116-20260806";
 const APP_ROOT = "/budget-dashboard-fs/";
 
 const shouldNeverCache = (url) =>

@@ -12,6 +12,7 @@ import {
   ListTodo,
   MapPin,
   Plus,
+  Printer,
   RefreshCcw,
   Search,
   Sparkles,
@@ -951,6 +952,51 @@ const parseSofiEvents = (text = '', sourceUrl = SOFI_STADIUM_EVENTS_URL) => {
     index = blockEnd - 1;
   }
 
+  // Carbonhouse venue pages now place the date before the event title. Keep the
+  // older "More Info for" parser above, then also accept the current date-first layout.
+  for (let index = 0; index < lines.length; index += 1) {
+    const dateDetails = parseSofiDateTimeLine(lines[index]);
+    if (!dateDetails) continue;
+
+    let nextDateIndex = lines.length;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (parseSofiDateTimeLine(lines[cursor])) {
+        nextDateIndex = cursor;
+        break;
+      }
+    }
+
+    const blockLines = lines.slice(index + 1, nextDateIndex);
+    const titleLines = blockLines
+      .map((line) => sanitizeScannedLine(line).replace(/^More Info for\s+/i, ''))
+      .filter((line) => {
+        const normalized = normalizeText(line);
+        if (!normalized || /^https?:\/\//i.test(line)) return false;
+        if (isSofiScannerNoiseLine(line)) return false;
+        return !/^(on sale now|preseason|more info|suites|parking|all upcoming events|all event types|concerts|football|tours|list grid calendar)$/.test(
+          normalized
+        );
+      });
+
+    const eventTitle = titleLines[0] || '';
+    const subtitle = titleLines.slice(1).find(
+      (line) => normalizeText(line) !== normalizeText(eventTitle)
+    );
+    if (!eventTitle) continue;
+
+    parsed.push(
+      createBlankOpportunity({
+        eventName: subtitle ? `${eventTitle} - ${subtitle}` : eventTitle,
+        venue: 'SoFi Stadium',
+        eventDate: dateDetails.eventDate,
+        eventTime: dateDetails.eventTime,
+        sourceText: [lines[index], ...blockLines].join('\n'),
+        eventUrl: sourceUrl || SOFI_STADIUM_EVENTS_URL,
+        status: 'New',
+      })
+    );
+  }
+
   const byKey = new Map();
   parsed.forEach((item) => byKey.set(opportunityKey(item), item));
   return Array.from(byKey.values());
@@ -1125,7 +1171,7 @@ const parseRoseBowlTime = (value = '') => {
 const parseRoseBowlDateTimeLine = (line = '') => {
   const cleaned = sanitizeScannedLine(line);
   const match = cleaned.match(
-    /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(20\d{2})\s*\/\s*(.+)$/i
+    /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(20\d{2})(?:\s*[\/|•·–—-]\s*(.+))?$/i
   );
 
   if (!match) return null;
@@ -1133,10 +1179,16 @@ const parseRoseBowlDateTimeLine = (line = '') => {
   const month = ROSE_BOWL_MONTH_INDEX[match[1].toLowerCase()];
   const day = Number(match[2]);
   const year = Number(match[3]);
-  const listedTimes = match[4]
-    .split(',')
+  const trailingText = sanitizeScannedLine(match[4] || '');
+  const listedTimes = trailingText
+    .split(/\s*(?:,|\/|\||•|·)\s*/)
     .map((value) => sanitizeScannedLine(value))
-    .filter(Boolean);
+    .filter((value) => Boolean(parseRoseBowlTime(value)));
+  const inlineEventName = sanitizeScannedLine(
+    trailingText
+      .replace(/\b\d{1,2}(?::\d{2})?\s*(?:AM|PM)\b(?:\s*,\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)\b)*/gi, '')
+      .replace(/^[\/|•·–—-]+|[\/|•·–—-]+$/g, '')
+  );
 
   if (!month || !day || day > 31 || !year) return null;
 
@@ -1144,6 +1196,7 @@ const parseRoseBowlDateTimeLine = (line = '') => {
     eventDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     eventTime: parseRoseBowlTime(listedTimes[0] || ''),
     listedTimes,
+    inlineEventName,
   };
 };
 
@@ -1188,7 +1241,7 @@ const parseRoseBowlEvents = (text = '', sourceUrl = ROSE_BOWL_EVENTS_URL) => {
     const eventBlock = lines
       .slice(index + 1, nextDateIndex)
       .filter((line) => !isRoseBowlScannerNoiseLine(line) && !/^https?:\/\//i.test(line));
-    const eventName = eventBlock[0] || '';
+    const eventName = dateDetails.inlineEventName || eventBlock[0] || '';
 
     if (!eventName) {
       index = nextDateIndex - 1;
@@ -1263,7 +1316,7 @@ const parseHollywoodBowlTime = (value = '') => {
 const parseHollywoodBowlDateLine = (line = '') => {
   const cleaned = sanitizeScannedLine(line);
   const match = cleaned.match(
-    /^(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat),?\s+([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,\s*(20\d{2}))?$/i
+    /^(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?\s*(?:\/|,)?\s*([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(20\d{2}))?(?:\s*(?:-|–|—|\/|\|)\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
   );
 
   if (!match) return null;
@@ -1278,6 +1331,7 @@ const parseHollywoodBowlDateLine = (line = '') => {
     month,
     day,
     explicitYear,
+    eventTime: parseHollywoodBowlTime(match[4] || ''),
   };
 };
 
@@ -1366,9 +1420,9 @@ const parseHollywoodBowlEvents = (text = '', sourceUrl = HOLLYWOOD_BOWL_EVENTS_U
     lastEventMonth = dateDetails.month;
 
     let timeLine = '';
-    let eventTime = '';
+    let eventTime = dateDetails.eventTime || '';
 
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    for (let cursor = index + 1; !eventTime && cursor < lines.length; cursor += 1) {
       const candidate = lines[cursor];
 
       if (isHollywoodBowlScannerNoiseLine(candidate) || /^https?:\/\//i.test(candidate)) continue;
@@ -1482,7 +1536,7 @@ const parseShrineDateLine = (line = '', fallbackYear = SHRINE_DEFAULT_SCAN_YEAR)
 const parseShrineInlineEventLine = (line = '', fallbackYear = SHRINE_DEFAULT_SCAN_YEAR) => {
   const cleaned = sanitizeScannedLine(line);
   const match = cleaned.match(
-    /^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\s+)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(20\d{2}))?\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(.+)$/i
+    /^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,?\s*)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(20\d{2}))?\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(.+)$/i
   );
 
   if (!match) return null;
@@ -1492,6 +1546,30 @@ const parseShrineInlineEventLine = (line = '', fallbackYear = SHRINE_DEFAULT_SCA
   const year = Number(match[3] || fallbackYear || SHRINE_DEFAULT_SCAN_YEAR);
   const eventTime = parseShrineTime(match[4]);
   const eventName = sanitizeScannedLine(match[5]);
+
+  if (!month || !day || day > 31 || !year || !eventName) return null;
+
+  return {
+    eventName,
+    eventDate: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    eventTime,
+    sourceText: cleaned,
+  };
+};
+
+const parseShrineEmbeddedEventLine = (line = '', fallbackYear = SHRINE_DEFAULT_SCAN_YEAR) => {
+  const cleaned = sanitizeScannedLine(line);
+  const match = cleaned.match(
+    /^(.+?)\s+(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,?\s*([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,?\s*(20\d{2}))?\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\.?$/i
+  );
+
+  if (!match) return null;
+
+  const month = SHRINE_MONTH_INDEX[match[2].toLowerCase()];
+  const day = Number(match[3]);
+  const year = Number(match[4] || fallbackYear || SHRINE_DEFAULT_SCAN_YEAR);
+  const eventTime = parseShrineTime(match[5]);
+  const eventName = sanitizeScannedLine(match[1]);
 
   if (!month || !day || day > 31 || !year || !eventName) return null;
 
@@ -1530,7 +1608,9 @@ const parseShrineEvents = (text = '', sourceUrl = SHRINE_EVENTS_URL) => {
   let currentYear = SHRINE_DEFAULT_SCAN_YEAR;
 
   for (let index = 0; index < lines.length; index += 1) {
-    const inlineEvent = parseShrineInlineEventLine(lines[index], currentYear);
+    const inlineEvent =
+      parseShrineInlineEventLine(lines[index], currentYear) ||
+      parseShrineEmbeddedEventLine(lines[index], currentYear);
 
     if (inlineEvent && !isShrineScannerNoiseLine(inlineEvent.eventName)) {
       parsed.push(
@@ -1725,7 +1805,7 @@ const parseNovoEvents = (text = '', sourceUrl = NOVO_THEATER_EVENTS_URL) => {
 const parseLongBeachAmphitheaterDateLine = (line = '') => {
   const cleaned = sanitizeScannedLine(line);
   const detailedMatch = cleaned.match(
-    /^([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(20\d{2})(?:\s*[•·|–—-]\s*(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?\s+)?(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
+    /^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,?\s*)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(20\d{2})(?:\s*[\/|•·–—-]\s*(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,?\s*)?(\d{1,2}(?::\d{2})?\s*(?:AM|PM)))?$/i
   );
 
   if (detailedMatch) {
@@ -2136,6 +2216,25 @@ const parseYouTubeTheaterDateLine = (line = '') => {
   };
 };
 
+const parseYouTubeTheaterInlineEvent = (line = '') => {
+  const cleaned = sanitizeScannedLine(line);
+  const match = cleaned.match(
+    /^(?:(?:Sun|Mon|Tue|Tues|Wed|Thu|Thur|Fri|Sat)\.?,?\s*)?([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s*(20\d{2})\s*(?:\/|\||-|–|—)\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(.+)$/i
+  );
+  if (!match) return null;
+
+  const eventDate = createVenueScannerDate(match[1], match[2], match[3]);
+  const eventName = sanitizeScannedLine(match[5]);
+  if (!eventDate || !eventName) return null;
+
+  return {
+    eventDate,
+    eventTime: parseVenueScannerTime(match[4]),
+    eventName,
+    sourceText: cleaned,
+  };
+};
+
 const parseYouTubeTheaterEventStart = (line = '') => {
   const cleaned = sanitizeScannedLine(line);
   if (!/^event starts?\s+/i.test(cleaned)) return '';
@@ -2198,6 +2297,22 @@ const parseYouTubeTheaterEvents = (
   const parsed = [];
 
   for (let index = 0; index < lines.length; index += 1) {
+    const inlineEvent = parseYouTubeTheaterInlineEvent(lines[index]);
+    if (inlineEvent) {
+      parsed.push(
+        createBlankOpportunity({
+          eventName: inlineEvent.eventName,
+          venue: 'YouTube Theater',
+          eventDate: inlineEvent.eventDate,
+          eventTime: inlineEvent.eventTime,
+          sourceText: inlineEvent.sourceText,
+          eventUrl: sourceUrl || YOUTUBE_THEATER_EVENTS_URL,
+          status: 'New',
+        })
+      );
+      continue;
+    }
+
     const dateDetails = parseYouTubeTheaterDateLine(lines[index]);
     if (!dateDetails) continue;
 
@@ -2301,6 +2416,96 @@ const getSimilarityScore = (firstValue = '', secondValue = '') => {
   return matches / Math.max(firstTokens.size, secondTokens.size);
 };
 
+const EVENT_IDENTITY_NOISE_TOKENS = new Set([
+  '2026',
+  'csc',
+  'dns',
+  'event',
+  'main',
+  'production',
+  'sec',
+  'security',
+  'shift',
+]);
+
+const normalizeEventIdentity = (value = '') =>
+  normalizeText(value)
+    .replace(/\b(?:and|amp)\b/g, ' ')
+    .replace(/\bday\s*(\d+)\b/g, ' n$1 ')
+    .replace(/\bnight\s*(\d+)\b/g, ' n$1 ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const getEventIdentityTokens = (value = '') =>
+  normalizeEventIdentity(value)
+    .split(' ')
+    .filter((token) => token && !EVENT_IDENTITY_NOISE_TOKENS.has(token));
+
+const getEditDistance = (firstValue = '', secondValue = '') => {
+  const first = String(firstValue || '');
+  const second = String(secondValue || '');
+  if (!first) return second.length;
+  if (!second) return first.length;
+
+  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+  const current = new Array(second.length + 1).fill(0);
+
+  for (let firstIndex = 1; firstIndex <= first.length; firstIndex += 1) {
+    current[0] = firstIndex;
+    for (let secondIndex = 1; secondIndex <= second.length; secondIndex += 1) {
+      const substitutionCost = first[firstIndex - 1] === second[secondIndex - 1] ? 0 : 1;
+      current[secondIndex] = Math.min(
+        current[secondIndex - 1] + 1,
+        previous[secondIndex] + 1,
+        previous[secondIndex - 1] + substitutionCost
+      );
+    }
+    for (let secondIndex = 0; secondIndex <= second.length; secondIndex += 1) {
+      previous[secondIndex] = current[secondIndex];
+    }
+  }
+
+  return previous[second.length];
+};
+
+const eventIdentityTokensMatch = (firstToken = '', secondToken = '') => {
+  if (!firstToken || !secondToken) return false;
+  if (firstToken === secondToken) return true;
+  if (firstToken.length >= 5 && secondToken.length >= 5) {
+    if (firstToken.includes(secondToken) || secondToken.includes(firstToken)) return true;
+    return getEditDistance(firstToken, secondToken) <= 2;
+  }
+  return false;
+};
+
+const getEventIdentityScore = (firstValue = '', secondValue = '') => {
+  const firstTokens = getEventIdentityTokens(firstValue);
+  const secondTokens = getEventIdentityTokens(secondValue);
+  if (!firstTokens.length || !secondTokens.length) return 0;
+
+  const usedSecondIndexes = new Set();
+  let matches = 0;
+
+  firstTokens.forEach((firstToken) => {
+    const matchIndex = secondTokens.findIndex(
+      (secondToken, index) =>
+        !usedSecondIndexes.has(index) && eventIdentityTokensMatch(firstToken, secondToken)
+    );
+    if (matchIndex < 0) return;
+    usedSecondIndexes.add(matchIndex);
+    matches += 1;
+  });
+
+  return matches / Math.max(firstTokens.length, secondTokens.length);
+};
+
+const getOpportunityShiftEventScore = (opportunity = {}, shift = {}) =>
+  Math.max(
+    getEventIdentityScore(opportunity.eventName, shift.event),
+    getEventIdentityScore(opportunity.eventName, shift.jobName),
+    getEventIdentityScore(opportunity.eventName, shift.shiftName)
+  );
+
 const readCscShifts = () => {
   const active = readArray(CSC_STORAGE_KEY, []).map((shift) => ({ ...shift, recordSource: 'active' }));
   const archived = readArray(CSC_ARCHIVE_STORAGE_KEY, []).map((shift) => ({ ...shift, recordSource: 'archived' }));
@@ -2330,27 +2535,164 @@ const getResolvedOpportunityStatus = (opportunity = {}, allShifts = readCscShift
 const isOpportunityCompleted = (opportunity = {}, allShifts = readCscShifts()) =>
   getResolvedOpportunityStatus(opportunity, allShifts) === 'Completed';
 
-const findMatchingCscShift = (opportunity = {}) => {
-  const candidates = readCscShifts().filter(
-    (shift) =>
-      !isCancelledShiftStatus(shift.shiftStatus) &&
-      shift.startDate === opportunity.eventDate
-  );
-  if (!candidates.length) return null;
-
+const getMatchingCscShiftResult = (opportunity = {}, allShifts = readCscShifts()) => {
   const canonicalOpportunityVenue = canonicalVenueName(opportunity.venue);
-  const scored = candidates.map((shift) => {
-    const venueScore = canonicalVenueName(shift.venue) === canonicalOpportunityVenue ? 3 : 0;
-    const eventScore = Math.max(
-      getSimilarityScore(opportunity.eventName, shift.event),
-      getSimilarityScore(opportunity.eventName, shift.jobName),
-      getSimilarityScore(opportunity.eventName, shift.shiftName)
-    );
-    return { shift, score: venueScore + eventScore * 3 };
+  const candidatesById = new Map();
+
+  allShifts.forEach((shift) => {
+    if (!shift?.id || isCancelledShiftStatus(shift.shiftStatus)) return;
+    if (shift.startDate !== opportunity.eventDate) return;
+    if (canonicalVenueName(shift.venue) !== canonicalOpportunityVenue) return;
+
+    const eventScore = getOpportunityShiftEventScore(opportunity, shift);
+    if (eventScore < 0.45) return;
+
+    const existing = candidatesById.get(shift.id);
+    if (!existing || eventScore > existing.eventScore) {
+      candidatesById.set(shift.id, { shift, eventScore });
+    }
   });
 
-  scored.sort((first, second) => second.score - first.score);
-  return scored[0]?.score >= 3 ? scored[0].shift : null;
+  const ranked = Array.from(candidatesById.values()).sort((first, second) => {
+    if (second.eventScore !== first.eventScore) return second.eventScore - first.eventScore;
+    if (first.shift.recordSource !== second.shift.recordSource) {
+      return first.shift.recordSource === 'active' ? -1 : 1;
+    }
+    return `${first.shift.startTime || ''}|${first.shift.finishTime || ''}`.localeCompare(
+      `${second.shift.startTime || ''}|${second.shift.finishTime || ''}`
+    );
+  });
+
+  if (!ranked.length) return { match: null, ambiguousMatches: [], rankedMatches: [] };
+
+  const topScore = ranked[0].eventScore;
+  const equallyStrong = ranked.filter((candidate) => topScore - candidate.eventScore <= 0.08);
+  const distinctWindows = new Set(
+    equallyStrong.map(({ shift }) =>
+      [shift.startDate, shift.startTime, shift.finishDate || shift.startDate, shift.finishTime].join('|')
+    )
+  );
+
+  if (equallyStrong.length > 1 && distinctWindows.size > 1) {
+    return {
+      match: null,
+      ambiguousMatches: equallyStrong.map(({ shift }) => shift),
+      rankedMatches: ranked.map(({ shift }) => shift),
+    };
+  }
+
+  return {
+    match: ranked[0].shift,
+    ambiguousMatches: [],
+    rankedMatches: ranked.map(({ shift }) => shift),
+  };
+};
+
+const findMatchingCscShift = (opportunity = {}, allShifts = readCscShifts()) =>
+  getMatchingCscShiftResult(opportunity, allShifts).match;
+
+const getShiftOpportunityEventName = (shift = {}) => {
+  const event = String(shift.event || '').trim();
+  const jobName = String(shift.jobName || '').trim();
+  const genericEvent = /^(?:accepted csc shift|csc courtesy shift reminder|event|shift)$/i.test(event);
+  const genericJobName = /^(?:accepted csc shift|csc courtesy shift reminder|job|shift)$/i.test(jobName);
+
+  if (jobName && !genericJobName) return jobName;
+  if (event && !genericEvent) return event;
+  return jobName || event || 'Scheduled CSC shift';
+};
+
+const createOpportunityFromScheduledShift = (shift = {}) =>
+  createBlankOpportunity({
+    id: `csc-opportunity-from-shift-${shift.id}`,
+    eventName: getShiftOpportunityEventName(shift),
+    venue: canonicalVenueName(shift.venue),
+    eventDate: shift.startDate || '',
+    eventTime: shift.startTime || '',
+    expectedEndTime:
+      !shift.finishDate || shift.finishDate === shift.startDate ? shift.finishTime || '' : '',
+    status: getOpportunityStatusFromLinkedShift(shift),
+    linkedCscShiftId: shift.id,
+    lastVerifiedAt: new Date().toISOString(),
+    sourceText: 'Created automatically from a scheduled CSC shift.',
+  });
+
+const repairOpportunityShiftLinks = (items = [], allShifts = readCscShifts()) => {
+  const currentItems = Array.isArray(items) ? items : [];
+  const nonCancelledShifts = allShifts.filter(
+    (shift) => shift?.id && !isCancelledShiftStatus(shift.shiftStatus)
+  );
+  const linkedShiftIds = new Set();
+  const representedShiftIds = new Set();
+  let changed = false;
+
+  const repairedItems = currentItems.map((opportunity) => {
+    const explicitLinkedShift = getLinkedCscShiftForOpportunity(opportunity, allShifts);
+
+    if (explicitLinkedShift) {
+      linkedShiftIds.add(explicitLinkedShift.id);
+      representedShiftIds.add(explicitLinkedShift.id);
+      const nextStatus = getOpportunityStatusFromLinkedShift(explicitLinkedShift);
+      if (
+        opportunity.linkedCscShiftId === explicitLinkedShift.id &&
+        opportunity.status === nextStatus
+      ) {
+        return opportunity;
+      }
+
+      changed = true;
+      return createBlankOpportunity({
+        ...opportunity,
+        linkedCscShiftId: explicitLinkedShift.id,
+        status: nextStatus,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    const result = getMatchingCscShiftResult(opportunity, allShifts);
+    result.rankedMatches.forEach((shift) => representedShiftIds.add(shift.id));
+
+    if (!result.match) {
+      if (!opportunity.linkedCscShiftId) return opportunity;
+      changed = true;
+      return createBlankOpportunity({
+        ...opportunity,
+        linkedCscShiftId: '',
+        status: opportunity.status === 'Scheduled' ? 'New' : opportunity.status,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    linkedShiftIds.add(result.match.id);
+    representedShiftIds.add(result.match.id);
+    changed = true;
+    return createBlankOpportunity({
+      ...opportunity,
+      linkedCscShiftId: result.match.id,
+      status: getOpportunityStatusFromLinkedShift(result.match),
+      lastVerifiedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  const currentDate = todayIso();
+  nonCancelledShifts.forEach((shift) => {
+    if (!shift.startDate || shift.startDate < currentDate) return;
+    if (linkedShiftIds.has(shift.id) || representedShiftIds.has(shift.id)) return;
+    if (!shift.venue || (!shift.event && !shift.jobName && !shift.shiftName)) return;
+
+    repairedItems.push(createOpportunityFromScheduledShift(shift));
+    linkedShiftIds.add(shift.id);
+    changed = true;
+  });
+
+  const sortedItems = repairedItems.sort((first, second) =>
+    `${first.eventDate || ''} ${first.eventTime || ''} ${first.eventName || ''}`.localeCompare(
+      `${second.eventDate || ''} ${second.eventTime || ''} ${second.eventName || ''}`
+    )
+  );
+
+  return { opportunities: sortedItems, changed };
 };
 
 const isOpportunityActiveForDateConflict = (opportunity = {}) =>
@@ -2604,6 +2946,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [eventWatchReport, setEventWatchReport] = useState(() => loadEventWatchReport());
   const [eventWatchReportText, setEventWatchReportText] = useState('');
   const [showConflictSection, setShowConflictSection] = useState(false);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [editingOpportunity, setEditingOpportunity] = useState(() => createBlankOpportunity());
   const [scanText, setScanText] = useState('');
   const [scanVenue, setScanVenue] = useState('Kia Forum');
@@ -2716,39 +3059,15 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       const allShifts = readCscShifts();
 
       setOpportunities((current) => {
-        let changed = false;
-        const next = current.map((opportunity) => {
-          const linkedShift = getLinkedCscShiftForOpportunity(opportunity, allShifts);
+        const repairResult = repairOpportunityShiftLinks(current, allShifts);
+        if (!repairResult.changed) return current;
 
-          if (!linkedShift) {
-            if (!opportunity.linkedCscShiftId) return opportunity;
-            changed = true;
-            return createBlankOpportunity({
-              ...opportunity,
-              linkedCscShiftId: '',
-              status: opportunity.status === 'Scheduled' ? 'New' : opportunity.status,
-            });
-          }
-
-          const nextStatus = getOpportunityStatusFromLinkedShift(linkedShift);
-          if (
-            opportunity.linkedCscShiftId === linkedShift.id &&
-            opportunity.status === nextStatus
-          ) {
-            return opportunity;
-          }
-
-          changed = true;
-          return createBlankOpportunity({
-            ...opportunity,
-            linkedCscShiftId: linkedShift.id,
-            status: nextStatus,
-          });
-        });
-
-        // A scheduled shift may conflict with another venue opportunity, but the
-        // opportunity must remain available so David can choose which event to work.
-        return changed ? next : current;
+        writeOpportunitySnapshot(
+          'Before automatic CSC opportunity and shift link repair',
+          current,
+          venueContacts
+        );
+        return archiveExpiredOpportunities(repairResult.opportunities);
       });
     };
 
@@ -2772,7 +3091,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       window.removeEventListener('focus', refreshCscShiftSync);
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [venueContacts]);
 
   useEffect(() => {
     let opportunityId = '';
@@ -2998,7 +3317,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   };
 
   const handleCheckScheduled = (opportunity) => {
-    const match = findMatchingCscShift(opportunity);
+    const matchResult = getMatchingCscShiftResult(opportunity);
+    const match = matchResult.match;
 
     if (match) {
       if (!confirmSameDateConflict(opportunity, 'link this scheduled CSC shift')) return;
@@ -3014,6 +3334,21 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         nextStatus === 'Completed'
           ? `Completed CSC shift found and linked for ${opportunity.eventName}.`
           : `Scheduled shift found and linked for ${opportunity.eventName}.`
+      );
+      return;
+    }
+
+    if (matchResult.ambiguousMatches.length) {
+      const timeOptions = matchResult.ambiguousMatches
+        .map(
+          (shift) =>
+            `${formatTime(shift.startTime)} to ${formatTime(shift.finishTime)}${
+              shift.jobName ? `, ${shift.jobName}` : ''
+            }`
+        )
+        .join('; ');
+      flashMessage(
+        `Multiple CSC shifts match ${opportunity.eventName}: ${timeOptions}. Open the correct shift and link it manually.`
       );
       return;
     }
@@ -3440,17 +3775,21 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     flashMessage(saveSnapshot('Manual CSC opportunities snapshot') ? 'CSC opportunities safety snapshot saved.' : 'Snapshot failed.');
   };
 
+  const openPrintPreview = () => setShowPrintPreview(true);
+
   useEffect(() => {
     const openAdd = () => openAddOpportunity();
     const snapshot = () => handleManualSnapshot();
     const exportData = () => handleExport();
     const importData = () => importInputRef.current?.click();
+    const printData = () => openPrintPreview();
 
     window.addEventListener('csc-opportunities-toolbar:add', openAdd);
     window.addEventListener('csc-opportunities-toolbar:snapshot', snapshot);
     window.addEventListener('csc-opportunities-toolbar:save', snapshot);
     window.addEventListener('csc-opportunities-toolbar:export', exportData);
     window.addEventListener('csc-opportunities-toolbar:import', importData);
+    window.addEventListener('csc-opportunities-toolbar:print', printData);
 
     return () => {
       window.removeEventListener('csc-opportunities-toolbar:add', openAdd);
@@ -3458,6 +3797,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       window.removeEventListener('csc-opportunities-toolbar:save', snapshot);
       window.removeEventListener('csc-opportunities-toolbar:export', exportData);
       window.removeEventListener('csc-opportunities-toolbar:import', importData);
+      window.removeEventListener('csc-opportunities-toolbar:print', printData);
     };
   }, [opportunities, venueContacts]);
 
@@ -3504,7 +3844,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       (key === 'scheduled' && statusFilter === 'Scheduled' && !summaryFilter) ||
       (key !== 'scheduled' && summaryFilter === key);
 
-    return `csc-summary-card ${colorClassName} rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 ${
+    return `csc-summary-card ${colorClassName} relative overflow-hidden rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 ${
       isActive ? 'ring-2 ring-slate-950 ring-offset-2' : ''
     }`;
   };
@@ -3669,8 +4009,152 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   ).length;
   const notesCount = activeOpportunities.filter((item) => String(item.notes || '').trim()).length;
 
+  const printOpportunityRows = useMemo(
+    () =>
+      activeOpportunities
+        .map((opportunity) => ({
+          opportunity,
+          status: getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus),
+          linkedShift: getLinkedCscShiftForOpportunity(opportunity, allCscShiftsForStatus),
+          ambiguousMatches: getLinkedCscShiftForOpportunity(opportunity, allCscShiftsForStatus)
+            ? []
+            : getMatchingCscShiftResult(opportunity, allCscShiftsForStatus).ambiguousMatches,
+          dateConflicts: sameDateConflictMap.get(opportunity.id) || [],
+          shiftConflicts: scheduledShiftConflictMap.get(opportunity.id) || [],
+        }))
+        .sort((first, second) =>
+          `${first.opportunity.eventDate || '9999-99-99'}|${first.opportunity.eventTime || '99:99'}|${canonicalVenueName(first.opportunity.venue)}|${first.opportunity.eventName}`.localeCompare(
+            `${second.opportunity.eventDate || '9999-99-99'}|${second.opportunity.eventTime || '99:99'}|${canonicalVenueName(second.opportunity.venue)}|${second.opportunity.eventName}`
+          )
+        ),
+    [activeOpportunities, allCscShiftsForStatus, sameDateConflictMap, scheduledShiftConflictMap]
+  );
+
+  const formatOpportunityWindow = (opportunity = {}) => {
+    const start = opportunity.eventTime ? formatTime(opportunity.eventTime) : 'Time not listed';
+    const finish = opportunity.expectedEndTime ? ` to ${formatTime(opportunity.expectedEndTime)}` : '';
+    return `${start}${finish}`;
+  };
+
+  const formatShiftWindow = (shift = {}) => {
+    const date = shift.startDate ? formatDate(shift.startDate) : 'Date not listed';
+    const start = shift.startTime ? formatTime(shift.startTime) : 'Time not listed';
+    const finish = shift.finishTime ? ` to ${formatTime(shift.finishTime)}` : '';
+    return `${date}, ${start}${finish}`;
+  };
+
+  const escapePrintHtml = (value = '') =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+  const handlePrintOpportunityList = () => {
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) {
+      flashMessage('Allow pop-ups for this site to print the CSC Opportunities list.');
+      return;
+    }
+
+    const tableRows = printOpportunityRows
+      .map(({ opportunity, status, linkedShift, ambiguousMatches, dateConflicts, shiftConflicts }) => {
+        const conflictLines = [
+          ...dateConflicts.map(
+            (conflict) =>
+              `Opportunity: ${canonicalVenueName(conflict.venue) || 'Venue not listed'}, ${conflict.eventName || 'Event not listed'}${
+                conflict.eventTime ? `, ${formatTime(conflict.eventTime)}` : ''
+              }, ${conflict.status || 'New'}`
+          ),
+          ...shiftConflicts.map(
+            (shift) =>
+              `CSC shift: ${canonicalVenueName(shift.venue) || 'Venue not listed'}, ${
+                shift.event || shift.jobName || shift.shiftName || 'Shift'
+              }, ${formatShiftWindow(shift)}`
+          ),
+          ...ambiguousMatches.map(
+            (shift) =>
+              `Possible duplicate match: ${shift.event || shift.jobName || shift.shiftName || 'CSC shift'}, ${formatShiftWindow(shift)}`
+          ),
+        ];
+        const linkedShiftLines = linkedShift
+          ? [
+              linkedShift.jobName || linkedShift.event || linkedShift.shiftName || 'Linked CSC shift',
+              `${linkedShift.recordSource === 'archived' ? 'Archived' : 'Active'} shift, ${linkedShift.shiftStatus || 'Scheduled'}`,
+              formatShiftWindow(linkedShift),
+              `Payment: ${linkedShift.paidStatus || 'Unpaid'}`,
+            ]
+          : ['Not linked'];
+
+        return `
+          <tr>
+            <td class="date-cell"><strong>${escapePrintHtml(formatDate(opportunity.eventDate))}</strong><br>${escapePrintHtml(formatOpportunityWindow(opportunity))}</td>
+            <td><strong>${escapePrintHtml(opportunity.eventName || 'Event not entered')}</strong></td>
+            <td>${escapePrintHtml(canonicalVenueName(opportunity.venue) || 'Venue not entered')}</td>
+            <td><strong>${escapePrintHtml(status)}</strong></td>
+            <td class="${conflictLines.length ? 'conflict-cell' : ''}">${
+              conflictLines.length
+                ? conflictLines.map((line) => `<div>${escapePrintHtml(line)}</div>`).join('')
+                : '<span class="muted">None</span>'
+            }</td>
+            <td class="${linkedShift ? 'linked-cell' : ''}">${linkedShiftLines
+              .map((line, index) => `<div${index === 0 ? ' class="strong"' : ''}>${escapePrintHtml(line)}</div>`)
+              .join('')}</td>
+          </tr>`;
+      })
+      .join('');
+
+    printWindow.document.write(`<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>CSC Opportunities List</title>
+          <style>
+            @page { size: landscape; margin: 0.28in; }
+            * { box-sizing: border-box; }
+            body { margin: 0; color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 7.2pt; line-height: 1.16; }
+            h1 { margin: 0; font-size: 13pt; }
+            .summary { margin: 2px 0 7px; color: #475569; font-size: 7.5pt; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            thead { display: table-header-group; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+            th { padding: 3px 4px; border: 1px solid #64748b; background: #e2e8f0; color: #0f172a; font-size: 7pt; text-align: left; text-transform: uppercase; }
+            td { padding: 3px 4px; border: 1px solid #94a3b8; vertical-align: top; overflow-wrap: anywhere; }
+            tbody tr:nth-child(even) td { background: #f8fafc; }
+            th:nth-child(1), td:nth-child(1) { width: 13%; }
+            th:nth-child(2), td:nth-child(2) { width: 18%; }
+            th:nth-child(3), td:nth-child(3) { width: 12%; }
+            th:nth-child(4), td:nth-child(4) { width: 8%; }
+            th:nth-child(5), td:nth-child(5) { width: 25%; }
+            th:nth-child(6), td:nth-child(6) { width: 24%; }
+            .conflict-cell { background: #fff1f2 !important; color: #881337; }
+            .linked-cell { background: #ecfeff !important; }
+            .strong { font-weight: 700; }
+            .muted { color: #64748b; }
+            td div + div { margin-top: 2px; padding-top: 2px; border-top: 1px dotted #cbd5e1; }
+          </style>
+        </head>
+        <body>
+          <h1>CSC Opportunities List</h1>
+          <div class="summary">${printOpportunityRows.length} active opportunities, generated ${escapePrintHtml(
+            new Date().toLocaleString('en-US')
+          )}</div>
+          <table>
+            <thead><tr><th>Date / Time</th><th>Event</th><th>Venue</th><th>Status</th><th>Conflicts</th><th>Linked CSC Shift</th></tr></thead>
+            <tbody>${tableRows || '<tr><td colspan="6">No active CSC opportunities.</td></tr>'}</tbody>
+          </table>
+          <script>window.addEventListener('load', () => { window.focus(); window.print(); });<\/script>
+        </body>
+      </html>`);
+    printWindow.document.close();
+  };
+
   const renderOpportunityCard = (opportunity) => {
     const match = getLinkedCscShiftForOpportunity(opportunity, allCscShiftsForStatus);
+    const ambiguousMatches = match
+      ? []
+      : getMatchingCscShiftResult(opportunity, allCscShiftsForStatus).ambiguousMatches;
     const resolvedStatus = getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus);
     const linkedTask = readStoredTodoTasks().find((task) => task.id === opportunity.linkedTodoTaskId) || null;
     const dateConflicts = sameDateConflictMap.get(opportunity.id) || [];
@@ -3681,13 +4165,23 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const notesHaveMore = overflowingNoteIds.has(opportunity.id);
 
     return (
-      <article id={`csc-opportunity-${opportunity.id}`} key={opportunity.id} className="csc-opportunity-mobile-card rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <article
+        id={`csc-opportunity-${opportunity.id}`}
+        key={opportunity.id}
+        className={`csc-opportunity-mobile-card overflow-visible rounded-2xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${
+          scheduledShiftConflicts.length || dateConflicts.length
+            ? 'border-l-4 border-red-400'
+            : match
+              ? 'border-l-4 border-emerald-400'
+              : 'border-l-4 border-violet-300'
+        }`}
+      >
         <div className="csc-opportunity-top flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 gap-3">
             <VenueLogo opportunity={opportunity} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-lg font-normal text-slate-950"><FormattedEventName value={opportunity.eventName} /></h3>
+                <h3 className="text-lg font-black leading-snug text-slate-950"><FormattedEventName value={opportunity.eventName} /></h3>
                 <span className={`rounded-full border px-2.5 py-1 text-xs font-extrabold ${getStatusClass(resolvedStatus)}`}>
                   {resolvedStatus}
                 </span>
@@ -3704,6 +4198,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   <span className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-700 px-2.5 py-1 text-xs font-extrabold text-white">
                     <CircleAlert className="h-3.5 w-3.5" />
                     CSC Shift Conflict ({scheduledShiftConflicts.length})
+                  </span>
+                ) : null}
+                {ambiguousMatches.length ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-100 px-2.5 py-1 text-xs font-extrabold text-amber-950">
+                    <CircleAlert className="h-3.5 w-3.5" />
+                    Multiple Shift Matches ({ambiguousMatches.length})
                   </span>
                 ) : null}
               </div>
@@ -3724,38 +4224,36 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   className="mt-1 flex min-w-0 items-start gap-1 text-xs font-semibold text-blue-700 underline decoration-1 underline-offset-2 hover:text-blue-900"
                   title={opportunity.eventUrl}
                 >
-                  <span>Upcoming Events</span>
+                  <span>Open venue event page</span>
                   <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 </a>
               ) : null}
             </div>
           </div>
 
-          <aside className="csc-opportunity-actions w-fit shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="csc-opportunity-actions-title border-b border-slate-200 bg-slate-100 px-3 py-2">
-              <p className="text-xs font-black uppercase tracking-wide text-slate-700">Actions</p>
-            </div>
-
-            <div className="csc-opportunity-actions-grid grid grid-cols-3 gap-2 p-2.5">
+          <aside className="csc-opportunity-actions relative flex w-full shrink-0 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 shadow-sm lg:w-auto lg:max-w-[22rem]">
+            <div className="csc-opportunity-actions-grid flex min-w-0 flex-1 flex-wrap items-center gap-2">
               {match ? (
                 <button
                   type="button"
                   onClick={() => handleOpenLinkedShift(match, opportunity)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-cyan-700 text-white hover:bg-cyan-800"
+                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-cyan-700 px-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 lg:flex-none"
                   title="Open linked CSC shift"
                   aria-label="Open linked CSC shift"
                 >
                   <ExternalLink className="h-4 w-4" />
+                  <span>Open Shift</span>
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={() => handleCheckScheduled(opportunity)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-blue-700 text-white hover:bg-blue-800"
-                  title="Check for scheduled CSC shift"
-                  aria-label="Check for scheduled CSC shift"
+                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-blue-700 px-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 lg:flex-none"
+                  title="Find a matching CSC shift"
+                  aria-label="Find a matching CSC shift"
                 >
                   <RefreshCcw className="h-4 w-4" />
+                  <span>Find Shift</span>
                 </button>
               )}
 
@@ -3763,48 +4261,58 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <button
                   type="button"
                   onClick={() => openCreateShift(opportunity)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-white hover:bg-slate-800"
+                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold text-slate-800 transition hover:border-slate-400 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 lg:flex-none"
                   title="Create CSC shift"
                   aria-label="Create CSC shift"
                 >
                   <CalendarCheck2 className="h-4 w-4" />
+                  <span>Create Shift</span>
                 </button>
-              ) : (
-                <span className="csc-opportunity-action-placeholder h-9 w-9" aria-hidden="true" />
-              )}
-
-              <button
-                type="button"
-                onClick={() => handleCreateOrOpenTodo(opportunity)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-emerald-700 text-white hover:bg-emerald-800"
-                title={linkedTask ? 'Open linked To-Do' : 'Create To-Do'}
-                aria-label={linkedTask ? 'Open linked To-Do' : 'Create To-Do'}
-              >
-                <ListTodo className="h-4 w-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openEditOpportunity(opportunity)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-slate-600 text-white hover:bg-slate-700"
-                title="Edit opportunity"
-                aria-label="Edit opportunity"
-              >
-                <Edit3 className="h-4 w-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDeleteOpportunity(opportunity)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-red-600 text-white hover:bg-red-700"
-                title="Delete opportunity"
-                aria-label="Delete opportunity"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-
-              <span className="csc-opportunity-action-placeholder h-9 w-9" aria-hidden="true" />
+              ) : null}
             </div>
+
+            <details className="csc-opportunity-more relative shrink-0">
+              <summary className="inline-flex min-h-11 cursor-pointer list-none items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2">
+                More
+                <ChevronDown className="h-4 w-4" />
+              </summary>
+              <div className="absolute right-0 top-full z-40 mt-2 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                    handleCreateOrOpenTodo(opportunity);
+                  }}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900"
+                >
+                  <ListTodo className="h-4 w-4" />
+                  {linkedTask ? 'Open linked To-Do' : 'Create To-Do'}
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                    openEditOpportunity(opportunity);
+                  }}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-950"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Edit opportunity
+                </button>
+                <div className="my-1 border-t border-slate-200" />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                    handleDeleteOpportunity(opportunity);
+                  }}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-red-700 hover:bg-red-50 hover:text-red-900"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete opportunity
+                </button>
+              </div>
+            </details>
           </aside>
         </div>
 
@@ -3829,6 +4337,23 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                     {shift.startTime ? `, ${formatTime(shift.startTime)}` : ''}
                     {shift.finishTime ? ` to ${formatTime(shift.finishTime)}` : ''}
                   </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {ambiguousMatches.length ? (
+          <div className="mt-4 rounded-xl border-2 border-amber-400 bg-amber-50 p-3">
+            <div className="flex items-center gap-2 text-amber-950">
+              <CircleAlert className="h-5 w-5 shrink-0" />
+              <p className="text-sm font-black">Multiple CSC shifts match this opportunity</p>
+            </div>
+            <div className="mt-2 grid gap-1.5">
+              {ambiguousMatches.map((shift) => (
+                <div key={shift.id} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-amber-950">
+                  <p className="font-extrabold">{shift.event || shift.jobName || shift.shiftName || 'CSC shift'}</p>
+                  <p className="mt-0.5 text-xs font-bold text-amber-800">{formatShiftWindow(shift)}</p>
                 </div>
               ))}
             </div>
@@ -4053,8 +4578,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   };
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-violet-100">
-      <div className="csc-opportunities-page flex flex-col gap-6 bg-violet-100 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-gradient-to-b from-violet-100 via-violet-50 to-slate-100">
+      <div className="csc-opportunities-page flex flex-col gap-6 py-6">
         <style>{`
           .csc-mobile-status-icon {
             display: none;
@@ -4062,6 +4587,31 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
           .csc-summary-title-mobile {
             display: none;
+          }
+
+          .csc-opportunity-more summary::-webkit-details-marker {
+            display: none;
+          }
+
+          .csc-opportunity-more[open] > summary {
+            border-color: #8b5cf6;
+            background: #f5f3ff;
+            color: #4c1d95;
+          }
+
+          .csc-opportunity-more[open] > summary svg {
+            transform: rotate(180deg);
+          }
+
+          @media (prefers-reduced-motion: reduce) {
+            .csc-opportunities-page *,
+            .csc-opportunities-page *::before,
+            .csc-opportunities-page *::after {
+              scroll-behavior: auto !important;
+              transition-duration: 0.01ms !important;
+              animation-duration: 0.01ms !important;
+              animation-iteration-count: 1 !important;
+            }
           }
 
           @media (max-width: 639px) {
@@ -4073,9 +4623,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
             .csc-header-action {
               width: 100%;
-              height: 2.25rem;
-              padding: 0 0.5rem;
-              font-size: 0.6875rem;
+              min-height: 2.75rem;
+              padding: 0 0.625rem;
+              font-size: 0.75rem;
             }
 
             .csc-header-actions {
@@ -4085,7 +4635,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               gap: 0.375rem;
             }
 
-            .csc-event-watch-action {
+            .csc-add-opportunity-action {
               grid-column: 1 / -1;
             }
 
@@ -4106,46 +4656,51 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             .csc-filter-grid {
               display: grid;
               width: 100%;
-              grid-template-columns: repeat(3, minmax(0, 1fr));
-              gap: 0.375rem;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 0.5rem;
             }
 
             .csc-filter-control {
               width: 100%;
               min-width: 0;
-              height: 2.25rem;
+              min-height: 2.75rem;
               padding-left: 0.5rem;
               padding-right: 1.5rem;
-              font-size: 0.6875rem;
+              font-size: 0.75rem;
             }
 
             .csc-filter-month-button {
-              width: 2.25rem;
-              height: 2.25rem;
+              width: 100%;
+              min-height: 2.75rem;
               justify-content: center;
-              padding: 0;
+              padding: 0 0.625rem;
             }
 
             .csc-filter-search {
-              grid-column: 2 / -1;
+              grid-column: 1 / -1;
               min-width: 0;
             }
 
             .csc-filter-search input {
               width: 100%;
-              height: 2.25rem;
+              min-height: 2.75rem;
             }
 
             .csc-summary-grid {
-              grid-template-columns: repeat(5, minmax(0, 1fr));
+              grid-template-columns: repeat(2, minmax(0, 1fr));
               gap: 0.5rem;
+            }
+
+            .csc-summary-card:last-child {
+              grid-column: 1 / -1;
             }
 
             .csc-summary-card {
               min-width: 0;
-              padding: 0.375rem 0.125rem;
+              min-height: 4.5rem;
+              padding: 0.625rem 0.75rem;
               border-radius: 0.75rem;
-              text-align: center;
+              text-align: left;
               transform: none;
             }
 
@@ -4159,17 +4714,14 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             }
 
             .csc-summary-title {
-              overflow: hidden;
-              font-size: 0.625rem;
-              line-height: 0.75rem;
-              text-overflow: ellipsis;
-              white-space: nowrap;
+              font-size: 0.75rem;
+              line-height: 1rem;
             }
 
             .csc-summary-count {
               margin-top: 0.125rem;
-              font-size: 1.125rem;
-              line-height: 1.25rem;
+              font-size: 1.5rem;
+              line-height: 1.75rem;
             }
 
             .csc-opportunity-mobile-card {
@@ -4178,10 +4730,6 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
             .csc-opportunity-top {
               gap: 0.75rem;
-            }
-
-            .csc-opportunity-actions {
-              width: 100%;
             }
 
             .csc-opportunity-actions-title,
@@ -4208,9 +4756,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             .csc-opportunity-actions-grid {
               display: flex;
               align-items: center;
-              justify-content: space-between;
-              gap: 0.375rem;
-              padding: 0.5rem;
+              gap: 0.5rem;
+              padding: 0;
             }
 
             .csc-opportunity-meta-grid {
@@ -4298,36 +4845,36 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           theme="violet"
           className="budget-mobile-header"
           actions={
-            <div className="csc-header-actions flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={openEventWatchReport}
-                title="Show the latest CSC Event Watch scan report"
-                aria-label="Show the latest CSC Event Watch scan report"
-                className={`csc-header-action csc-event-watch-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-emerald-500 text-white hover:bg-emerald-400`}
-              >
-                <CalendarCheck2 className="h-4 w-4" />
-                <span className="csc-header-action-label">Latest Event Watch Report</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowScanDrawer(true)}
-                title="Scan events"
-                aria-label="Scan events"
-                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
-              >
-                <ClipboardCheck className="h-4 w-4" />
-                <span className="csc-header-action-label">Scan Events</span>
-              </button>
+            <div className="csc-header-actions flex w-max flex-nowrap items-center gap-2">
               <button
                 type="button"
                 onClick={openAddOpportunity}
                 title="Add opportunity"
                 aria-label="Add opportunity"
-                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 hover:bg-violet-50`}
+                className={`csc-header-action csc-add-opportunity-action ${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 shadow-sm hover:bg-violet-50`}
               >
                 <Plus className="h-4 w-4" />
                 <span className="csc-header-action-label">Add Opportunity</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowScanDrawer(true)}
+                title="Scan venue events"
+                aria-label="Scan venue events"
+                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
+              >
+                <ClipboardCheck className="h-4 w-4" />
+                <span className="csc-header-action-label">Scan Venue Events</span>
+              </button>
+              <button
+                type="button"
+                onClick={openEventWatchReport}
+                title="Show the latest venue scan report"
+                aria-label="Show the latest venue scan report"
+                className={`csc-header-action csc-event-watch-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-emerald-700 text-white hover:bg-emerald-600`}
+              >
+                <CalendarCheck2 className="h-4 w-4" />
+                <span className="csc-header-action-label">Latest Scan Report</span>
               </button>
             </div>
           }
@@ -4338,7 +4885,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             type="button"
             onClick={() => applySummaryFilter('active')}
             aria-pressed={summaryFilter === 'active'}
-            className={summaryCardClassName('active', 'border-indigo-200 bg-indigo-50 text-indigo-950')}
+            className={summaryCardClassName('active', 'border-indigo-200 bg-gradient-to-br from-white to-indigo-100 text-indigo-950')}
             title="Show active opportunities"
           >
             <p className="csc-summary-title text-sm font-bold">
@@ -4354,7 +4901,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             type="button"
             onClick={() => applySummaryFilter('notes')}
             aria-pressed={summaryFilter === 'notes'}
-            className={summaryCardClassName('notes', 'border-violet-200 bg-violet-50 text-violet-950')}
+            className={summaryCardClassName('notes', 'border-violet-200 bg-gradient-to-br from-white to-violet-100 text-violet-950')}
             title="Show active opportunities with notes"
           >
             <p className="csc-summary-title text-sm font-bold">
@@ -4370,7 +4917,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             type="button"
             onClick={() => applySummaryFilter('scheduled')}
             aria-pressed={statusFilter === 'Scheduled' && !summaryFilter}
-            className={summaryCardClassName('scheduled', 'border-emerald-200 bg-emerald-50 text-emerald-950')}
+            className={summaryCardClassName('scheduled', 'border-emerald-200 bg-gradient-to-br from-white to-emerald-100 text-emerald-950')}
             title="Show scheduled opportunities"
           >
             <p className="csc-summary-title text-sm font-bold">
@@ -4386,7 +4933,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             type="button"
             onClick={() => applySummaryFilter('upcoming')}
             aria-pressed={summaryFilter === 'upcoming'}
-            className={summaryCardClassName('upcoming', 'border-blue-200 bg-blue-50 text-blue-950')}
+            className={summaryCardClassName('upcoming', 'border-blue-200 bg-gradient-to-br from-white to-blue-100 text-blue-950')}
             title="Show upcoming active events"
           >
             <p className="csc-summary-title text-sm font-bold">
@@ -4405,7 +4952,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             aria-expanded={showConflictSection}
             aria-controls="csc-opportunity-conflicts"
             title="Show opportunity conflicts"
-            className={summaryCardClassName('conflicts', 'border-red-300 bg-red-50 text-red-950')}
+            className={summaryCardClassName('conflicts', 'border-red-300 bg-gradient-to-br from-white to-red-100 text-red-950')}
           >
             <p className="csc-summary-title text-sm font-bold">
               <span className="csc-summary-title-desktop">Conflict Dates</span>
@@ -4488,16 +5035,28 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         <section className="csc-opportunity-browser rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="csc-opportunity-browser-layout flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="csc-opportunity-browser-heading">
-              <h2 className="text-xl font-black text-slate-950">Venue Event Opportunities</h2>
-              <p className="text-sm text-slate-600">Opportunities stay separate from CSC Shifts until you create or link a shift.</p>
+              <h2 className="text-xl font-black text-slate-950">Opportunity Pipeline</h2>
+              <p className="text-sm text-slate-600">Find venue events, identify conflicts, and connect confirmed work to CSC Shifts.</p>
             </div>
             <div className="csc-filter-grid flex flex-wrap gap-2">
+              <label className="csc-filter-search relative order-first w-full xl:w-64">
+                <span className="sr-only">Search opportunities</span>
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={localSearch}
+                  onChange={(event) => setLocalSearch(event.target.value)}
+                  placeholder="Search event or venue"
+                  aria-label="Search opportunities by event or venue"
+                  className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                />
+              </label>
               <div ref={venueFilterRef} className="csc-venue-filter-wrap relative">
                 <button
                   type="button"
                   onClick={() => setShowVenueFilter((current) => !current)}
                   aria-haspopup="true"
                   aria-expanded={showVenueFilter}
+                  aria-label={`Filter venues, ${venueFilterLabel}`}
                   className="csc-filter-control flex h-10 min-w-[12rem] items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-bold text-violet-950 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
                 >
                   <span className="truncate">{venueFilterLabel}</span>
@@ -4544,7 +5103,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   </div>
                 ) : null}
               </div>
-              <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="csc-filter-control h-10 rounded-lg border border-purple-200 bg-purple-50 px-3 text-sm font-bold text-purple-950 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200">
+              <select aria-label="Filter by month" value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)} className="csc-filter-control h-10 rounded-lg border border-purple-200 bg-purple-50 px-3 text-sm font-bold text-purple-950 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-200">
                 <option value="All">All months</option>
                 {monthOptions.map((month) => (
                   <option key={month.monthKey} value={month.monthKey}>
@@ -4552,7 +5111,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   </option>
                 ))}
               </select>
-              <select value={statusFilter} onChange={(event) => handleStatusFilterChange(event.target.value)} className="csc-filter-control h-10 rounded-lg border border-fuchsia-200 bg-fuchsia-50 px-3 text-sm font-bold text-fuchsia-950 focus:border-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-200">
+              <select aria-label="Filter by status" value={statusFilter} onChange={(event) => handleStatusFilterChange(event.target.value)} className="csc-filter-control h-10 rounded-lg border border-fuchsia-200 bg-fuchsia-50 px-3 text-sm font-bold text-fuchsia-950 focus:border-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-200">
                 <option value="All">All statuses</option>
                 {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
@@ -4572,11 +5131,31 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <CalendarDays className="h-4 w-4" />
                 <span className="csc-month-label">{showMonthOverview ? 'Hide Months' : 'View by Month'}</span>
               </button>
-              <label className="csc-filter-search relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input value={localSearch} onChange={(event) => setLocalSearch(event.target.value)} placeholder="Search opportunities" className="h-10 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm" />
-              </label>
             </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+            <p className="text-sm font-bold text-slate-600" role="status" aria-live="polite">
+              Showing <span className="text-slate-950">{filteredOpportunities.length}</span> of{' '}
+              <span className="text-slate-950">{activeOpportunities.length}</span> active opportunities
+            </p>
+            {localSearch || excludedVenues.length || monthFilter !== 'All' || statusFilter !== 'All' || summaryFilter !== 'active' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalSearch('');
+                  setExcludedVenues([]);
+                  setMonthFilter('All');
+                  setStatusFilter('All');
+                  setSummaryFilter('active');
+                  setShowMonthOverview(false);
+                  setShowConflictSection(false);
+                }}
+                className="inline-flex min-h-10 items-center rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-extrabold text-violet-800 hover:bg-violet-100"
+              >
+                Clear filters
+              </button>
+            ) : null}
           </div>
 
           {showMonthOverview ? (
@@ -4665,6 +5244,95 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           </div>
         </section>
       </div>
+
+      {showPrintPreview ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/70 p-3 sm:p-5">
+          <div className="flex max-h-[94vh] w-full max-w-[96rem] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
+              <div>
+                <h3 className="text-xl font-black text-slate-950">CSC Opportunities List</h3>
+                <p className="text-sm font-semibold text-slate-600">
+                  {printOpportunityRows.length} active opportunities, compact landscape preview
+                </p>
+              </div>
+              <CloseScreenButton onClick={() => setShowPrintPreview(false)} />
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto p-3 sm:p-4">
+              <table className="w-full min-w-[1040px] table-fixed border-collapse text-[11px] leading-tight text-slate-900">
+                <thead className="sticky top-0 z-10 bg-slate-200">
+                  <tr>
+                    <th className="w-[13%] border border-slate-400 px-2 py-2 text-left uppercase">Date / Time</th>
+                    <th className="w-[18%] border border-slate-400 px-2 py-2 text-left uppercase">Event</th>
+                    <th className="w-[12%] border border-slate-400 px-2 py-2 text-left uppercase">Venue</th>
+                    <th className="w-[8%] border border-slate-400 px-2 py-2 text-left uppercase">Status</th>
+                    <th className="w-[25%] border border-slate-400 px-2 py-2 text-left uppercase">Conflicts</th>
+                    <th className="w-[24%] border border-slate-400 px-2 py-2 text-left uppercase">Linked CSC Shift</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printOpportunityRows.length ? (
+                    printOpportunityRows.map(({ opportunity, status, linkedShift, ambiguousMatches, dateConflicts, shiftConflicts }) => (
+                      <tr key={opportunity.id} className="odd:bg-white even:bg-slate-50">
+                        <td className="border border-slate-300 px-2 py-1.5 align-top">
+                          <div className="font-extrabold">{formatDate(opportunity.eventDate)}</div>
+                          <div>{formatOpportunityWindow(opportunity)}</div>
+                        </td>
+                        <td className="border border-slate-300 px-2 py-1.5 align-top font-extrabold">
+                          <FormattedEventName value={opportunity.eventName || 'Event not entered'} />
+                        </td>
+                        <td className="border border-slate-300 px-2 py-1.5 align-top">
+                          {canonicalVenueName(opportunity.venue) || 'Venue not entered'}
+                        </td>
+                        <td className="border border-slate-300 px-2 py-1.5 align-top font-extrabold">{status}</td>
+                        <td className={`border border-slate-300 px-2 py-1.5 align-top ${dateConflicts.length || shiftConflicts.length || ambiguousMatches.length ? 'bg-rose-50 text-rose-950' : 'text-slate-500'}`}>
+                          {dateConflicts.map((conflict) => (
+                            <div key={`opportunity-${conflict.id}`} className="border-b border-dotted border-rose-200 pb-1 last:border-0 last:pb-0">
+                              <strong>Opportunity:</strong> {canonicalVenueName(conflict.venue)}, <FormattedEventName value={conflict.eventName} />
+                              {conflict.eventTime ? `, ${formatTime(conflict.eventTime)}` : ''}, {conflict.status || 'New'}
+                            </div>
+                          ))}
+                          {shiftConflicts.map((shift) => (
+                            <div key={`shift-${shift.id}`} className="border-b border-dotted border-rose-200 py-1 last:border-0 last:pb-0">
+                              <strong>CSC shift:</strong> {canonicalVenueName(shift.venue)}, {shift.event || shift.jobName || shift.shiftName || 'Shift'}, {formatShiftWindow(shift)}
+                            </div>
+                          ))}
+                          {ambiguousMatches.map((shift) => (
+                            <div key={`ambiguous-${shift.id}`} className="border-b border-dotted border-amber-200 py-1 last:border-0 last:pb-0">
+                              <strong>Possible duplicate:</strong> {shift.event || shift.jobName || shift.shiftName || 'CSC shift'}, {formatShiftWindow(shift)}
+                            </div>
+                          ))}
+                          {!dateConflicts.length && !shiftConflicts.length && !ambiguousMatches.length ? 'None' : null}
+                        </td>
+                        <td className={`border border-slate-300 px-2 py-1.5 align-top ${linkedShift ? 'bg-cyan-50' : 'text-slate-500'}`}>
+                          {linkedShift ? (
+                            <>
+                              <div className="font-extrabold">{linkedShift.jobName || linkedShift.event || linkedShift.shiftName || 'Linked CSC shift'}</div>
+                              <div>{linkedShift.recordSource === 'archived' ? 'Archived' : 'Active'} shift, {linkedShift.shiftStatus || 'Scheduled'}</div>
+                              <div>{formatShiftWindow(linkedShift)}</div>
+                              <div>Payment: {linkedShift.paidStatus || 'Unpaid'}</div>
+                            </>
+                          ) : 'Not linked'}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan={6} className="border border-slate-300 p-6 text-center font-bold text-slate-600">No active CSC opportunities.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
+              <button type="button" onClick={() => setShowPrintPreview(false)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-100">Close</button>
+              <button type="button" onClick={handlePrintOpportunityList} className="inline-flex items-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-800">
+                <Printer className="h-4 w-4" />
+                Print List
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showEventWatchDrawer ? (
         <div className="fixed inset-0 z-[90] flex justify-end bg-slate-950/60">
