@@ -53,7 +53,7 @@ const THEME_CLASSES = {
 };
 
 export const TAB_HEADER_ACTION_CLASS =
-  'inline-flex h-11 min-w-[112px] items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-transparent px-3 text-sm font-extrabold leading-none shadow-sm transition-colors duration-150 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-transparent motion-reduce:transition-none';
+  'inline-flex h-11 min-w-[112px] items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-transparent px-3 text-sm font-extrabold leading-none shadow-sm transition-colors duration-150 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-transparent motion-reduce:transition-none lg:!h-11 lg:!min-w-[112px] lg:!gap-2 lg:!rounded-xl lg:!px-3 lg:!text-sm lg:!font-extrabold lg:!leading-none';
 
 export default function TabPageHeader({
   icon: Icon,
@@ -67,8 +67,8 @@ export default function TabPageHeader({
 }) {
   const selectedTheme = THEME_CLASSES[theme] || THEME_CLASSES.blue;
   const shellLayoutClass =
-    'h-[200px] min-h-[200px] rounded-2xl px-4 py-4 sm:px-6 lg:h-[152px] lg:min-h-[152px] lg:py-4';
-  const contentLayoutClass = 'h-full gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-5';
+    'min-h-0 rounded-2xl px-3 py-3 sm:px-4 lg:h-[136px] lg:min-h-[136px] lg:px-5 lg:py-3';
+  const contentLayoutClass = 'gap-2 lg:grid lg:h-full lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-4';
   const iconLayoutClass = 'h-10 w-10 rounded-xl';
   const titleLayoutClass = 'text-xl leading-7 sm:text-2xl sm:leading-8';
   const subtitleLayoutClass = compactMobile ? 'hidden sm:block' : '';
@@ -100,21 +100,17 @@ export default function TabPageHeader({
             {subtitle}
           </p>
 
-          <div className={`mt-1 min-h-6 ${messageLayoutClass}`} aria-live="polite" aria-atomic="true">
-            {message ? (
+          {message ? (
+            <div className={`mt-1 min-h-6 ${messageLayoutClass}`} aria-live="polite" aria-atomic="true">
               <p className={`inline-flex min-h-6 items-center rounded-full border px-3 py-1 text-xs font-extrabold leading-4 shadow-sm ${selectedTheme.message}`}>
                 {message}
               </p>
-            ) : (
-              <span aria-hidden="true" className="invisible inline-flex min-h-6 items-center rounded-full border px-3 py-1 text-xs font-extrabold leading-4">
-                Status
-              </span>
-            )}
-          </div>
+            </div>
+          ) : null}
         </div>
 
         {actions ? (
-          <div className="tab-page-header-actions min-h-11 w-full min-w-0 shrink-0 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-white/30 bg-slate-950/20 p-1.5 shadow-sm lg:w-auto lg:max-w-[62vw] lg:overflow-x-auto [&>div]:!flex [&>div]:!w-max [&>div]:!min-w-max [&>div]:!flex-nowrap [&>div]:!items-center [&>div]:!gap-2 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-white [&_button]:focus-visible:ring-offset-2 [&_button]:focus-visible:ring-offset-slate-800 [&_label]:focus-within:ring-2 [&_label]:focus-within:ring-white [&_label]:focus-within:ring-offset-2 [&_label]:focus-within:ring-offset-slate-800 [&_svg]:shrink-0">
+          <div className="tab-page-header-actions min-h-11 w-full min-w-0 shrink-0 overflow-x-hidden overflow-y-hidden rounded-xl border border-white/30 bg-slate-950/20 p-1 shadow-sm lg:min-h-14 lg:w-auto lg:max-w-[62vw] lg:overflow-x-auto lg:overscroll-x-contain lg:p-1.5 [&>div]:!flex [&>div]:!w-full [&>div]:!min-w-0 [&>div]:!flex-wrap [&>div]:!items-center [&>div]:!gap-2 lg:[&>div]:!w-max lg:[&>div]:!min-w-max lg:[&>div]:!flex-nowrap lg:[&>div]:!gap-2 lg:[&_button]:!h-11 lg:[&_button]:!min-w-[112px] lg:[&_button]:!gap-2 lg:[&_button]:!rounded-xl lg:[&_button]:!px-3 lg:[&_button]:!text-sm lg:[&_button]:!font-extrabold lg:[&_button]:!leading-none lg:[&_svg]:!h-4 lg:[&_svg]:!w-4 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-white [&_button]:focus-visible:ring-offset-2 [&_button]:focus-visible:ring-offset-slate-800 [&_label]:focus-within:ring-2 [&_label]:focus-within:ring-white [&_label]:focus-within:ring-offset-2 [&_label]:focus-within:ring-offset-slate-800 [&_svg]:shrink-0">
             {actions}
           </div>
         ) : (

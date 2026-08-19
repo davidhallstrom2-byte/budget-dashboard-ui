@@ -8,7 +8,6 @@ import {
   Check,
   Clock,
   ChevronDown,
-  ChevronRight,
   Copy,
   Download,
   Edit2,
@@ -34,6 +33,8 @@ import {
 import PageContainer from "../common/PageContainer";
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
 import CloseScreenButton from "../common/CloseScreenButton.jsx";
+import DataToolsScreen from "../common/DataToolsScreen.jsx";
+import CollapseToggleButton from "../common/CollapseToggleButton.jsx";
 import PremiumTodoListView from "../todo/PremiumTodoListView";
 import ArchivedDrawer from "../ui/ArchivedDrawer";
 import ContactManager from "../contacts/ContactManager";
@@ -2162,6 +2163,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isDataOpen, setIsDataOpen] = useState(false);
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [showActiveOnly, setShowActiveOnly] = useState(true);
   const [taskSearch, setTaskSearch] = useState("");
@@ -2268,6 +2270,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
 
     const openExport = () => setIsExportOpen(true);
     const openImport = () => setIsImportOpen(true);
+    const openData = () => setIsDataOpen(true);
 
     window.addEventListener("todo-toolbar:add", openCreateTask);
     window.addEventListener("todo-toolbar:archive", openArchiveDrawer);
@@ -2275,6 +2278,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     window.addEventListener("todo-toolbar:save", saveSnapshot);
     window.addEventListener("todo-toolbar:export", openExport);
     window.addEventListener("todo-toolbar:import", openImport);
+    window.addEventListener("todo-toolbar:data", openData);
 
     return () => {
       window.removeEventListener("todo-toolbar:add", openCreateTask);
@@ -2283,6 +2287,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
       window.removeEventListener("todo-toolbar:save", saveSnapshot);
       window.removeEventListener("todo-toolbar:export", openExport);
       window.removeEventListener("todo-toolbar:import", openImport);
+      window.removeEventListener("todo-toolbar:data", openData);
     };
   }, [tasks, archivedTasks, resetTaskScan]);
 
@@ -4156,7 +4161,7 @@ const addParsedTasks = () => {
   ));
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-slate-100" className="flex flex-col gap-3 bg-gradient-to-b from-emerald-50 via-slate-100 to-slate-100 py-3 sm:gap-5 sm:py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-slate-100" className="flex flex-col gap-3 bg-gradient-to-b from-emerald-50 via-slate-100 to-slate-100 py-3 sm:gap-4 sm:py-4">
       {completionCelebration && (
         <div
           key={completionCelebration.id}
@@ -4422,17 +4427,6 @@ const addParsedTasks = () => {
 
             <button
               type="button"
-              onClick={() => setIsImportOpen(true)}
-              title="Import structured task text"
-              aria-label="Import structured task text"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-white/35 bg-white text-emerald-950 hover:bg-emerald-50`}
-            >
-              <FileText className="h-4 w-4" />
-              <span>Import</span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => setShowPremiumTodoView(true)}
               title="Open the print and on-the-go task list"
               aria-label="Open the print and on-the-go task list"
@@ -4444,71 +4438,126 @@ const addParsedTasks = () => {
 
             <button
               type="button"
-              onClick={() => setIsExportOpen(true)}
-              title="Open export options"
-              aria-label="Open export options"
-              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-white/35 bg-white/15 text-white hover:bg-white/25`}
+              onClick={() => setIsDataOpen(true)}
+              title="Open To-Do data and backup tools"
+              aria-label="Open To-Do data and backup tools"
+              aria-haspopup="dialog"
+              aria-expanded={isDataOpen}
+              className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-white/35 bg-white text-emerald-950 hover:bg-emerald-50`}
             >
-              <Download className="h-4 w-4" />
-              <span>Export</span>
+              <FileText className="h-4 w-4" />
+              <span>Data</span>
             </button>
           </div>
         }
       />
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/5">
-        <div className="border-b border-slate-200 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 px-3 py-3 text-white sm:px-4">
-          <div className="flex min-h-9 items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-base font-black leading-tight tracking-tight">Task overview</h3>
-              <p className="mt-0.5 text-xs font-medium leading-4 text-slate-300">Filter active tasks by status.</p>
-            </div>
-            <span className="shrink-0 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-bold leading-5 text-white">
-              {tasks.length} total
-            </span>
-          </div>
+      {isDataOpen ? (
+        <DataToolsScreen
+          title="To-Do Data and Backups"
+          subtitle="Import tasks, export your To-Do data, or save a safety snapshot before major changes."
+          onClose={() => setIsDataOpen(false)}
+          tools={[
+            {
+              key: "import",
+              icon: FileText,
+              tone: "indigo",
+              title: "Import Tasks",
+              description: "Open the structured task importer to review and add task data.",
+              buttonLabel: "Open Task Import",
+              onClick: () => {
+                setIsDataOpen(false);
+                setIsImportOpen(true);
+              },
+            },
+            {
+              key: "export",
+              icon: Download,
+              tone: "sky",
+              title: "Export To-Do",
+              description: "Open the existing To-Do export options for active and completed tasks.",
+              buttonLabel: "Open Export Options",
+              onClick: () => {
+                setIsDataOpen(false);
+                setIsExportOpen(true);
+              },
+            },
+            {
+              key: "snapshot",
+              icon: ShieldCheck,
+              tone: "emerald",
+              title: "Safety Snapshot",
+              description: "Save a local snapshot of active and archived tasks before bulk updates.",
+              buttonLabel: "Save Safety Snapshot",
+              onClick: () => {
+                writeSafetySnapshot("Manual safety snapshot", tasks, archivedTasks);
+                alert("Safety snapshot saved.");
+              },
+            },
+            {
+              key: "dashboard-export",
+              icon: Download,
+              tone: "violet",
+              title: "Complete Dashboard Backup",
+              description: "Download all dashboard data as one JSON backup file.",
+              buttonLabel: "Export Complete Dashboard",
+              onClick: () => window.dispatchEvent(new CustomEvent("dashboard-toolbar:export-all")),
+            },
+          ]}
+        />
+      ) : null}
 
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Filter tasks by status">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-900/5">
+        <div className="border-b border-slate-200 bg-white p-3 sm:p-4">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4" role="group" aria-label="Filter tasks by status">
             {[
               {
                 key: "all",
                 label: "Active",
                 count: taskSummary.active,
                 icon: Check,
-                accent: "border-emerald-400",
-                countClass: "text-emerald-300",
-                selectedClass: "border-emerald-300 bg-emerald-50 text-slate-950",
-                selectedCountClass: "text-emerald-700",
+                cardClass: "border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100",
+                selectedClass: "border-emerald-500 bg-emerald-100 ring-2 ring-emerald-200",
+                labelClass: "text-emerald-800",
+                countClass: "text-emerald-950",
+                iconClass: "bg-emerald-100 text-emerald-700",
+                orbClass: "bg-emerald-100/80",
               },
               {
                 key: "overdue",
                 label: "Overdue",
                 count: taskSummary.overdue,
                 icon: AlertCircle,
-                accent: "border-red-400",
-                countClass: "text-red-300",
-                selectedClass: "border-red-300 bg-red-50 text-slate-950",
-                selectedCountClass: "text-red-700",
+                cardClass: "border-rose-200 bg-rose-50/80 hover:bg-rose-100",
+                selectedClass: "border-rose-500 bg-rose-100 ring-2 ring-rose-200",
+                labelClass: "text-rose-800",
+                countClass: "text-rose-950",
+                iconClass: "bg-rose-100 text-rose-700",
+                orbClass: "bg-rose-100/80",
               },
               {
                 key: "dueSoon",
                 label: "Due soon",
                 count: taskSummary.dueSoon,
                 icon: Clock,
-                accent: "border-amber-400",
-                countClass: "text-amber-300",
-                selectedClass: "border-amber-300 bg-amber-50 text-slate-950",
-                selectedCountClass: "text-amber-700",
+                cardClass: "border-amber-200 bg-amber-50/80 hover:bg-amber-100",
+                selectedClass: "border-amber-500 bg-amber-100 ring-2 ring-amber-200",
+                labelClass: "text-amber-800",
+                countClass: "text-amber-950",
+                iconClass: "bg-amber-100 text-amber-700",
+                orbClass: "bg-amber-100/80",
               },
               {
                 key: "followUpDue",
                 label: "Follow-up due",
                 count: taskSummary.followUpDue,
                 icon: History,
-                accent: "border-fuchsia-400",
-                countClass: "text-fuchsia-300",
-                selectedClass: "border-fuchsia-300 bg-fuchsia-50 text-slate-950",
-                selectedCountClass: "text-fuchsia-700",
+                cardClass: "border-fuchsia-200 bg-fuchsia-50/80 hover:bg-fuchsia-100",
+                selectedClass: "border-fuchsia-500 bg-fuchsia-100 ring-2 ring-fuchsia-200",
+                labelClass: "text-fuchsia-800",
+                countClass: "text-fuchsia-950",
+                iconClass: "bg-fuchsia-100 text-fuchsia-700",
+                orbClass: "bg-fuchsia-100/80",
               },
             ].map((item) => {
               const isSelected = taskViewFilter === item.key && showActiveOnly;
@@ -4525,27 +4574,21 @@ const addParsedTasks = () => {
                   title={`Show ${item.label.toLowerCase()} tasks`}
                   aria-label={`Show ${item.count} ${item.label.toLowerCase()} tasks`}
                   aria-pressed={isSelected}
-                  className={`group flex min-h-12 min-w-0 items-center gap-2.5 rounded-xl border border-l-4 px-3 py-1.5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-slate-950 ${
-                    isSelected
-                      ? `${item.selectedClass} shadow-md shadow-slate-950/20`
-                      : `${item.accent} border-y-white/10 border-r-white/10 bg-white/10 text-white hover:bg-white/[0.16]`
+                  className={`group relative flex min-h-[84px] min-w-0 items-center justify-between overflow-hidden rounded-2xl border px-4 py-3 text-left shadow-sm transition-colors hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-900/20 ${
+                    isSelected ? item.selectedClass : item.cardClass
                   }`}
                 >
-                  <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                      isSelected ? "bg-white/80" : "bg-white/10"
-                    }`}
-                    aria-hidden="true"
-                  >
-                    <StatusIcon className={`h-4 w-4 ${isSelected ? item.selectedCountClass : item.countClass}`} />
-                  </span>
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className={`shrink-0 text-xl font-black leading-none ${isSelected ? item.selectedCountClass : item.countClass}`}>
-                      {item.count}
-                    </span>
-                    <span className={`min-w-0 truncate text-sm font-bold leading-5 ${isSelected ? "text-slate-800" : "text-white"}`}>
+                  <span className={`absolute -right-6 -top-8 h-24 w-24 rounded-full ${item.orbClass}`} aria-hidden="true" />
+                  <span className="relative z-10 flex min-w-0 flex-col">
+                    <span className={`truncate text-[11px] font-black uppercase tracking-[0.14em] ${item.labelClass}`}>
                       {item.label}
                     </span>
+                    <span className={`mt-1 text-3xl font-black leading-none sm:text-4xl ${item.countClass}`}>
+                      {item.count}
+                    </span>
+                  </span>
+                  <span className={`relative z-10 ml-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${item.iconClass}`} aria-hidden="true">
+                    <StatusIcon className="h-5 w-5" />
                   </span>
                 </button>
               );
@@ -4618,8 +4661,8 @@ const addParsedTasks = () => {
 
       <section className="space-y-3 sm:space-y-5">
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-2 shadow-sm">
-          <div className="grid grid-cols-6 items-center gap-2 sm:grid-cols-[minmax(220px,1fr)_140px_repeat(4,40px)] lg:grid-cols-[minmax(240px,380px)_150px_repeat(4,44px)_minmax(170px,1fr)]">
-            <label className="relative col-span-6 block sm:col-span-1">
+          <div className="grid grid-cols-5 items-center gap-2 sm:grid-cols-[minmax(220px,1fr)_140px_repeat(3,40px)] lg:grid-cols-[minmax(240px,380px)_150px_repeat(3,44px)_minmax(170px,1fr)]">
+            <label className="relative col-span-5 block sm:col-span-1">
               <span className="sr-only">Search tasks</span>
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
               <input
@@ -4660,18 +4703,6 @@ const addParsedTasks = () => {
 
             <button
               type="button"
-              onClick={() => {
-                writeSafetySnapshot("Manual safety snapshot", tasks, archivedTasks);
-                alert("Safety snapshot saved.");
-              }}
-              title="Save a manual safety snapshot of active and archived To-Do tasks"
-              aria-label="Save a manual safety snapshot of active and archived To-Do tasks"
-              className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-emerald-300 bg-white text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              <History size={18} />
-            </button>
-            <button
-              type="button"
               onClick={() => setShowActiveOnly((current) => !current)}
               title={showActiveOnly ? "Show all task categories" : "Show only categories with active tasks and hide completed tasks"}
               aria-label={showActiveOnly ? "Show all task categories" : "Show only categories with active tasks and hide completed tasks"}
@@ -4682,26 +4713,22 @@ const addParsedTasks = () => {
             >
               <Check size={18} />
             </button>
-            <button
-              type="button"
+            <CollapseToggleButton
+              action="collapse"
               onClick={() => setCollapsedCategories(taskCategoryTypes.reduce((map, type) => ({ ...map, [type]: true }), {}))}
               title="Collapse all categories"
-              aria-label="Collapse all categories"
-              className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-emerald-300 bg-white text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              <ChevronDown size={18} />
-            </button>
-            <button
-              type="button"
+              ariaLabel="Collapse all task categories"
+              className="h-10 w-full"
+            />
+            <CollapseToggleButton
+              action="expand"
               onClick={() => setCollapsedCategories({})}
-              title="Expand all visible categories"
-              aria-label="Expand all visible categories"
-              className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-emerald-300 bg-white text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              <ChevronRight size={18} />
-            </button>
+              title="Expand all categories"
+              ariaLabel="Expand all visible task categories"
+              className="h-10 w-full"
+            />
 
-            <div className="col-span-6 flex min-w-0 items-center justify-between gap-2 px-1 text-xs font-bold text-emerald-950 sm:col-span-6 lg:col-span-1 lg:pl-2" role="status">
+            <div className="col-span-5 flex min-w-0 items-center justify-between gap-2 px-1 text-xs font-bold text-emerald-950 sm:col-span-5 lg:col-span-1 lg:pl-2" role="status">
               <span className="truncate">{taskSearch || taskViewFilter !== "all" ? "Filtered task view" : "All active tasks"}</span>
               {(taskSearch || taskViewFilter !== "all") && (
                 <button
@@ -4832,18 +4859,16 @@ const addParsedTasks = () => {
                 activeCount > 0 ? "border-slate-300" : "border-slate-200 opacity-85"
               }`}
             >
-              <div className="flex items-center justify-between gap-3 border-l-8 border-rose-500 bg-gradient-to-r from-rose-950 via-rose-900 to-slate-900 px-3 py-2.5 text-white sm:px-4">
+              <div className="flex items-center justify-between gap-3 border-l-8 border-emerald-300 bg-gradient-to-r from-emerald-700 via-teal-700 to-cyan-700 px-3 py-2.5 text-white sm:px-4">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <GripVertical className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" aria-hidden="true" title="Category section" />
-                  <button
-                    type="button"
+                  <GripVertical className="hidden h-4 w-4 shrink-0 text-emerald-200 sm:block" aria-hidden="true" title="Category section" />
+                  <CollapseToggleButton
+                    expanded={!isCollapsed}
                     onClick={() => toggleCategory(type)}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white transition-colors hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white"
-                    aria-label={isCollapsed ? `Expand ${type}` : `Collapse ${type}`}
+                    ariaLabel={isCollapsed ? `Expand ${type}` : `Collapse ${type}`}
                     title={isCollapsed ? `Expand ${type}` : `Collapse ${type}`}
-                  >
-                    {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronDown className="h-4 w-4 rotate-180" />}
-                  </button>
+                    className="border-emerald-400 bg-emerald-800/70 hover:bg-emerald-800 focus-visible:ring-white"
+                  />
                   <Icon className={`h-5 w-5 shrink-0 ${iconColor}`} aria-hidden="true" />
                   <div className="flex min-w-0 items-center gap-2">
                     <h4 className="truncate text-base font-black text-white sm:text-lg">{type}</h4>
@@ -4852,15 +4877,15 @@ const addParsedTasks = () => {
                         overdueCount > 0
                           ? "bg-red-600 text-white"
                           : activeCount > 0
-                            ? "bg-blue-600 text-white"
-                            : "bg-slate-700 text-slate-300"
+                            ? "bg-emerald-100 text-emerald-900"
+                            : "bg-emerald-950/60 text-emerald-100"
                       }`}
                       title={`${activeCount} active tasks, ${completedCount} completed tasks${overdueCount > 0 ? `, ${overdueCount} overdue` : ""}`}
                     >
                       Active {activeCount}
                     </span>
                     {completedCount > 0 && (
-                      <span className="hidden text-xs font-semibold text-slate-400 sm:inline">{completedCount} done</span>
+                      <span className="hidden text-xs font-semibold text-emerald-100 sm:inline">{completedCount} done</span>
                     )}
                   </div>
                   {overdueCount > 0 && (

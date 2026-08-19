@@ -6,7 +6,7 @@ import {
   Car,
   Check,
   ChevronDown,
-  ChevronRight,
+  ChevronUp,
   Clock,
   Copy,
   Download,
@@ -2197,6 +2197,7 @@ const RidesTab = ({ searchQuery = '' }) => {
       'rides-toolbar:import': () => fileInputRef.current?.click(),
       'rides-toolbar:snapshot': saveSnapshot,
       'rides-toolbar:archive': () => setIsArchiveOpen(true),
+      'rides-toolbar:data': () => setIsRideDataOpen(true),
     };
 
     Object.entries(handlers).forEach(([eventName, handler]) => window.addEventListener(eventName, handler));
@@ -2204,7 +2205,7 @@ const RidesTab = ({ searchQuery = '' }) => {
   });
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-sky-100/70" className="rides-mobile-page flex flex-col gap-1.5 bg-sky-100/70 py-1.5 sm:gap-3 sm:bg-sky-50 sm:py-3">
+    <PageContainer surfaceClassName="min-h-screen bg-sky-100/70" className="rides-mobile-page flex flex-col gap-1.5 bg-sky-100/70 py-1.5 sm:gap-3 sm:bg-sky-50 sm:py-3 lg:gap-4 lg:py-4">
       <style>{`
         .rides-header-actions {
           display: flex;
@@ -2452,8 +2453,14 @@ const RidesTab = ({ searchQuery = '' }) => {
                           <button
                             type="button"
                             onClick={() => setExpandedRideIds((current) => ({ ...current, [ride.id]: !isExpanded }))}
-                            className="text-left"
+                            className="flex min-w-0 items-start gap-2 text-left"
+                            title={isExpanded ? 'Collapse ride details' : 'Expand ride details'}
+                            aria-label={isExpanded ? 'Collapse ride details' : 'Expand ride details'}
                           >
+                            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-600 bg-slate-700 text-white shadow-sm">
+                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                            </span>
+                            <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-black text-blue-800 sm:px-3 sm:py-1 sm:text-xs">
                                 Confirmation #{ride.confirmationNumber || 'N/A'}
@@ -2480,6 +2487,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                             <p className="mt-1.5 text-xs font-bold text-slate-900 sm:mt-2 sm:text-sm">
                               {ride.riderName}, {ride.legs.length} leg{ride.legs.length === 1 ? '' : 's'}
                             </p>
+                            </div>
                           </button>
 
                           <div className="grid w-full grid-cols-2 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:gap-2">
@@ -3062,6 +3070,23 @@ const RidesTab = ({ searchQuery = '' }) => {
               >
                 <ShieldCheck className="h-4 w-4" aria-hidden="true" />
                 Download Safety Snapshot
+              </button>
+            </section>
+
+            <section className="min-w-0 rounded-2xl border border-violet-200 bg-violet-50 p-4 sm:col-span-2 sm:p-5">
+              <Download className="h-6 w-6 text-violet-800" aria-hidden="true" />
+              <h3 className="mt-3 text-base font-black text-slate-950">Complete Dashboard Backup</h3>
+              <p className="mt-1 max-w-[60ch] break-words text-sm leading-6 text-slate-700">
+                Download all dashboard data as one JSON backup file.
+              </p>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('dashboard-toolbar:export-all'))}
+                title="Export complete dashboard JSON"
+                className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-violet-800 px-4 text-sm font-black text-white hover:bg-violet-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-700 focus-visible:ring-offset-2"
+              >
+                <Download className="h-4 w-4" aria-hidden="true" />
+                Export Complete Dashboard
               </button>
             </section>
           </div>

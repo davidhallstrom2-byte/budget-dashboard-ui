@@ -1,7 +1,6 @@
 // src/components/tabs/AnalysisTab.jsx
 import React, { useRef, useState } from "react";
 import PageContainer from "../common/PageContainer";
-import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
 import FinancialHealthCard from "../modern/FinancialHealthCard";
 import HealthRecommendations from "../modern/HealthRecommendations";
 import SpendingTrendsChart from "../modern/SpendingTrendsChart";
@@ -64,47 +63,51 @@ export default function AnalysisTab({ state, searchQuery }) {
   const insights = getSpendingInsights();
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-cyan-50" className="flex flex-col gap-6 bg-cyan-50 pb-6">
-      <TabPageHeader
-        icon={Activity}
-        title="Analysis"
-        subtitle="Review financial health, spending patterns, category performance, trends, and detailed budget results."
-        theme="cyan"
-        className="budget-mobile-header"
-        actions={
-          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-5 sm:gap-1.5 xl:gap-2">
-            {[
-              { id: 'overview', label: 'Health', title: 'Jump to financial health', icon: Activity },
-              { id: 'spending', label: 'Spending', title: 'Jump to spending overview', icon: DollarSign },
-              { id: 'category', label: 'Categories', title: 'Jump to category breakdown', icon: CreditCard },
-              { id: 'trends', label: 'Trends', title: 'Jump to income and expense trends', icon: TrendingUp },
-              { id: 'details', label: 'Details', title: 'Jump to detailed analysis', icon: BarChart3 },
-            ].map((section) => {
-              const refs = { overview: overviewRef, spending: spendingRef, category: categoryRef, trends: trendsRef, details: detailsRef };
-              const SectionIcon = section.icon;
-              const isActive = activeSection === section.id;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => scrollToSection(refs[section.id], section.id)}
-                  title={section.title}
-                  aria-label={section.title}
-                  aria-pressed={isActive}
-                  className={`${TAB_HEADER_ACTION_CLASS} !w-full !min-w-0 !px-2 !text-xs ${
-                    isActive
-                      ? 'border-white/50 bg-white text-cyan-950 shadow-md'
-                      : 'border-white/30 bg-white/15 text-white hover:bg-white/25'
-                  }`}
-                >
-                  <SectionIcon className="h-4 w-4" aria-hidden="true" />
-                  <span>{section.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        }
-      />
+    <PageContainer surfaceClassName="min-h-screen bg-cyan-50" className="flex flex-col gap-3 bg-cyan-50 pb-4">
+      <section
+        className="rounded-xl border border-cyan-200 bg-white p-3 shadow-sm sm:flex sm:items-center sm:justify-between sm:gap-4"
+        aria-label="Analysis navigation"
+      >
+        <div className="min-w-0 pb-3 sm:pb-0">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-cyan-800">Analysis sections</p>
+          <p className="mt-0.5 max-w-2xl text-sm leading-5 text-slate-600">
+            Review financial health, spending, categories, trends, and detailed results.
+          </p>
+        </div>
+
+        <div className="grid shrink-0 grid-cols-2 gap-1.5 sm:flex sm:flex-nowrap" role="group" aria-label="Jump to analysis section">
+          {[
+            { id: 'overview', label: 'Health', title: 'Jump to financial health', icon: Activity },
+            { id: 'spending', label: 'Spending', title: 'Jump to spending overview', icon: DollarSign },
+            { id: 'category', label: 'Categories', title: 'Jump to category breakdown', icon: CreditCard },
+            { id: 'trends', label: 'Trends', title: 'Jump to income and expense trends', icon: TrendingUp },
+            { id: 'details', label: 'Details', title: 'Jump to detailed analysis', icon: BarChart3 },
+          ].map((section) => {
+            const refs = { overview: overviewRef, spending: spendingRef, category: categoryRef, trends: trendsRef, details: detailsRef };
+            const SectionIcon = section.icon;
+            const isActive = activeSection === section.id;
+
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => scrollToSection(refs[section.id], section.id)}
+                title={section.title}
+                aria-label={section.title}
+                aria-pressed={isActive}
+                className={`inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600 focus-visible:ring-offset-2 ${
+                  isActive
+                    ? 'border-cyan-700 bg-cyan-700 text-white shadow-sm'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-900'
+                }`}
+              >
+                <SectionIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="whitespace-nowrap">{section.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <div ref={overviewRef} className="grid grid-cols-1 gap-4">
         <div className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl overflow-hidden">
@@ -233,8 +236,8 @@ export default function AnalysisTab({ state, searchQuery }) {
             <h3 className="text-lg font-bold">Detailed Category Analysis</h3>
           </div>
           <div className="bg-white p-6">
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="analysis-detail-table-shell overflow-x-auto">
+              <table className="analysis-detail-table w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Category</th>

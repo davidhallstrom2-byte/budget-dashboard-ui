@@ -7,7 +7,7 @@ import {
   CreditCard, Repeat, Package, PiggyBank
 } from 'lucide-react';
 import PageContainer from "../common/PageContainer.jsx";
-import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
+import CollapseToggleButton from '../common/CollapseToggleButton.jsx';
 import CreditReportScanner from '../credit/CreditReportScanner.jsx';
 import CloseScreenButton from '../common/CloseScreenButton.jsx';
 
@@ -1952,20 +1952,20 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
 
     return (
       <div
-        className="mb-8"
+        className="mb-4"
         onDragOver={handleCategoryDragOver}
         onDrop={(e) => handleCategoryDrop(e, bucketName)}
       >
         <div draggable onDragStart={(e) => handleCategoryDragStart(e, bucketName)} className="bg-black text-white px-4 py-2 rounded-t-lg flex items-center justify-between cursor-move">
           <div className="flex items-center gap-2 flex-wrap">
             <GripVertical className="w-4 h-4 text-gray-400 hidden sm:block" />
-            <button
+            <CollapseToggleButton
+              expanded={!isCollapsed}
               onClick={() => toggleCategory(bucketName)}
-              className="p-1 hover:bg-gray-800 rounded transition-colors"
-              title={isCollapsed ? "Expand" : "Collapse"}
-            >
-              {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-            </button>
+              title={isCollapsed ? `Expand ${displayTitle}` : `Collapse ${displayTitle}`}
+              ariaLabel={isCollapsed ? `Expand ${displayTitle}` : `Collapse ${displayTitle}`}
+              className="border-slate-500 bg-slate-700 hover:bg-slate-600 focus-visible:ring-white"
+            />
             <IconComponent className={`w-5 h-5 ${iconColor}`} aria-hidden="true" />
             <h3 className="text-base sm:text-lg font-semibold">{displayTitle}</h3>
             <span className="text-xs sm:text-sm opacity-75">({filteredItems.length})</span>
@@ -2673,7 +2673,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
   };
 
   return (
-    <PageContainer className="overflow-x-hidden py-6">
+    <PageContainer className="overflow-x-hidden py-3 sm:py-4">
       <style>{`
         @media (max-width: 767.98px) {
           .editor-table-scroll {
@@ -2838,75 +2838,53 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
           }
         }
       `}</style>
-      <TabPageHeader
-        icon={PiggyBank}
-        title="Budget Editor"
-        subtitle="Manage categories, budget items, payment status, debt details, savings plans, and recurring dates."
-        theme="emerald"
-        className="budget-mobile-header"
-        actions={
-          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7 sm:gap-1.5 xl:gap-2">
-            {[
-              { id: 'all', label: 'All', title: 'Show all budget items', icon: Package },
-              { id: 'paid', label: 'Paid', title: 'Show paid budget items', icon: Save },
-              { id: 'dueSoon', label: 'Due Soon', title: 'Show budget items due soon', icon: Clock },
-              { id: 'pending', label: 'Pending', title: 'Show pending budget items', icon: CalendarClock },
-              { id: 'overdue', label: 'Overdue', title: 'Show overdue budget items', icon: AlertCircle },
-              { id: 'paused', label: 'Paused', title: 'Show paused budget items', icon: PauseCircle },
-              { id: 'notPaying', label: 'Excluded', title: 'Show items excluded from the payment plan', icon: Ban },
-            ].map((filter) => {
-              const FilterIcon = filter.icon;
-              const isActive = statusFilter === filter.id;
-              return (
-                <button
-                  key={filter.id}
-                  type="button"
-                  onClick={() => setStatusFilter(filter.id)}
-                  title={filter.title}
-                  aria-label={filter.title}
-                  aria-pressed={isActive}
-                  className={`${TAB_HEADER_ACTION_CLASS} !w-full !min-w-0 !px-2 !text-xs ${
-                    isActive
-                      ? 'border-white/50 bg-white text-emerald-950 shadow-md'
-                      : 'border-white/30 bg-white/15 text-white hover:bg-white/25'
-                  }`}
-                >
-                  <FilterIcon className="h-4 w-4" aria-hidden="true" />
-                  <span>{filter.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        }
-      />
-
-      <div className="mb-4 flex flex-col gap-3">
-        <div className="hidden md:flex items-center gap-3 flex-wrap">
-          <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">Row Color Legend:</span>
-          <span className="flex items-center gap-2 text-sm whitespace-nowrap">
-            <div className="w-4 h-4 bg-green-100 border border-green-200 rounded"></div>
-            Paid
-          </span>
-          <span className="flex items-center gap-2 text-sm whitespace-nowrap">
-            <div className="w-4 h-4 bg-yellow-100 border border-yellow-200 rounded"></div>
-            Due Soon (≤5 days)
-          </span>
-          <span className="flex items-center gap-2 text-sm whitespace-nowrap">
-            <div className="w-4 h-4 bg-red-100 border border-red-200 rounded"></div>
-            Overdue
-          </span>
-          <span className="flex items-center gap-2 text-sm whitespace-nowrap">
-            <div className="w-4 h-4 bg-indigo-50 border border-indigo-200 rounded"></div>
-            Paused
-          </span>
-          <span className="flex items-center gap-2 text-sm whitespace-nowrap">
-            <div className="w-4 h-4 bg-slate-200 border border-slate-300 rounded"></div>
-            Not Paying
-          </span>
+      <section
+        className="rounded-xl border border-cyan-200 bg-white p-3 shadow-sm lg:flex lg:items-center lg:justify-between lg:gap-4"
+        aria-label="Budget editor filters"
+      >
+        <div className="min-w-0 pb-3 lg:pb-0">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-cyan-800">Editor filters</p>
+          <p className="mt-0.5 max-w-2xl text-sm leading-5 text-slate-600">
+            Manage categories, budget items, payment status, debt details, savings plans, and recurring dates.
+          </p>
         </div>
-      </div>
 
-      <section className="mb-6 flex flex-col gap-3 rounded-xl border-2 border-lime-300 bg-gradient-to-r from-lime-50 to-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid shrink-0 grid-cols-2 gap-1.5 sm:grid-cols-4 lg:flex lg:flex-nowrap" role="group" aria-label="Filter budget items">
+          {[
+            { id: 'all', label: 'All', title: 'Show all budget items', icon: Package },
+            { id: 'pending', label: 'Pending', title: 'Show pending budget items', icon: CalendarClock },
+            { id: 'dueSoon', label: 'Due Soon', title: 'Show budget items due soon', icon: Clock },
+            { id: 'overdue', label: 'Overdue', title: 'Show overdue budget items', icon: AlertCircle },
+            { id: 'paid', label: 'Paid', title: 'Show paid budget items', icon: Save },
+            { id: 'paused', label: 'Paused', title: 'Show paused budget items', icon: PauseCircle },
+            { id: 'notPaying', label: 'Excluded', title: 'Show items excluded from the payment plan', icon: Ban },
+          ].map((filter) => {
+            const FilterIcon = filter.icon;
+            const isActive = statusFilter === filter.id;
+
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                onClick={() => setStatusFilter(filter.id)}
+                title={filter.title}
+                aria-label={filter.title}
+                aria-pressed={isActive}
+                className={`inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600 focus-visible:ring-offset-2 ${
+                  isActive
+                    ? 'border-cyan-700 bg-cyan-700 text-white shadow-sm'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-900'
+                }`}
+              >
+                <FilterIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="whitespace-nowrap">{filter.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="mt-3 mb-4 flex flex-col gap-3 rounded-xl border-2 border-lime-300 bg-gradient-to-r from-lime-50 to-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <PiggyBank className="mt-0.5 h-6 w-6 shrink-0 text-emerald-700" />
           <div>
@@ -2932,7 +2910,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       </section>
 
       {auntPersonalLoanRecord && (
-        <section className="mb-6 flex flex-col gap-4 rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <section className="mb-4 flex flex-col gap-3 rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 p-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
             <DollarSign className="mt-0.5 h-6 w-6 shrink-0 text-blue-700" />
             <div>
@@ -3016,7 +2994,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
         </section>
       )}
 
-      <div className="flex flex-col gap-3 mb-6">
+      <div className="mb-4 flex flex-col gap-2">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-xl font-semibold text-gray-800">Manage Categories & Items</h3>
@@ -3096,22 +3074,18 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
                 </button>
               </>
             )}
-            <button
+            <CollapseToggleButton
+              action="collapse"
               onClick={collapseAll}
-              className="flex items-center gap-2 px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
-              title="Collapse All Categories"
-            >
-              <ChevronDown className="w-4 h-4" />
-              <span className="hidden lg:inline">Collapse All</span>
-            </button>
-            <button
+              title="Collapse all categories"
+              ariaLabel="Collapse all budget categories"
+            />
+            <CollapseToggleButton
+              action="expand"
               onClick={expandAll}
-              className="flex items-center gap-2 px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
-              title="Expand All Categories"
-            >
-              <ChevronUp className="w-4 h-4" />
-              <span className="hidden lg:inline">Expand All</span>
-            </button>
+              title="Expand all categories"
+              ariaLabel="Expand all budget categories"
+            />
             <button
               onClick={addCategory}
               className="flex items-center gap-2 px-3 py-2 bg-black text-white rounded hover:bg-gray-900 text-sm"
@@ -3133,7 +3107,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       </div>
 
       {showSavedCreditReports && (
-        <section className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+        <section className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="font-black text-indigo-950">Saved Credit Reports</h3>
@@ -3204,7 +3178,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       )}
 
       {batchAddMode && (
-        <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+        <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 p-3">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-orange-900">Batch Add Mode - Quick Item Entry</h3>
             <button
@@ -3254,7 +3228,7 @@ const EditorTab = ({ state, setState, saveBudget, searchQuery }) => {
       )}
 
       {showTemplates && (
-        <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+        <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-indigo-900">Quick Templates</h3>
             <button

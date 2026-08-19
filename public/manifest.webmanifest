@@ -2,19 +2,20 @@
   "name": "Budget Dashboard",
   "short_name": "Dashboard",
   "description": "Private budget, to-do, CSC shifts, rides, opportunities, and paycheck dashboard.",
-  "start_url": "/budget-dashboard-fs/",
-  "scope": "/budget-dashboard-fs/",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#020617",
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "/budget-dashboard-fs/icon-192.png",
+      "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/budget-dashboard-fs/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }

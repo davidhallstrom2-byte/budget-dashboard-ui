@@ -1,7 +1,8 @@
 // src/components/modern/FinancialHealthCard.jsx
 import { useState, useMemo } from 'react';
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp } from 'lucide-react';
+import { TrendingUp, TrendingDown } from 'lucide-react';
 import { calculateFinancialHealthScore, saveScoreHistory, getScoreHistory } from '../../utils/financialHealthScore';
+import CollapseToggleButton from '../common/CollapseToggleButton.jsx';
 
 export default function FinancialHealthCard({ totals, buckets }) {
   const [expanded, setExpanded] = useState(false);
@@ -46,21 +47,21 @@ export default function FinancialHealthCard({ totals, buckets }) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
-      <div className="flex items-center justify-between mb-4">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-lg">
+      <div className="mb-3 flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Financial Health Score</h3>
           <p className="text-sm text-gray-500">Overall budget performance assessment</p>
         </div>
-        <button
+        <CollapseToggleButton
+          expanded={expanded}
           onClick={() => setExpanded(!expanded)}
-          className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-        >
-          {expanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-        </button>
+          title={expanded ? 'Collapse financial health details' : 'Expand financial health details'}
+          ariaLabel={expanded ? 'Collapse financial health details' : 'Expand financial health details'}
+        />
       </div>
 
-      <div className="flex items-end gap-6 mb-6">
+      <div className="mb-4 flex items-end gap-4">
         <div className="flex items-baseline gap-2">
           <span className={`text-5xl font-bold ${getScoreColor(overallScore)}`}>
             {overallScore}
@@ -83,7 +84,7 @@ export default function FinancialHealthCard({ totals, buckets }) {
         )}
       </div>
 
-      <div className="mb-6">
+      <div className="mb-4">
         <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
           <div 
             className={`h-full transition-all duration-500 ${getBarColor(overallScore)}`}

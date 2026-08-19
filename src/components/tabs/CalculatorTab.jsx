@@ -1,7 +1,6 @@
 // src/components/tabs/CalculatorTab.jsx
 import React, { useState, useRef } from 'react';
 import PageContainer from "../common/PageContainer";
-import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
 import { Calculator, TrendingUp, PiggyBank, CreditCard, Target } from 'lucide-react';
 
 export default function CalculatorTab({ state, searchQuery }) {
@@ -107,50 +106,54 @@ export default function CalculatorTab({ state, searchQuery }) {
   const anchorStyle = { scrollMarginTop: `${STICKY_OFFSET}px` };
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-amber-50" className="flex flex-col gap-6 bg-amber-50 pb-6">
-      <TabPageHeader
-        icon={Calculator}
-        title="Calculators"
-        subtitle="Model income, break-even needs, savings goals, debt payoff timing, and emergency-fund targets."
-        theme="indigo"
-        className="budget-mobile-header"
-        actions={
-          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-6 sm:gap-1.5 xl:gap-2">
-            {calculators.map(({ id, label }) => {
-              const CalculatorIcon = {
-                income: TrendingUp,
-                scenarios: Target,
-                breakeven: Calculator,
-                savings: PiggyBank,
-                debt: CreditCard,
-                emergency: Target,
-              }[id] || Calculator;
-              const isActive = activeCalculator === id;
-              const tooltip = `Jump to ${label} calculator`;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => scrollToCalculator(id)}
-                  title={tooltip}
-                  aria-label={tooltip}
-                  aria-pressed={isActive}
-                  className={`${TAB_HEADER_ACTION_CLASS} !w-full !min-w-0 !px-2 !text-xs ${
-                    isActive
-                      ? 'border-white/50 bg-white text-indigo-950 shadow-md'
-                      : 'border-white/30 bg-white/15 text-white hover:bg-white/25'
-                  }`}
-                >
-                  <CalculatorIcon className="h-4 w-4" aria-hidden="true" />
-                  <span>{label}</span>
-                </button>
-              );
-            })}
-          </div>
-        }
-      />
+    <PageContainer surfaceClassName="min-h-screen bg-amber-50" className="flex flex-col gap-3 bg-amber-50 pb-4">
+      <section
+        className="rounded-xl border border-cyan-200 bg-white p-3 shadow-sm lg:flex lg:items-center lg:justify-between lg:gap-4"
+        aria-label="Calculator navigation"
+      >
+        <div className="min-w-0 pb-3 lg:pb-0">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-cyan-800">Calculator sections</p>
+          <p className="mt-0.5 max-w-2xl text-sm leading-5 text-slate-600">
+            Model income, break-even needs, savings goals, debt payoff timing, and emergency-fund targets.
+          </p>
+        </div>
 
-      <div ref={(el) => (sectionRefs.current['income'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+        <div className="grid shrink-0 grid-cols-2 gap-1.5 sm:grid-cols-3 lg:flex lg:flex-nowrap" role="group" aria-label="Jump to calculator">
+          {calculators.map(({ id, label }) => {
+            const CalculatorIcon = {
+              income: TrendingUp,
+              scenarios: Target,
+              breakeven: Calculator,
+              savings: PiggyBank,
+              debt: CreditCard,
+              emergency: Target,
+            }[id] || Calculator;
+            const isActive = activeCalculator === id;
+            const tooltip = `Jump to ${label} calculator`;
+
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => scrollToCalculator(id)}
+                title={tooltip}
+                aria-label={tooltip}
+                aria-pressed={isActive}
+                className={`inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600 focus-visible:ring-offset-2 ${
+                  isActive
+                    ? 'border-cyan-700 bg-cyan-700 text-white shadow-sm'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-900'
+                }`}
+              >
+                <CalculatorIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="whitespace-nowrap">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <div ref={(el) => (sectionRefs.current['income'] = el)} style={anchorStyle} className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="bg-blue-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Income Calculator</h3>
@@ -200,7 +203,7 @@ export default function CalculatorTab({ state, searchQuery }) {
         </div>
       </div>
 
-      <div ref={(el) => (sectionRefs.current['scenarios'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+      <div ref={(el) => (sectionRefs.current['scenarios'] = el)} style={anchorStyle} className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="bg-purple-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">What-If Scenarios</h3>
@@ -255,7 +258,7 @@ export default function CalculatorTab({ state, searchQuery }) {
         </div>
       </div>
 
-      <div ref={(el) => (sectionRefs.current['breakeven'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+      <div ref={(el) => (sectionRefs.current['breakeven'] = el)} style={anchorStyle} className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="bg-green-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Break-Even Calculator</h3>
@@ -285,7 +288,7 @@ export default function CalculatorTab({ state, searchQuery }) {
         </div>
       </div>
 
-      <div ref={(el) => (sectionRefs.current['savings'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+      <div ref={(el) => (sectionRefs.current['savings'] = el)} style={anchorStyle} className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="bg-orange-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Savings Goal Planner</h3>
@@ -333,7 +336,7 @@ export default function CalculatorTab({ state, searchQuery }) {
         </div>
       </div>
 
-      <div ref={(el) => (sectionRefs.current['debt'] = el)} style={anchorStyle} className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+      <div ref={(el) => (sectionRefs.current['debt'] = el)} style={anchorStyle} className="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
         <div className="bg-red-500 px-6 py-3 text-white">
           <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
             <h3 className="text-lg font-semibold">Debt Payoff Calculator</h3>

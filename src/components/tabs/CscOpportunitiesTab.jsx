@@ -5,6 +5,7 @@ import {
   ChevronDown,
   CircleAlert,
   ClipboardCheck,
+  Download,
   Edit3,
   ExternalLink,
   Link2Off,
@@ -15,6 +16,7 @@ import {
   Printer,
   RefreshCcw,
   Search,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Upload,
@@ -23,6 +25,7 @@ import {
 import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.jsx';
 import CloseScreenButton from '../common/CloseScreenButton.jsx';
+import DataToolsScreen from '../common/DataToolsScreen.jsx';
 import { formatPhoneNumber } from '../../utils/phone';
 
 const OPPORTUNITIES_STORAGE_KEY = 'cscOpportunities.v1';
@@ -2943,6 +2946,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [showScanDrawer, setShowScanDrawer] = useState(false);
   const [showCreateShiftDrawer, setShowCreateShiftDrawer] = useState(false);
   const [showEventWatchDrawer, setShowEventWatchDrawer] = useState(false);
+  const [showDataScreen, setShowDataScreen] = useState(false);
   const [eventWatchReport, setEventWatchReport] = useState(() => loadEventWatchReport());
   const [eventWatchReportText, setEventWatchReportText] = useState('');
   const [showConflictSection, setShowConflictSection] = useState(false);
@@ -3783,6 +3787,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const exportData = () => handleExport();
     const importData = () => importInputRef.current?.click();
     const printData = () => openPrintPreview();
+    const openData = () => setShowDataScreen(true);
 
     window.addEventListener('csc-opportunities-toolbar:add', openAdd);
     window.addEventListener('csc-opportunities-toolbar:snapshot', snapshot);
@@ -3790,6 +3795,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     window.addEventListener('csc-opportunities-toolbar:export', exportData);
     window.addEventListener('csc-opportunities-toolbar:import', importData);
     window.addEventListener('csc-opportunities-toolbar:print', printData);
+    window.addEventListener('csc-opportunities-toolbar:data', openData);
 
     return () => {
       window.removeEventListener('csc-opportunities-toolbar:add', openAdd);
@@ -3798,6 +3804,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       window.removeEventListener('csc-opportunities-toolbar:export', exportData);
       window.removeEventListener('csc-opportunities-toolbar:import', importData);
       window.removeEventListener('csc-opportunities-toolbar:print', printData);
+      window.removeEventListener('csc-opportunities-toolbar:data', openData);
     };
   }, [opportunities, venueContacts]);
 
@@ -4579,7 +4586,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
   return (
     <PageContainer surfaceClassName="min-h-screen bg-gradient-to-b from-violet-100 via-violet-50 to-slate-100">
-      <div className="csc-opportunities-page flex flex-col gap-6 py-6">
+      <div className="csc-opportunities-page flex flex-col gap-3 py-3 sm:gap-4 sm:py-4">
         <style>{`
           .csc-mobile-status-icon {
             display: none;
@@ -4876,9 +4883,67 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <CalendarCheck2 className="h-4 w-4" />
                 <span className="csc-header-action-label">Latest Scan Report</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setShowDataScreen(true)}
+                title="Open CSC opportunity data and backup tools"
+                aria-label="Open CSC opportunity data and backup tools"
+                aria-haspopup="dialog"
+                aria-expanded={showDataScreen}
+                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 shadow-sm hover:bg-violet-50`}
+              >
+                <Upload className="h-4 w-4" />
+                <span className="csc-header-action-label">Data</span>
+              </button>
             </div>
           }
         />
+
+        {showDataScreen ? (
+          <DataToolsScreen
+            title="CSC Opportunity Data and Backups"
+            subtitle="Export or import opportunities and venue contacts, or save a safety snapshot before major changes."
+            onClose={() => setShowDataScreen(false)}
+            tools={[
+              {
+                key: 'export',
+                icon: Download,
+                tone: 'sky',
+                title: 'Export Opportunities',
+                description: 'Download opportunities and venue contacts as one JSON backup file.',
+                buttonLabel: 'Export Opportunities',
+                onClick: handleExport,
+              },
+              {
+                key: 'import',
+                icon: Upload,
+                tone: 'indigo',
+                title: 'Import Backup',
+                description: 'Restore opportunities and venue contacts from a previously exported JSON file.',
+                buttonLabel: 'Choose Backup File',
+                onClick: () => importInputRef.current?.click(),
+              },
+              {
+                key: 'snapshot',
+                icon: ShieldCheck,
+                tone: 'emerald',
+                title: 'Safety Snapshot',
+                description: 'Save a local CSC Opportunities snapshot before imports or other major updates.',
+                buttonLabel: 'Save Safety Snapshot',
+                onClick: handleManualSnapshot,
+              },
+              {
+                key: 'dashboard-export',
+                icon: Download,
+                tone: 'violet',
+                title: 'Complete Dashboard Backup',
+                description: 'Download all dashboard data as one JSON backup file.',
+                buttonLabel: 'Export Complete Dashboard',
+                onClick: () => window.dispatchEvent(new CustomEvent('dashboard-toolbar:export-all')),
+              },
+            ]}
+          />
+        ) : null}
 
         <section className="csc-summary-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <button
@@ -5060,7 +5125,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   className="csc-filter-control flex h-10 min-w-[12rem] items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-bold text-violet-950 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
                 >
                   <span className="truncate">{venueFilterLabel}</span>
-                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showVenueFilter ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showVenueFilter ? '' : 'rotate-180'}`} />
                 </button>
 
                 {showVenueFilter ? (

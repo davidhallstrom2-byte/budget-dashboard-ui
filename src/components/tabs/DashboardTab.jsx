@@ -1,14 +1,16 @@
 // src/components/tabs/DashboardTab.jsx
 import React, { useState, useMemo, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Printer, AlertCircle, Clock, Download, Plus, Minus, CheckCircle2, Ban, Landmark, PauseCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Printer, AlertCircle, Clock, Download, Plus, CheckCircle2, Ban, Landmark, PauseCircle } from 'lucide-react';
 import {
   DollarSign, Home, Car, Utensils, User, Monitor,
   CreditCard, Repeat, Package, WalletCards, PiggyBank
 } from 'lucide-react';
 import PageContainer from '../common/PageContainer.jsx';
 import TabPageHeader from '../common/TabPageHeader.jsx';
+import CollapseToggleButton, { COLLAPSE_TOGGLE_CLASS } from '../common/CollapseToggleButton.jsx';
 import EmergencyFundWidget from '../modern/EmergencyFundWidget';
 import CloseScreenButton from '../common/CloseScreenButton.jsx';
+import { reconcileStoredCscShiftsWithPaychecks } from '../../utils/cscPaycheckReconciliation.js';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -188,18 +190,24 @@ const getDashboardRideFinancials = (ride = {}) => {
 };
 
 const getDashboardPaycheckHours = (paycheck = {}) => {
+  const earningsLines = Array.isArray(paycheck?.earningsLines) ? paycheck.earningsLines : [];
+  const workedEarningsHours = earningsLines.reduce((sum, line) => {
+    if (/break|premium|meal|penalty/i.test(String(line?.type || ''))) return sum;
+    return sum + getDashboardNumber(line?.hours);
+  }, 0);
+  if (workedEarningsHours > 0) return workedEarningsHours;
+
   const hours = getDashboardNumber(paycheck?.hours);
+  if (hours > 0) return hours;
+
   const grossPay = getDashboardNumber(paycheck?.grossPay);
   const rate = getDashboardHourlyRate(paycheck?.rate);
 
   if (grossPay && rate) {
-    const calculatedHours = grossPay / rate;
-    if (!hours || Math.abs(hours - calculatedHours) > 0.25) {
-      return calculatedHours;
-    }
+    return grossPay / rate;
   }
 
-  return hours;
+  return 0;
 };
 
 const normalizeDashboardDate = (value = '') => {
@@ -406,7 +414,15 @@ const DashboardTab = ({
   }, []);
 
   useEffect(() => {
-    const refreshPaychecks = () => setPaychecks(loadPaycheckBudgetItems());
+    const refreshPaychecks = () => {
+      const nextPaychecks = loadPaycheckBudgetItems();
+      reconcileStoredCscShiftsWithPaychecks(nextPaychecks);
+      setPaychecks(nextPaychecks);
+      setCscShifts(loadCscBudgetShifts());
+      setArchivedCscShifts(loadArchivedCscBudgetShifts());
+    };
+
+    refreshPaychecks();
 
     window.addEventListener('storage', refreshPaychecks);
     window.addEventListener(PAYCHECK_UPDATE_EVENT, refreshPaychecks);
@@ -544,7 +560,10 @@ const DashboardTab = ({
     );
 
     const estimatedPay = activeShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
-    const paidPay = paidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
+    const paidPay = paidShifts.reduce(
+      (sum, shift) => sum + (getDashboardNumber(shift.actualGrossPay) || getCscEstimatedPay(shift)),
+      0
+    );
     const unpaidPay = unpaidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
     const currentMonthUnpaidPay = currentMonthUnpaidShifts.reduce((sum, shift) => sum + getCscEstimatedPay(shift), 0);
     const estimatedHours = activeShifts.reduce((sum, shift) => sum + getCscShiftHours(shift), 0);
@@ -1384,7 +1403,7 @@ const DashboardTab = ({
   };
 
   return (
-    <PageContainer surfaceClassName="min-h-screen bg-blue-50" className="budget-overview-page bg-blue-50 py-6">
+    <PageContainer surfaceClassName="min-h-screen bg-blue-50" className="budget-overview-page bg-blue-50 py-3 sm:py-4">
       {/* Urgent Payment Alert Modal */}
       {(() => {
         const urgentItems = [];
@@ -1471,15 +1490,16 @@ const DashboardTab = ({
         className="budget-mobile-header"
       />
 
-      <section className="mx-auto mb-3 mt-3 max-w-6xl overflow-hidden rounded-xl border border-blue-200 bg-white shadow-sm sm:mb-5 sm:mt-5 sm:rounded-2xl">
-        <button
-          type="button"
-          onClick={() => setShowBudgetOverview((prev) => !prev)}
-          className="flex w-full items-center gap-1.5 border-b border-blue-100 bg-blue-100/60 px-4 py-2 text-left text-sm font-bold text-blue-900 transition-colors hover:bg-blue-100 sm:gap-2 sm:px-5 sm:py-2.5"
-        >
-          {showBudgetOverview ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          {showBudgetOverview ? 'Hide Stats' : 'Show Stats'}
-        </button>
+      <section className="mx-auto mb-3 mt-3 max-w-6xl overflow-hidden rounded-xl border border-blue-200 bg-white shadow-sm sm:mb-4 sm:rounded-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-blue-100 bg-blue-100/60 px-4 py-2 sm:px-5">
+          <span className="text-sm font-bold text-blue-900">Budget Stats</span>
+          <CollapseToggleButton
+            expanded={showBudgetOverview}
+            onClick={() => setShowBudgetOverview((prev) => !prev)}
+            title={showBudgetOverview ? 'Collapse budget stats' : 'Expand budget stats'}
+            ariaLabel={showBudgetOverview ? 'Collapse budget stats' : 'Expand budget stats'}
+          />
+        </div>
 
         {showBudgetOverview && (
           <div className="space-y-3 border-t border-blue-100 bg-slate-50/70 p-3 sm:space-y-4 sm:p-4">
@@ -1814,7 +1834,7 @@ const DashboardTab = ({
 
 
       {homelightSavings.missingCount > 0 && (
-      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-2xl border-2 border-lime-300 bg-white shadow-sm">
+      <section className="mx-auto mb-4 max-w-6xl overflow-hidden rounded-2xl border-2 border-lime-300 bg-white shadow-sm">
         <button
           type="button"
           onClick={() => setShowHomelightSavings((current) => !current)}
@@ -1823,7 +1843,9 @@ const DashboardTab = ({
           aria-controls="homelight-savings-details"
         >
           <div className="flex min-w-0 items-center gap-3">
-            {showHomelightSavings ? <ChevronDown className="h-5 w-5 shrink-0 text-emerald-800" /> : <ChevronRight className="h-5 w-5 shrink-0 text-emerald-800" />}
+            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-600 bg-slate-700 text-white shadow-sm">
+              {showHomelightSavings ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </span>
             <PiggyBank className="h-7 w-7 shrink-0 text-emerald-700" />
             <div className="min-w-0">
               <h2 className="text-lg font-black text-emerald-950 sm:text-xl">Homelight Savings Plan</h2>
@@ -1932,14 +1954,16 @@ const DashboardTab = ({
 
 
 
-      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-2xl border-2 border-amber-300 bg-white shadow-sm">
+      <section className="mx-auto mb-4 max-w-6xl overflow-hidden rounded-2xl border-2 border-amber-300 bg-white shadow-sm">
         <button
           type="button"
           onClick={() => setShowDebtReconciliation((current) => !current)}
           className="flex w-full flex-col gap-3 bg-gradient-to-r from-amber-100 via-orange-50 to-rose-50 px-5 py-4 text-left sm:flex-row sm:items-center sm:justify-between"
         >
           <div className="flex items-center gap-3">
-            {showDebtReconciliation ? <ChevronDown className="h-5 w-5 text-amber-800" /> : <ChevronRight className="h-5 w-5 text-amber-800" />}
+            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-600 bg-slate-700 text-white shadow-sm">
+              {showDebtReconciliation ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </span>
             <Landmark className="h-6 w-6 text-amber-800" />
             <div>
               <h2 className="text-xl font-black text-slate-950">Debt and Delinquency Reconciliation</h2>
@@ -2036,8 +2060,8 @@ const DashboardTab = ({
               ))}
             </div>
 
-            <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full min-w-[1150px]">
+            <div className="dashboard-mobile-table-shell mt-5 overflow-x-auto rounded-xl border border-slate-200">
+              <table className="dashboard-mobile-table dashboard-debt-table w-full min-w-[1150px]">
                 <thead className="bg-slate-100">
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-black text-slate-700">Account</th>
@@ -2108,7 +2132,7 @@ const DashboardTab = ({
 
 
 
-      <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
+      <div className="mx-auto mb-4 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="flex flex-col gap-2 bg-blue-600 px-3 py-3 text-white sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-4">
           <div className="flex w-full items-center justify-between gap-2 sm:contents">
             <div className="flex min-w-0 items-center gap-1.5 sm:order-1 sm:gap-2">
@@ -2121,19 +2145,19 @@ const DashboardTab = ({
                   });
                   setExpandedCategories(allExpanded);
                 }}
-                className="rounded p-1 transition-colors hover:bg-white/20"
+                className={COLLAPSE_TOGGLE_CLASS}
                 title="Expand All Categories"
                 aria-label="Expand All Categories"
               >
-                <Plus className="h-5 w-5" />
+                <ChevronUp className="h-4 w-4" />
               </button>
               <button
                 onClick={() => setExpandedCategories({})}
-                className="rounded p-1 transition-colors hover:bg-white/20"
+                className={COLLAPSE_TOGGLE_CLASS}
                 title="Collapse All Categories"
                 aria-label="Collapse All Categories"
               >
-                <Minus className="h-5 w-5" />
+                <ChevronDown className="h-4 w-4" />
               </button>
             </div>
 
@@ -2195,11 +2219,11 @@ const DashboardTab = ({
           });
 
           return (
-            <div className="px-4 pb-4 overflow-x-auto bg-white">
+            <div className="dashboard-mobile-table-shell bg-white px-4 pb-4 overflow-x-auto">
               <div className="py-3 text-sm text-gray-600">
                 Showing {flatItems.length} {statusFilter !== 'all' ? statusFilter : ''} item{flatItems.length !== 1 ? 's' : ''} across all categories
               </div>
-              <table className="w-full min-w-[1000px]">
+              <table className="dashboard-mobile-table dashboard-flat-table w-full min-w-[1000px]">
                 <thead className="bg-gray-100">
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 w-48">Category</th>
@@ -2290,7 +2314,9 @@ const DashboardTab = ({
                 className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
               >
                 <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                  {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-600 bg-slate-700 text-white shadow-sm">
+                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                  </span>
                   <IconComponent className={`w-5 h-5 ${iconColor}`} />
                   <span className="font-medium text-sm sm:text-base">{displayTitle}</span>
                   <span className="text-xs sm:text-sm text-gray-500">({filteredItems.length})</span>
@@ -2330,8 +2356,8 @@ const DashboardTab = ({
               </button>
 
               {isExpanded && (
-                <div className="px-4 pb-4 overflow-x-auto bg-white">
-                  <table className="w-full min-w-[900px]">
+                <div className="dashboard-mobile-table-shell bg-white px-4 pb-4 overflow-x-auto">
+                  <table className={`dashboard-mobile-table dashboard-budget-table ${bucketName === 'banking' ? 'dashboard-budget-table-banking' : 'dashboard-budget-table-standard'} w-full min-w-[900px]`}>
                     <thead className="bg-gray-100">
                       <tr>
                         {bucketName === 'banking' ? (
@@ -2431,11 +2457,11 @@ const DashboardTab = ({
       </div>
 
       {/* Grand Totals */}
-      <div className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
+      <div className="mx-auto mb-4 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
         <div className="bg-blue-600 text-white px-4 py-3">
           <h3 className="text-lg font-bold">GRAND TOTALS</h3>
         </div>
-        <div className="p-6">
+        <div className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white rounded-lg p-4 border border-blue-200">
               <p className="text-sm text-gray-600 mb-1">Total Items</p>
@@ -2472,15 +2498,9 @@ const DashboardTab = ({
         </div>
       </div>
 
-      <section className="mx-auto mb-6 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
-        <button
-          type="button"
-          onClick={() => setShowPaymentAlerts(prev => !prev)}
-          className="flex w-full items-center justify-between gap-4 bg-blue-600 px-4 py-3 text-left text-white hover:bg-blue-700"
-          title={showPaymentAlerts ? 'Collapse overdue and due soon items' : 'Expand overdue and due soon items'}
-        >
+      <section className="mx-auto mb-4 max-w-6xl overflow-hidden rounded-xl border-2 border-blue-300 bg-gradient-to-r from-blue-50 to-blue-100">
+        <div className="flex w-full items-center justify-between gap-4 bg-blue-600 px-4 py-2 text-white">
           <div className="flex items-center gap-2">
-            {showPaymentAlerts ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
             <AlertCircle className="h-5 w-5 text-red-300" />
             <h3 className="text-lg font-bold">Payment Alerts</h3>
             <span className="rounded-full bg-red-600 px-2 py-1 text-xs font-extrabold text-white">
@@ -2490,10 +2510,14 @@ const DashboardTab = ({
               Due Soon {alerts.upcoming.length}
             </span>
           </div>
-          <span className="text-sm font-semibold text-white">
-            {showPaymentAlerts ? 'Collapse' : 'Expand'}
-          </span>
-        </button>
+          <CollapseToggleButton
+            expanded={showPaymentAlerts}
+            onClick={() => setShowPaymentAlerts(prev => !prev)}
+            title={showPaymentAlerts ? 'Collapse payment alerts' : 'Expand payment alerts'}
+            ariaLabel={showPaymentAlerts ? 'Collapse payment alerts' : 'Expand payment alerts'}
+            className="border-slate-500 bg-slate-700 hover:bg-slate-600 focus-visible:ring-white"
+          />
+        </div>
 
         {showPaymentAlerts && (
           <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">

@@ -299,7 +299,7 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
     <div className="relative" ref={panelRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative h-10 w-10 p-0 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center flex-shrink-0"
+        className="relative h-9 w-9 p-0 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center flex-shrink-0 lg:h-10 lg:w-10"
         title={notificationConfig.buttonTitle}
         aria-label={notificationConfig.buttonTitle}
       >
@@ -314,7 +314,7 @@ export default function NotificationPanel({ state, activeTab = 'budget', onMarkP
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border border-slate-200 z-50 max-h-[500px] overflow-hidden flex flex-col">
+        <div className="absolute -right-10 top-full z-50 mt-2 flex max-h-[500px] w-[calc(100vw-2rem)] max-w-96 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl lg:right-0 lg:w-96">
           <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
             <h3 className="font-semibold text-slate-900">{notificationConfig.title}</h3>
             <button
