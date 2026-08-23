@@ -60,6 +60,9 @@ const TASK_FILE_UPLOAD_LOCALWP_ENDPOINT = "http://main-dashboard.local/budget-da
 const TASK_FILE_PUBLIC_BASE_PATH = "/budget-dashboard-fs";
 const CUSTOM_TASK_CATEGORIES_STORAGE_KEY = "todoTab.taskCategories.custom.v1";
 const TASK_WORKFLOW_STATUSES = ["Pending", "Waiting"];
+const CSC_SHIFTS_STORAGE_KEY = "cscShifts.v1";
+const CSC_SHIFT_UPDATE_EVENT = "cscShifts:updated";
+const DEFAULT_APPOINTMENT_DURATION_MINUTES = 60;
 
 const TASK_TYPES = [
   "General",
@@ -71,8 +74,11 @@ const TASK_TYPES = [
   "Moving",
   "Work",
   "Dental",
-  "Phone / Lifeline",
 ];
+
+const LEGACY_TASK_CATEGORIES = new Set(["phone / lifeline"]);
+const isLegacyTaskCategory = (value = "") =>
+  LEGACY_TASK_CATEGORIES.has(cleanTaskCategoryName(value).toLowerCase());
 
 const normalizeTaskWorkflowStatus = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -82,6 +88,12 @@ const normalizeTaskWorkflowStatus = (value = "") => {
 };
 
 const cleanTaskCategoryName = (value = "") => String(value || "").replace(/\s+/g, " ").trim();
+
+const compareAlphabetically = (firstValue = "", secondValue = "") =>
+  String(firstValue || "").localeCompare(String(secondValue || ""), undefined, {
+    sensitivity: "base",
+    numeric: true,
+  });
 
 const mergeTaskCategories = (...categoryGroups) => {
   const seen = new Set();
@@ -110,7 +122,9 @@ const readStoredCustomTaskCategories = () => {
     if (typeof localStorage === "undefined") return [];
     const saved = localStorage.getItem(CUSTOM_TASK_CATEGORIES_STORAGE_KEY);
     const parsed = saved ? JSON.parse(saved) : [];
-    return mergeTaskCategories(Array.isArray(parsed) ? parsed : []).filter((category) => !TASK_TYPES.includes(category));
+    return mergeTaskCategories(Array.isArray(parsed) ? parsed : []).filter(
+      (category) => !TASK_TYPES.includes(category) && !isLegacyTaskCategory(category)
+    );
   } catch {
     return [];
   }
@@ -119,7 +133,9 @@ const readStoredCustomTaskCategories = () => {
 const writeStoredCustomTaskCategories = (categories = []) => {
   try {
     if (typeof localStorage === "undefined") return;
-    const cleaned = mergeTaskCategories(categories).filter((category) => !TASK_TYPES.includes(category));
+    const cleaned = mergeTaskCategories(categories).filter(
+      (category) => !TASK_TYPES.includes(category) && !isLegacyTaskCategory(category)
+    );
     localStorage.setItem(CUSTOM_TASK_CATEGORIES_STORAGE_KEY, JSON.stringify(cleaned));
   } catch {
     // Ignore storage write failures so task entry still works.
@@ -129,7 +145,7 @@ const writeStoredCustomTaskCategories = (categories = []) => {
 const extractTaskCategoryNames = (tasks = []) =>
   mergeTaskCategories(
     tasks.flatMap((task) => [task?.typeOverride, task?.type]).filter(Boolean)
-  ).filter((category) => category && category !== "General");
+  ).filter((category) => category && category !== "General" && !isLegacyTaskCategory(category));
 
 const TODO_CATEGORY_ICONS = {
   General: { icon: ListTodo, color: "text-slate-300" },
@@ -141,7 +157,6 @@ const TODO_CATEGORY_ICONS = {
   Moving: { icon: Truck, color: "text-orange-500" },
   Work: { icon: BriefcaseBusiness, color: "text-cyan-500" },
   Dental: { icon: Smile, color: "text-pink-500" },
-  "Phone / Lifeline": { icon: Phone, color: "text-indigo-500" },
 };
 
 const DEFAULT_FORM = {
@@ -151,6 +166,7 @@ const DEFAULT_FORM = {
   typeOverride: "",
   date: "",
   time: "",
+  endTime: "",
   contactId: "",
   contactName: "",
   phone: "",
@@ -193,7 +209,7 @@ const DEFAULT_FORM = {
 };
 
 const TASK_SCAN_FILL_FIELDS = Object.keys(DEFAULT_FORM).filter(
-  (field) => !["id", "completed", "details", "documents", "notes", "followUpNotes"].includes(field)
+  (field) => !["id", "completed", "details", "documents", "notes", "followUpNotes", "systemLink"].includes(field)
 );
 
 const FIELD_LABELS = {
@@ -208,6 +224,7 @@ const FIELD_LABELS = {
   deadline: ["deadline", "due", "due date", "reg due", "registration due", "suspension"],
   date: ["date", "appointment date", "visit date", "order date"],
   time: ["time", "appointment time", "start time"],
+  endTime: ["end time", "appointment end time", "finish time"],
   caseNumber: ["case", "case #", "case number", "citation", "citation #", "citation number", "id"],
   amount: ["amount", "balance", "fee", "cost", "total", "payment"],
   plate: ["plate", "license plate"],
@@ -240,8 +257,9 @@ const FIELD_LABEL_DISPLAY = {
   details: "Details",
   type: "Type",
   typeOverride: "Category",
-  date: "Date",
-  time: "Time",
+  date: "Appointment / event date",
+  time: "Appointment start time",
+  endTime: "Appointment end time",
   contactId: "Contact ID",
   contactName: "Contact name",
   phone: "Main phone",
@@ -253,19 +271,19 @@ const FIELD_LABEL_DISPLAY = {
   address2: "Second office / address",
   address3: "Third office / address",
   contactDetails: "Additional contact details",
-  deadline: "Deadline",
+  deadline: "Due date",
   blockedBy: "Blocked by",
   person: "Person",
   organization: "Organization",
-  website: "Website",
+  website: "Website or portal link",
   plate: "Plate",
   vin: "VIN",
   policyNumber: "Policy #",
   caseNumber: "Case / Citation #",
   amount: "Amount",
-  documents: "Documents",
+  documents: "Documents needed",
   questions: "Questions",
-  outcome: "Outcome",
+  outcome: "Desired outcome",
   fileName: "File name",
   notes: "Notes",
   status: "Status",
@@ -278,12 +296,13 @@ const FIELD_LABEL_DISPLAY = {
   effectiveDate: "Effective date",
   impact: "Impact",
   requiredAction: "Required action",
-  systemLink: "System link",
+  systemLink: "Website or portal link",
   followUpNotes: "Follow-up Notes",
 };
 
 const normalizeType = (value = "") => {
   const candidate = cleanTaskCategoryName(value);
+  if (isLegacyTaskCategory(candidate)) return "General";
   return candidate || "General";
 };
 
@@ -303,39 +322,27 @@ const getFieldLabel = (task, field) => {
 const TYPE_FIELDS = {
   General: ["date", "deadline", "time", "phone", "website", "documents", "questions", "outcome", "notes"],
   Medical: ["person", "organization", "phone", "address", "date", "deadline", "time", "documents", "questions", "outcome", "notes"],
-  "DMV / Vehicle": ["plate", "vin", "vehicle", "date", "deadline", "time", "amount", "caseNumber", "phone", "website", "systemLink", "documents", "requiredAction", "impact", "notes"],
-  Insurance: ["company", "policyNumber", "policyStatus", "effectiveDate", "time", "phone", "website", "systemLink", "amount", "deadline", "requiredAction", "impact", "documents", "notes"],
-  "DPSS / Benefits": ["person", "organization", "caseNumber", "phone", "website", "systemLink", "deadline", "time", "amount", "documents", "questions", "outcome", "notes"],
-  Legal: ["person", "organization", "caseNumber", "phone", "address", "date", "deadline", "time", "amount", "website", "systemLink", "documents", "questions", "outcome", "notes"],
+  "DMV / Vehicle": ["plate", "vin", "vehicle", "date", "deadline", "time", "amount", "caseNumber", "phone", "website", "documents", "requiredAction", "impact", "notes"],
+  Insurance: ["company", "policyNumber", "policyStatus", "effectiveDate", "time", "phone", "website", "amount", "deadline", "requiredAction", "impact", "documents", "notes"],
+  "DPSS / Benefits": ["person", "organization", "caseNumber", "phone", "website", "deadline", "time", "amount", "documents", "questions", "outcome", "notes"],
+  Legal: ["person", "organization", "caseNumber", "phone", "address", "date", "deadline", "time", "amount", "website", "documents", "questions", "outcome", "notes"],
   Moving: ["date", "deadline", "time", "address", "phone", "amount", "documents", "questions", "outcome", "notes"],
   Work: ["organization", "person", "phone", "website", "date", "deadline", "time", "documents", "questions", "outcome", "notes"],
   Dental: ["person", "organization", "phone", "address", "date", "deadline", "time", "documents", "questions", "outcome", "notes"],
-  "Phone / Lifeline": ["person", "company", "phone", "website", "systemLink", "caseNumber", "deadline", "time", "documents", "questions", "outcome", "notes"],
 };
 
-const REQUIRED_FIELDS_BY_TYPE = {
-  Medical: ["phone", "date"],
-  "DMV / Vehicle": ["plate", "vin", "deadline"],
-  Insurance: ["company", "phone", "effectiveDate"],
-  "DPSS / Benefits": ["caseNumber", "phone"],
-  Legal: ["caseNumber", "deadline", "phone"],
-  Moving: ["date", "address", "phone"],
-  Work: ["organization", "phone"],
-  Dental: ["phone", "date"],
-  "Phone / Lifeline": ["phone", "website"],
-};
-
-const MULTILINE_FIELDS = new Set(["details", "contactDetails", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction", "website", "systemLink"]);
+const MULTILINE_FIELDS = new Set(["details", "contactDetails", "documents", "questions", "outcome", "notes", "followUpNotes", "impact", "requiredAction"]);
 const FORMATTED_TEXT_FIELDS = new Set(["notes", "followUpNotes"]);
+const URL_FIELDS = new Set(["website"]);
 const DATE_PICKER_FIELDS = new Set(["date", "deadline", "effectiveDate", "followUpDate"]);
-const TIME_PICKER_FIELDS = new Set(["time", "followUpTime"]);
+const TIME_PICKER_FIELDS = new Set(["time", "endTime", "followUpTime"]);
 const PHONE_NUMBER_FIELDS = new Set(["phone", "directPhone", "cellPhone", "fax"]);
 const shouldUseFormattingToolbar = (field) => FORMATTED_TEXT_FIELDS.has(field);
 const DOCUMENT_DETAIL_FIELDS = new Set(["fileName", "documents"]);
 const NOTE_DETAIL_FIELDS = new Set(["notes", "followUpNotes"]);
 
-const SCHEDULE_FORM_FIELDS = ["date", "time", "deadline", "effectiveDate"];
-const FOLLOW_UP_FORM_FIELDS = ["status", "waitingOn", "followUpDate", "followUpTime"];
+const SCHEDULE_FORM_FIELDS = ["date", "time", "endTime", "deadline", "effectiveDate"];
+const FOLLOW_UP_FORM_FIELDS = ["waitingOn", "followUpDate", "followUpTime"];
 const CONTACT_FORM_FIELDS = [
   "contactName",
   "person",
@@ -352,17 +359,17 @@ const CONTACT_FORM_FIELDS = [
   "address3",
   "contactDetails",
 ];
-const ALWAYS_VISIBLE_CONTACT_FIELDS = new Set([
-  "contactName",
-  "person",
-  "organization",
-  "email",
-  "phone",
-  "fax",
-  "website",
-  "address",
-]);
+const PRIMARY_CONTACT_FIELDS = new Set(["contactName", "organization", "phone", "website"]);
 const PREPARATION_FORM_FIELDS = ["questions", "documents", "fileName", "outcome", "notes", "followUpNotes"];
+
+const hasTaskContactInformation = (task = {}) =>
+  Boolean(task.contactId) || CONTACT_FORM_FIELDS.some((field) => Boolean(String(task[field] || "").trim()));
+const hasAdditionalTaskContactInformation = (task = {}) =>
+  CONTACT_FORM_FIELDS.some(
+    (field) => !PRIMARY_CONTACT_FIELDS.has(field) && Boolean(String(task[field] || "").trim())
+  );
+const hasTaskPreparationInformation = (task = {}) =>
+  PREPARATION_FORM_FIELDS.some((field) => Boolean(String(task[field] || "").trim()));
 
 const orderTaskFormFields = (fields = []) => {
   const uniqueFields = Array.from(new Set(fields));
@@ -1209,6 +1216,113 @@ const formatTodoTimeForTextInput = (value = "") => {
   return `${displayHour}:${String(minute).padStart(2, "0")} ${meridiem}`;
 };
 
+const readScheduledCscShifts = () => {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const parsed = JSON.parse(localStorage.getItem(CSC_SHIFTS_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter((shift) => {
+      const status = String(shift?.shiftStatus || "Scheduled").trim().toLowerCase();
+      return shift?.startDate && !["cancelled", "canceled", "done", "complete", "completed"].includes(status);
+    });
+  } catch {
+    return [];
+  }
+};
+
+const buildLocalDateTime = (dateValue = "", timeValue = "") => {
+  const date = normalizeTodoCalendarDate(dateValue);
+  const time = normalizeTodoCalendarTime(timeValue);
+  if (!date || !time) return null;
+
+  const value = new Date(`${date}T${time}`);
+  return Number.isNaN(value.getTime()) ? null : value;
+};
+
+const getCscShiftWindow = (shift = {}) => {
+  const start = buildLocalDateTime(shift.startDate, shift.startTime);
+  const end = buildLocalDateTime(shift.finishDate || shift.startDate, shift.finishTime);
+  if (!start || !end) return null;
+  if (end <= start) end.setDate(end.getDate() + 1);
+  return { start, end };
+};
+
+const getTodoAppointmentWindow = (task = {}) => {
+  const date = normalizeTodoCalendarDate(task.date);
+  if (!date) return null;
+
+  const start = buildLocalDateTime(date, task.time);
+  if (!start) {
+    const dayStart = new Date(`${date}T00:00:00`);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    return { start: dayStart, end: dayEnd, hasExactTime: false, usesDefaultDuration: false };
+  }
+
+  const normalizedEndTime = normalizeTodoCalendarTime(task.endTime);
+  const end = normalizedEndTime
+    ? buildLocalDateTime(date, normalizedEndTime)
+    : new Date(start.getTime() + DEFAULT_APPOINTMENT_DURATION_MINUTES * 60 * 1000);
+
+  if (!end) return null;
+  if (end <= start) end.setDate(end.getDate() + 1);
+
+  return {
+    start,
+    end,
+    hasExactTime: true,
+    usesDefaultDuration: !normalizedEndTime,
+  };
+};
+
+const getTodoCscShiftConflictResult = (task = {}, shifts = []) => {
+  const appointmentWindow = getTodoAppointmentWindow(task);
+  if (!appointmentWindow) {
+    return { conflicts: [], hasAppointmentDate: false, hasExactTime: false, usesDefaultDuration: false };
+  }
+
+  const conflicts = shifts.filter((shift) => {
+    const shiftWindow = getCscShiftWindow(shift);
+    if (!shiftWindow) return false;
+    return appointmentWindow.start < shiftWindow.end && shiftWindow.start < appointmentWindow.end;
+  });
+
+  return {
+    conflicts,
+    hasAppointmentDate: true,
+    hasExactTime: appointmentWindow.hasExactTime,
+    usesDefaultDuration: appointmentWindow.usesDefaultDuration,
+  };
+};
+
+const formatCscShiftConflictWindow = (shift = {}) => {
+  const startDate = formatTodoDateForTextInput(shift.startDate);
+  const finishDate = formatTodoDateForTextInput(shift.finishDate || shift.startDate);
+  const startTime = formatTodoTimeForTextInput(shift.startTime);
+  const finishTime = formatTodoTimeForTextInput(shift.finishTime);
+  const finish = finishDate && finishDate !== startDate ? `${finishDate} ${finishTime}` : finishTime;
+  return `${startDate} ${startTime} to ${finish}`.trim();
+};
+
+const formatLocalDateTimeForCalendar = (value) => {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "";
+  return `${[
+    String(value.getFullYear()).padStart(4, "0"),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0"),
+  ].join("-")}T${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}:${String(value.getSeconds()).padStart(2, "0")}`;
+};
+
+const getTodoAppointmentEndDateTime = (task = {}, dateValue = "", startTimeValue = "") => {
+  const appointmentWindow = getTodoAppointmentWindow({
+    ...task,
+    date: dateValue,
+    time: startTimeValue,
+  });
+  return appointmentWindow?.hasExactTime ? formatLocalDateTimeForCalendar(appointmentWindow.end) : "";
+};
+
 const getTaskFollowUpTimestamp = (task = {}) => {
   const dateValue = normalizeTodoCalendarDate(task.followUpDate || "");
   if (!dateValue) return Number.NaN;
@@ -1499,8 +1613,7 @@ const buildTodoGoogleCalendarEventPayload = (task = {}) => {
     task.caseNumber ? `Case #: ${task.caseNumber}` : "",
     task.policyNumber ? `Policy #: ${task.policyNumber}` : "",
     task.amount ? `Amount: ${task.amount}` : "",
-    task.website ? `Website: ${task.website}` : "",
-    task.systemLink ? `System link: ${task.systemLink}` : "",
+    task.website || task.systemLink ? `Website: ${task.website || task.systemLink}` : "",
     task.questions ? `Questions:\n${task.questions}` : "",
     normalizeTaskWorkflowStatus(task.status) === "Waiting" ? "Status: Waiting" : "",
     task.waitingOn ? `Waiting on: ${task.waitingOn}` : "",
@@ -1528,7 +1641,7 @@ const buildTodoGoogleCalendarEventPayload = (task = {}) => {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles",
     };
     payload.end = {
-      dateTime: addHoursToTodoCalendarDateTime(dateValue, timeValue, 1),
+      dateTime: getTodoAppointmentEndDateTime(task, dateValue, timeValue) || addHoursToTodoCalendarDateTime(dateValue, timeValue, 1),
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles",
     };
   } else {
@@ -1681,6 +1794,21 @@ const createEmptyTask = () => ({
   attachments: [],
 });
 
+const createPrintSafeTask = (task = {}) => ({
+  ...task,
+  documents: "",
+  fileName: "",
+  attachments: [],
+  sourceTaskSnapshot: task.sourceTaskSnapshot
+    ? {
+        ...task.sourceTaskSnapshot,
+        documents: "",
+        fileName: "",
+        attachments: [],
+      }
+    : task.sourceTaskSnapshot,
+});
+
 const getCategoryAnchorId = (type) =>
   `todo-category-${String(type).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}`;
 
@@ -1780,7 +1908,9 @@ const normalizeInsuranceDmvTasks = (tasks = []) => {
       }
     }
 
-    normalizedTasks.push(normalizeTaskCategory(task));
+    const normalizedTask = normalizeTaskCategory(task);
+    if (JSON.stringify(normalizedTask) !== JSON.stringify(task)) changed = true;
+    normalizedTasks.push(normalizedTask);
   });
 
   return { tasks: normalizedTasks, changed };
@@ -1926,11 +2056,9 @@ const getExplicitTaskType = (task) => {
   const text = `${title} ${details} ${notes}`;
 
   if (/\bcall\s+dpss\b|\bdpss\b|calfresh|medi-cal|redetermination|benefitscal|\bgr\b/.test(text)) return "DPSS / Benefits";
-  if (/spectrum|internet|basic\s+tv|tv\s+package|cable|wireless|phone\s+service/.test(text)) return "Phone / Lifeline";
   if (/secure\s+moving\s+assistance|\bmoving\b|move-in|move-out|storage|211\s*la/.test(text)) return "Moving";
   if (/parking citation|citationprocessingcenter|dmv|registration renewal|vehicle registration|plate\s*:|vin\s*:/.test(text)) return "DMV / Vehicle";
   if (/auto insurance|insurance assignment|caarp|aipso|integon|policy|coverage|carrier|premium|cancelled|canceled/.test(text)) return "Insurance";
-  if (/lifeline phone|lifeline phones|safelink|truconnect|assurance wireless|california lifeline/.test(text)) return "Phone / Lifeline";
   if (/dental|dentist|bhakta/.test(text)) return "Dental";
   if (/csc|reactivation|retraining|work|job|shift|schedule/.test(text)) return "Work";
   if (/attorney|lawyer|court|legal|hearing|notice|eviction|custodio|dubey/.test(text)) return "Legal";
@@ -1966,11 +2094,9 @@ const inferTaskType = (task) => {
     .toLowerCase();
 
   if (/(dpss|calfresh|medi-cal|gr\b|benefitscal|benefits|redetermination|case\s?#)/i.test(haystack)) return "DPSS / Benefits";
-  if (/(spectrum|internet|basic\s+tv|tv\s+package|cable|wireless|phone\s+service)/i.test(haystack)) return "Phone / Lifeline";
   if (/(move|moving|move-in|move-out|storage|rental|211 la)/i.test(haystack)) return "Moving";
   if (/(insurance|integon|policy|coverage|carrier|premium|cancelled|canceled|effective date|policy status|caarp|aipso)/i.test(haystack)) return "Insurance";
   if (/(dmv|registration|plate|vin|vehicle|license|parking citation|citationprocessingcenter)/i.test(haystack)) return "DMV / Vehicle";
-  if (/(lifeline|phone|wireless|safelink|truconnect|assurance wireless|california lifeline)/i.test(haystack)) return "Phone / Lifeline";
   if (/(doctor|medical|clinic|podiatry|urology|oncology|cardiology|blood draw|quest|lab|authorization|referral|antibiotics|wound)/i.test(haystack)) return "Medical";
   if (/(court|legal|attorney|lawyer|hearing|notice|eviction|custodio|dubey)/i.test(haystack)) return "Legal";
   if (/(work|job|shift|schedule|reactivation|retraining|csc)/i.test(haystack)) return "Work";
@@ -1983,12 +2109,16 @@ const inferTaskType = (task) => {
 const normalizeTaskCategory = (task = {}) => {
   const correctedType = inferTaskType(task);
   const normalizedType = normalizeType(correctedType);
-  const normalizedOverride = cleanTaskCategoryName(task.typeOverride);
+  const overrideCandidate = cleanTaskCategoryName(task.typeOverride);
+  const normalizedOverride = overrideCandidate ? normalizeType(overrideCandidate) : "";
+  const website = String(task.website || task.systemLink || "").trim();
 
   return combineNotesIntoFollowUpEntries({
     ...task,
     type: normalizedType,
     typeOverride: normalizedOverride,
+    website,
+    systemLink: "",
     status: normalizeTaskWorkflowStatus(task.status),
     followUpTime: task.followUpTime ? formatTodoTimeForTextInput(task.followUpTime) : "",
     attachments: normalizeTaskAttachments(task.attachments),
@@ -2002,6 +2132,11 @@ const normalizeTaskCategory = (task = {}) => {
 const normalizeDerivedFields = (task) => {
   const combined = `${task.taskName}\n${task.details}\n${task.notes}\n${task.documents}\n${task.requiredAction}\n${task.impact}`;
 
+  if (!task.website && task.systemLink) {
+    task.website = String(task.systemLink).trim();
+  }
+  task.systemLink = "";
+
   if (!task.phone) {
     const phoneMatch = combined.match(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
     if (phoneMatch) task.phone = phoneMatch[0].trim();
@@ -2011,11 +2146,10 @@ const normalizeDerivedFields = (task) => {
     task[field] = formatPhoneNumber(task[field] || "");
   });
 
-  if (!task.website && !task.systemLink) {
+  if (!task.website) {
     const urlMatch = combined.match(/https?:\/\/[^\s]+|www\.[^\s]+/i);
     if (urlMatch) {
       task.website = urlMatch[0].trim();
-      task.systemLink = urlMatch[0].trim();
     }
   }
 
@@ -2154,10 +2288,16 @@ const sortTasks = (tasks) => {
 export default function TodoTab({ contacts: sharedContacts, onContactsChange } = {}) {
   const hasHydrated = useRef(false);
   const [tasks, setTasks] = useState(readStoredTasks);
+  const printListTasks = useMemo(() => tasks.map(createPrintSafeTask), [tasks]);
   const [form, setForm] = useState(createEmptyTask);
+  const [scheduledCscShifts, setScheduledCscShifts] = useState(readScheduledCscShifts);
   const [importText, setImportText] = useState("");
   const [parsedTasks, setParsedTasks] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showContactFields, setShowContactFields] = useState(false);
+  const [showMoreContactFields, setShowMoreContactFields] = useState(false);
+  const [showDependencyFields, setShowDependencyFields] = useState(false);
+  const [showNotesFields, setShowNotesFields] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [showPremiumTodoView, setShowPremiumTodoView] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -2185,8 +2325,18 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const [replaceExistingContactFields, setReplaceExistingContactFields] = useState(false);
   const [contactApplyTarget, setContactApplyTarget] = useState("form");
   const contacts = useMemo(() => getInitialContactsForState(sharedContacts?.length ? sharedContacts : localContacts), [sharedContacts, localContacts]);
+  const alphabetizedContacts = useMemo(
+    () =>
+      [...contacts].sort((first, second) =>
+        compareAlphabetically(
+          `${first.name || ""} ${first.category || ""}`,
+          `${second.name || ""} ${second.category || ""}`
+        )
+      ),
+    [contacts]
+  );
   const taskCategoryTypes = useMemo(
-    () => mergeTaskCategories(TASK_TYPES, customTaskCategories, extractTaskCategoryNames(tasks)),
+    () => mergeTaskCategories(TASK_TYPES, customTaskCategories, extractTaskCategoryNames(tasks)).sort(compareAlphabetically),
     [customTaskCategories, tasks]
   );
 
@@ -2228,6 +2378,10 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   const [statusClock, setStatusClock] = useState(() => Date.now());
   const completionCelebrationTimeoutRef = useRef(null);
   const previousTaskCompletionRef = useRef(new Map(tasks.map((task) => [task.id, Boolean(task.completed)])));
+  const cscAppointmentConflictResult = useMemo(
+    () => getTodoCscShiftConflictResult(form, scheduledCscShifts),
+    [form.date, form.time, form.endTime, scheduledCscShifts]
+  );
 
   const resetTaskScan = useCallback(() => {
     setIsTaskScanOpen(false);
@@ -2245,6 +2399,21 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   }, []);
 
   useEffect(() => {
+    const refreshScheduledCscShifts = () => setScheduledCscShifts(readScheduledCscShifts());
+
+    refreshScheduledCscShifts();
+    window.addEventListener(CSC_SHIFT_UPDATE_EVENT, refreshScheduledCscShifts);
+    window.addEventListener("storage", refreshScheduledCscShifts);
+    window.addEventListener("focus", refreshScheduledCscShifts);
+
+    return () => {
+      window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshScheduledCscShifts);
+      window.removeEventListener("storage", refreshScheduledCscShifts);
+      window.removeEventListener("focus", refreshScheduledCscShifts);
+    };
+  }, []);
+
+  useEffect(() => {
     const timerId = window.setInterval(() => setStatusClock(Date.now()), 30000);
     return () => window.clearInterval(timerId);
   }, []);
@@ -2254,6 +2423,10 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
       setForm(createEmptyTask());
       setEditingId(null);
       setShowAdvanced(false);
+      setShowContactFields(false);
+      setShowMoreContactFields(false);
+      setShowDependencyFields(false);
+      setShowNotesFields(false);
       resetTaskScan();
       setIsCreateOpen(true);
     };
@@ -2438,11 +2611,11 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   }, [form]);
 
   const scheduleFormFields = SCHEDULE_FORM_FIELDS.filter(
-    (field) => ["date", "time", "deadline"].includes(field) || visibleFormFields.includes(field)
+    (field) => ["date", "time", "endTime", "deadline"].includes(field) || visibleFormFields.includes(field)
   );
-  const contactFormFields = CONTACT_FORM_FIELDS.filter(
-    (field) => ALWAYS_VISIBLE_CONTACT_FIELDS.has(field) || visibleFormFields.includes(field) || Boolean(form[field])
-  );
+  const contactFormFields = CONTACT_FORM_FIELDS;
+  const primaryContactFormFields = contactFormFields.filter((field) => PRIMARY_CONTACT_FIELDS.has(field));
+  const additionalContactFormFields = contactFormFields.filter((field) => !PRIMARY_CONTACT_FIELDS.has(field));
   const preparationFormFields = PREPARATION_FORM_FIELDS.filter((field) => visibleFormFields.includes(field));
   const followUpFormFields = FOLLOW_UP_FORM_FIELDS;
   const organizedFormFieldNames = new Set([
@@ -2452,6 +2625,9 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     ...preparationFormFields,
   ]);
   const categoryDetailFormFields = visibleFormFields.filter((field) => !organizedFormFieldNames.has(field));
+  const advancedFormFields = Object.keys(DEFAULT_FORM)
+    .filter((field) => !["taskName", "details", "type", "typeOverride", "blockedBy", "contactId", "completed", "id", "systemLink"].includes(field))
+    .filter((field) => !organizedFormFieldNames.has(field) && !categoryDetailFormFields.includes(field));
 
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -2459,7 +2635,7 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
 
   const addCustomTaskCategory = (rawCategoryName, options = {}) => {
     const typedCategory = cleanTaskCategoryName(rawCategoryName);
-    if (!typedCategory) return "";
+    if (!typedCategory || isLegacyTaskCategory(typedCategory)) return "";
 
     const existingCategory = taskCategoryTypes.find(
       (category) => category.toLowerCase() === typedCategory.toLowerCase()
@@ -2738,6 +2914,10 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     setForm(createEmptyTask());
     setEditingId(null);
     setShowAdvanced(false);
+    setShowContactFields(false);
+    setShowMoreContactFields(false);
+    setShowDependencyFields(false);
+    setShowNotesFields(false);
     resetTaskScan();
     setIsCreateOpen(false);
   };
@@ -2756,7 +2936,27 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
   };
 
   const saveTask = () => {
-    if (!form.taskName.trim() && !form.details.trim()) return;
+    if (!form.taskName.trim()) return;
+
+    if (cscAppointmentConflictResult.conflicts.length > 0) {
+      const conflictDetails = cscAppointmentConflictResult.conflicts
+        .map((shift) => {
+          const shiftName = shift.event || shift.jobName || shift.shiftName || shift.venue || "CSC shift";
+          const venue = shift.venue && shift.venue !== shiftName ? `, ${shift.venue}` : "";
+          return `• ${shiftName}${venue}\n  ${formatCscShiftConflictWindow(shift)}`;
+        })
+        .join("\n\n");
+      const appointmentTimingNote = cscAppointmentConflictResult.hasExactTime
+        ? cscAppointmentConflictResult.usesDefaultDuration
+          ? "The appointment is being treated as one hour because no end time was entered."
+          : "The appointment time overlaps the CSC shift."
+        : "No appointment time was entered, so the entire date is being checked.";
+
+      const shouldSave = window.confirm(
+        `CSC shift conflict detected.\n\n${appointmentTimingNote}\n\n${conflictDetails}\n\nSave this appointment anyway?`
+      );
+      if (!shouldSave) return;
+    }
 
     const taskToSave = stampTask(
       normalizeDerivedFields({
@@ -2780,6 +2980,10 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     setForm(createEmptyTask());
     setEditingId(null);
     setShowAdvanced(false);
+    setShowContactFields(false);
+    setShowMoreContactFields(false);
+    setShowDependencyFields(false);
+    setShowNotesFields(false);
     resetTaskScan();
     setIsCreateOpen(false);
   };
@@ -2791,6 +2995,10 @@ export default function TodoTab({ contacts: sharedContacts, onContactsChange } =
     if (parsed.length === 1) {
       setForm({ ...createEmptyTask(), ...parsed[0] });
       setShowAdvanced(true);
+      setShowContactFields(hasTaskContactInformation(parsed[0]));
+      setShowMoreContactFields(hasAdditionalTaskContactInformation(parsed[0]));
+      setShowDependencyFields(Boolean(parsed[0].blockedBy));
+      setShowNotesFields(hasTaskPreparationInformation(parsed[0]));
       resetTaskScan();
       setIsImportOpen(false);
       setIsCreateOpen(true);
@@ -2929,6 +3137,10 @@ const addParsedTasks = () => {
     setForm({ ...createEmptyTask(), ...task, attachments: normalizeTaskAttachments(task.attachments) });
     setEditingId(task.id);
     setShowAdvanced(true);
+    setShowContactFields(hasTaskContactInformation(task));
+    setShowMoreContactFields(hasAdditionalTaskContactInformation(task));
+    setShowDependencyFields(Boolean(task.blockedBy));
+    setShowNotesFields(hasTaskPreparationInformation(task));
     resetTaskScan();
     setIsCreateOpen(true);
   };
@@ -3156,7 +3368,7 @@ const addParsedTasks = () => {
           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
         >
           <option value="">Select saved contact...</option>
-          {contacts.map((contact) => (
+          {alphabetizedContacts.map((contact) => (
             <option key={contact.id} value={contact.id}>
               {contact.name}{contact.category ? ` - ${contact.category}` : ""}
             </option>
@@ -3203,6 +3415,10 @@ const addParsedTasks = () => {
     setForm({ ...createEmptyTask(), type, typeOverride: type });
     setEditingId(null);
     setShowAdvanced(false);
+    setShowContactFields(false);
+    setShowMoreContactFields(false);
+    setShowDependencyFields(false);
+    setShowNotesFields(false);
     resetTaskScan();
     setIsCreateOpen(true);
     window.requestAnimationFrame(() => {
@@ -3257,7 +3473,7 @@ const addParsedTasks = () => {
         phone: sourceTask.phone || "",
         address: sourceTask.address || "",
         website: sourceTask.website || "",
-        systemLink: sourceTask.systemLink || sourceTask.website || "",
+        systemLink: "",
         caseNumber: sourceTask.caseNumber || "",
         amount: sourceTask.amount || "",
         documents: sourceTask.documents || "",
@@ -4139,6 +4355,19 @@ const addParsedTasks = () => {
       );
     }
 
+    if (URL_FIELDS.has(field)) {
+      return (
+        <input
+          type="url"
+          inputMode="url"
+          value={value || ""}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="https://"
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      );
+    }
+
     return (
       <input
         type={PHONE_NUMBER_FIELDS.has(field) ? "tel" : "text"}
@@ -4415,6 +4644,11 @@ const addParsedTasks = () => {
                 setForm(createEmptyTask());
                 setEditingId(null);
                 setShowAdvanced(false);
+                setShowContactFields(false);
+                setShowMoreContactFields(false);
+                setShowDependencyFields(false);
+                setShowNotesFields(false);
+                resetTaskScan();
                 setIsCreateOpen(true);
               }}
               title="Add task"
@@ -5481,7 +5715,7 @@ const addParsedTasks = () => {
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">{editingId ? "Edit task" : "Add task"}</h3>
-                <p className="text-sm text-slate-600">Only the fields that fit this task type are shown first.</p>
+                <p className="text-sm text-slate-600">Start with the essentials, then open optional sections only when needed.</p>
               </div>
               <CloseScreenButton onClick={closeTaskForm} />
             </div>
@@ -5495,15 +5729,24 @@ const addParsedTasks = () => {
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <label className="text-sm font-medium md:col-span-2">
-                      Task name
-                      <input value={form.taskName} onChange={(event) => updateForm("taskName", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                      Task name <span className="text-red-600">*</span>
+                      <input
+                        autoFocus
+                        value={form.taskName}
+                        onChange={(event) => updateForm("taskName", event.target.value)}
+                        placeholder="What needs to be done?"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
                     </label>
 
                     <label className="text-sm font-medium">
                       Category
                       <select
                         value={form.type}
-                        onChange={(event) => updateForm("type", event.target.value)}
+                        onChange={(event) => {
+                          const nextType = event.target.value;
+                          setForm((current) => ({ ...current, type: nextType, typeOverride: nextType }));
+                        }}
                         className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                       >
                         {taskCategoryTypes.map((type) => <option key={type} value={type}>{type}</option>)}
@@ -5511,10 +5754,9 @@ const addParsedTasks = () => {
                     </label>
 
                     <label className="text-sm font-medium">
-                      Blocked by
-                      <select value={form.blockedBy} onChange={(event) => updateForm("blockedBy", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                        <option value="">Not blocked</option>
-                        {tasks.filter((task) => task.id !== editingId).map((task) => <option key={task.id} value={task.id}>{task.taskName}</option>)}
+                      Status
+                      <select value={normalizeTaskWorkflowStatus(form.status)} onChange={(event) => updateForm("status", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                        {TASK_WORKFLOW_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                       </select>
                     </label>
 
@@ -5523,7 +5765,8 @@ const addParsedTasks = () => {
                       <textarea
                         value={form.details || ""}
                         onChange={(event) => updateForm("details", event.target.value)}
-                        rows={4}
+                        placeholder="Add instructions, context, or the next action."
+                        rows={3}
                         className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                       />
                     </label>
@@ -5533,35 +5776,141 @@ const addParsedTasks = () => {
                 <section className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
                   <div className="mb-3">
                     <h4 className="font-black text-slate-900">Schedule</h4>
-                    <p className="text-xs font-semibold text-slate-500">Keep the appointment date and hard deadline separate from follow-up timing.</p>
+                    <p className="text-xs font-semibold text-slate-500">Use the event date for an appointment and the due date for the final deadline.</p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(scheduleFormFields)}</div>
+
+                  {cscAppointmentConflictResult.hasAppointmentDate && (
+                    <div
+                      className={`mt-3 rounded-xl border p-3 ${
+                        cscAppointmentConflictResult.conflicts.length > 0
+                          ? "border-red-300 bg-red-50"
+                          : cscAppointmentConflictResult.hasExactTime
+                            ? "border-emerald-300 bg-emerald-50"
+                            : "border-amber-300 bg-amber-50"
+                      }`}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {cscAppointmentConflictResult.conflicts.length > 0 ? (
+                        <>
+                          <div className="font-black text-red-950">CSC shift conflict detected</div>
+                          <p className="mt-1 text-xs font-semibold text-red-900">
+                            {cscAppointmentConflictResult.hasExactTime
+                              ? cscAppointmentConflictResult.usesDefaultDuration
+                                ? "This check assumes a one-hour appointment because no end time was entered."
+                                : "The appointment overlaps the following scheduled CSC shift."
+                              : "No appointment time was entered, so this is treated as a possible all-day conflict."}
+                          </p>
+                          <div className="mt-2 space-y-2">
+                            {cscAppointmentConflictResult.conflicts.map((shift, index) => {
+                              const shiftName = shift.event || shift.jobName || shift.shiftName || shift.venue || "CSC shift";
+                              return (
+                                <div key={shift.id || `${shift.startDate}-${shift.startTime}-${index}`} className="rounded-lg border border-red-200 bg-white px-3 py-2">
+                                  <div className="text-sm font-black text-slate-950">{shiftName}</div>
+                                  {shift.venue && shift.venue !== shiftName && (
+                                    <div className="text-xs font-bold text-slate-800">{shift.venue}</div>
+                                  )}
+                                  <div className="text-xs font-semibold text-slate-800">{formatCscShiftConflictWindow(shift)}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <p className="mt-2 text-xs font-bold text-red-950">Saving will require confirmation.</p>
+                        </>
+                      ) : cscAppointmentConflictResult.hasExactTime ? (
+                        <>
+                          <div className="font-black text-emerald-950">No CSC shift conflict found</div>
+                          <p className="mt-1 text-xs font-semibold text-emerald-900">
+                            {cscAppointmentConflictResult.usesDefaultDuration
+                              ? "Checked as a one-hour appointment. Add an end time if it will last longer."
+                              : "The appointment does not overlap an active scheduled CSC shift."}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="font-black text-amber-950">Add an appointment time for an exact check</div>
+                          <p className="mt-1 text-xs font-semibold text-amber-900">No CSC shift is currently scheduled on this date.</p>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </section>
 
-                <section className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/40 p-4">
-                  <div className="mb-3">
-                    <h4 className="font-black text-slate-900">Waiting & Follow-up</h4>
-                    <p className="text-xs font-semibold text-slate-500">Use Waiting when the next action belongs to someone else. Follow-up timing does not replace the hard deadline.</p>
+                {(normalizeTaskWorkflowStatus(form.status) === "Waiting" || followUpFormFields.some((field) => Boolean(form[field]))) && (
+                  <section className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/40 p-4">
+                    <div className="mb-3">
+                      <h4 className="font-black text-slate-900">Waiting & Follow-up</h4>
+                      <p className="text-xs font-semibold text-slate-500">Record who has the next action and when you want to follow up.</p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(followUpFormFields)}</div>
+                  </section>
+                )}
+
+                <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="font-black text-slate-900">Dependency</h4>
+                      <p className="text-xs font-semibold text-slate-500">Use this only when another task must be completed first.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowDependencyFields((current) => !current)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-100"
+                    >
+                      {showDependencyFields ? "Hide dependency" : form.blockedBy ? "Edit dependency" : "Add dependency"}
+                    </button>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(followUpFormFields)}</div>
+                  {showDependencyFields && (
+                    <label className="mt-3 block text-sm font-medium">
+                      Blocked by
+                      <select value={form.blockedBy} onChange={(event) => updateForm("blockedBy", event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                        <option value="">Not blocked</option>
+                        {tasks.filter((task) => task.id !== editingId).map((task) => <option key={task.id} value={task.id}>{task.taskName}</option>)}
+                      </select>
+                    </label>
+                  )}
                 </section>
 
                 <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
-                  <div className="mb-3">
-                    <h4 className="font-black text-slate-900">Contact Information</h4>
-                    <p className="text-xs font-semibold text-slate-500">Choose a saved contact or enter the person, organization, phones, email, website, and offices manually.</p>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="font-black text-slate-900">Contact Information</h4>
+                      <p className="text-xs font-semibold text-slate-500">Add a saved contact, organization, phone number, or website when needed.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowContactFields((current) => !current)}
+                      className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-50"
+                    >
+                      {showContactFields ? "Hide contacts" : hasTaskContactInformation(form) ? "Edit contacts" : "Add contact"}
+                    </button>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {renderContactPicker("form")}
-                    {renderTaskFormFields(contactFormFields)}
-                  </div>
+                  {showContactFields && (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {renderContactPicker("form")}
+                      {renderTaskFormFields(primaryContactFormFields)}
+                      {additionalContactFormFields.length > 0 && (
+                        <div className="md:col-span-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowMoreContactFields((current) => !current)}
+                            className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-50"
+                          >
+                            {showMoreContactFields ? "Hide additional contact fields" : "More contact fields"}
+                          </button>
+                        </div>
+                      )}
+                      {showMoreContactFields && renderTaskFormFields(additionalContactFormFields)}
+                    </div>
+                  )}
                 </section>
 
                 {categoryDetailFormFields.length > 0 && (
                   <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
                     <div className="mb-3">
-                      <h4 className="font-black text-slate-900">Category Details</h4>
-                      <p className="text-xs font-semibold text-slate-500">Fields specific to {form.type || "this task"}.</p>
+                      <h4 className="font-black text-slate-900">{form.type === "General" ? "Additional Details" : `${form.type} Details`}</h4>
+                      <p className="text-xs font-semibold text-slate-500">Add only the information that is useful for this task.</p>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(categoryDetailFormFields)}</div>
                   </section>
@@ -5569,29 +5918,37 @@ const addParsedTasks = () => {
 
                 {preparationFormFields.length > 0 && (
                   <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
-                    <div className="mb-3">
-                      <h4 className="font-black text-slate-900">Preparation & Follow-up</h4>
-                      <p className="text-xs font-semibold text-slate-500">Keep questions, documents, outcomes, and notes together.</p>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-black text-slate-900">Notes and Documents</h4>
+                        <p className="text-xs font-semibold text-slate-500">Keep questions, required documents, the desired outcome, and notes together.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowNotesFields((current) => !current)}
+                        className="rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-bold text-violet-900 hover:bg-violet-50"
+                      >
+                        {showNotesFields ? "Hide notes and documents" : hasTaskPreparationInformation(form) ? "Edit notes and documents" : "Add notes or documents"}
+                      </button>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">{renderTaskFormFields(preparationFormFields)}</div>
+                    {showNotesFields && (
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">{renderTaskFormFields(preparationFormFields)}</div>
+                    )}
                   </section>
                 )}
 
-                <section className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
-                  {renderTaskScanPanel()}
-                </section>
+                {renderTaskScanPanel()}
               </div>
 
-              <button type="button" onClick={() => setShowAdvanced((value) => !value)} title={showAdvanced ? "Hide advanced task fields" : "Show advanced task fields"} className="mt-3 text-sm font-medium text-slate-700 underline">
-                {showAdvanced ? "Hide advanced fields" : "Show advanced fields"}
-              </button>
+              {advancedFormFields.length > 0 && (
+                <button type="button" onClick={() => setShowAdvanced((value) => !value)} title={showAdvanced ? "Hide advanced task fields" : "Show advanced task fields"} className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
+                  {showAdvanced ? "Hide advanced fields" : "Show advanced fields"}
+                </button>
+              )}
 
-              {showAdvanced && (
+              {showAdvanced && advancedFormFields.length > 0 && (
                 <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3 md:grid-cols-2">
-                  {Object.keys(DEFAULT_FORM)
-                    .filter((field) => !["taskName", "details", "type", "typeOverride", "blockedBy", "contactId", "completed", "id"].includes(field))
-                    .filter((field) => !organizedFormFieldNames.has(field) && !categoryDetailFormFields.includes(field))
-                    .map((field) => (
+                  {advancedFormFields.map((field) => (
                       <label key={field} className="text-sm font-medium">
                         {getFieldLabel(form, field)}
                         <div className="mt-1">{renderInput(field, form[field], (value) => updateForm(field, value))}</div>
@@ -5601,9 +5958,20 @@ const addParsedTasks = () => {
               )}
             </div>
 
-            <div className="flex flex-wrap gap-2 border-t border-slate-200 px-6 py-4">
-              <button type="button" onClick={saveTask} title={editingId ? "Save task changes" : "Add task to the list"} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white">{editingId ? "Save changes" : "Add task"}</button>
-              <button type="button" onClick={closeTaskForm} title="Cancel task editing" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium">Cancel</button>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white px-6 py-4">
+              <p className="text-xs font-semibold text-slate-500"><span className="text-red-600">*</span> Task name is required.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={closeTaskForm} title="Cancel task editing" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                <button
+                  type="button"
+                  onClick={saveTask}
+                  disabled={!form.taskName.trim()}
+                  title={editingId ? "Save task changes" : "Add task to the list"}
+                  className="rounded-lg bg-slate-950 px-5 py-2 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {editingId ? "Save changes" : "Add task"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -5905,7 +6273,7 @@ const addParsedTasks = () => {
         title="To-Do Archives"
       />
 
-      {showPremiumTodoView && <PremiumTodoListView tasks={tasks} onClose={() => setShowPremiumTodoView(false)} />}
+      {showPremiumTodoView && <PremiumTodoListView tasks={printListTasks} onClose={() => setShowPremiumTodoView(false)} />}
     </PageContainer>
   );
 }

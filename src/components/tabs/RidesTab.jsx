@@ -38,10 +38,31 @@ const RIDES_CREATE_DRAFT_STORAGE_KEY = 'modivcareRides.createDraftFromOpportunit
 const RIDES_OPEN_LINKED_RIDE_STORAGE_KEY = 'modivcareRides.openLinkedRideId.v1';
 const CSC_OPPORTUNITIES_STORAGE_KEY = 'cscOpportunities.v1';
 const CSC_OPPORTUNITIES_UPDATE_EVENT = 'cscOpportunities:updated';
+const APP_NAVIGATE_EVENT = 'app:navigate';
 const RIDE_STATUS_OPTIONS = ['Confirmed', 'Completed', 'Canceled', 'Pending', 'Paid'];
 const LEG_STATUS_OPTIONS = ['Confirmed', 'Completed', 'Canceled', 'Pending', 'Request Pickup'];
 
 const createRideId = (prefix = 'ride') => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const navigateToAppTab = (tab, recordId = '') => {
+  window.dispatchEvent(
+    new CustomEvent(APP_NAVIGATE_EVENT, {
+      detail: { tab, recordId },
+    })
+  );
+};
+
+const normalizeRideReturnContext = (context = null) => {
+  const returnTab = String(context?.returnTab || '').trim();
+  const returnRecordId = String(context?.returnRecordId || '').trim();
+
+  if (!returnTab) return null;
+
+  return {
+    returnTab,
+    returnRecordId,
+  };
+};
 
 const formatDateForInput = (value = '') => {
   const text = String(value || '').trim();
@@ -1524,16 +1545,29 @@ const RidesTab = ({ searchQuery = '' }) => {
   const [isRideReportOpen, setIsRideReportOpen] = useState(false);
   const [isRideDataOpen, setIsRideDataOpen] = useState(false);
   const [showPremiumRidesView, setShowPremiumRidesView] = useState(false);
+  const [rideEditorReturnContext, setRideEditorReturnContext] = useState(null);
   const fileInputRef = useRef(null);
   const rideEditorRef = useRef(null);
   const isRideEditorOpen = Boolean(editingRide);
+
+  const closeRideEditor = () => {
+    const returnContext = rideEditorReturnContext;
+    setEditingRide(null);
+    setRideEditorReturnContext(null);
+
+    if (returnContext?.returnTab) {
+      window.requestAnimationFrame(() => {
+        navigateToAppTab(returnContext.returnTab, returnContext.returnRecordId || '');
+      });
+    }
+  };
 
   useEffect(() => {
     if (!editingRide) return undefined;
 
     const previouslyFocusedElement = document.activeElement;
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape') setEditingRide(null);
+      if (event.key === 'Escape') closeRideEditor();
     };
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -1547,7 +1581,7 @@ const RidesTab = ({ searchQuery = '' }) => {
         previouslyFocusedElement.focus();
       }
     };
-  }, [isRideEditorOpen]);
+  }, [isRideEditorOpen, rideEditorReturnContext]);
 
   useEffect(() => {
     let rawDraft = '';
@@ -1566,8 +1600,14 @@ const RidesTab = ({ searchQuery = '' }) => {
     if (!rawDraft) return;
 
     try {
-      setEditingRide(normalizeRide(JSON.parse(rawDraft)));
-      setStatusMessage('Ride plan opened from CSC Opportunities.');
+      const parsedDraft = JSON.parse(rawDraft);
+      setRideEditorReturnContext(normalizeRideReturnContext(parsedDraft.returnContext));
+      setEditingRide(normalizeRide(parsedDraft));
+      setStatusMessage(
+        parsedDraft.linkedCscShiftId
+          ? 'Ride plan opened from CSC Shifts.'
+          : 'Ride plan opened from CSC Opportunities.'
+      );
       window.setTimeout(() => setStatusMessage(''), 3000);
     } catch (error) {
       console.error('Failed to open ride draft from CSC opportunity:', error);
@@ -1709,6 +1749,7 @@ const RidesTab = ({ searchQuery = '' }) => {
   };
 
   const startEditRide = (ride = {}) => {
+    setRideEditorReturnContext(null);
     setEditingRide(normalizeRide(ride));
   };
 
@@ -1784,7 +1825,7 @@ const RidesTab = ({ searchQuery = '' }) => {
     saveRides(nextRides, existingRide ? 'Ride changes saved.' : 'Ride plan saved.');
     updateOpportunityRideLink(normalized.sourceOpportunityId, normalized.id);
     setExpandedRideIds((current) => ({ ...current, [normalized.id]: true }));
-    setEditingRide(null);
+    closeRideEditor();
   };
 
   const duplicateRide = (ride = {}) => {
@@ -1966,6 +2007,7 @@ const RidesTab = ({ searchQuery = '' }) => {
     setIsRideImportOpen(false);
     setIsRideReportOpen(false);
     setIsRideDataOpen(false);
+    setRideEditorReturnContext(null);
     setEditingRide(ride);
   };
 
@@ -2683,7 +2725,7 @@ const RidesTab = ({ searchQuery = '' }) => {
           <button
             type="button"
             className="absolute inset-0 bg-slate-950/40"
-            onClick={() => setEditingRide(null)}
+            onClick={closeRideEditor}
             aria-label="Close Ride Editor"
             tabIndex={-1}
           />
@@ -2695,7 +2737,7 @@ const RidesTab = ({ searchQuery = '' }) => {
                 </h2>
                 <p id="ride-editor-description" className="mt-1 max-w-[60ch] break-words text-xs leading-5 text-slate-600 sm:text-sm">Update ride details, leg times, locations, phone numbers, provider, and notes.</p>
               </div>
-              <CloseScreenButton onClick={() => setEditingRide(null)} />
+              <CloseScreenButton onClick={closeRideEditor} />
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-5">
@@ -2997,7 +3039,7 @@ const RidesTab = ({ searchQuery = '' }) => {
             <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-3 py-2.5 sm:px-5 sm:py-4">
               <button
                 type="button"
-                onClick={() => setEditingRide(null)}
+                onClick={closeRideEditor}
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
               >
                 Cancel

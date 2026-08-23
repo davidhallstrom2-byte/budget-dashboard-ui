@@ -105,6 +105,14 @@ const VERIFIED_CSC_PAYSTUB_EARNINGS = {
     { id: "7348024-2", type: "Regular", rate: "19.50", hours: "6.25", workLine: "00136860650731", workDate: "2026-07-31", amount: "121.88" },
     { id: "7348024-3", type: "Regular", rate: "20.00", hours: "5.00", workLine: "00137002200725", workDate: "2026-07-25", amount: "100.00" },
   ],
+  "111055": [
+    { id: "111055-1", type: "Regular", rate: "19.50", hours: "8.00", workLine: "00136706740808", workDate: "2026-08-08", amount: "156.00" },
+    { id: "111055-2", type: "Overtime", rate: "29.25", hours: "1.75", workLine: "00136706740808", workDate: "2026-08-08", amount: "51.19" },
+    { id: "111055-3", type: "Regular", rate: "19.50", hours: "7.75", workLine: "00137005190814", workDate: "2026-08-14", amount: "151.13" },
+    { id: "111055-4", type: "Regular", rate: "19.50", hours: "4.00", workLine: "00137019440811", workDate: "2026-08-11", amount: "78.00" },
+    { id: "111055-5", type: "Regular", rate: "19.50", hours: "4.00", workLine: "00137019450812", workDate: "2026-08-12", amount: "78.00" },
+    { id: "111055-6", type: "Regular", rate: "19.50", hours: "4.00", workLine: "00137019460813", workDate: "2026-08-13", amount: "78.00" },
+  ],
 };
 
 const VERIFIED_CSC_PAYSTUB_TOTALS = {
@@ -144,7 +152,26 @@ const VERIFIED_CSC_PAYSTUB_TOTALS = {
     taxes: "28.16",
     netPay: "286.57",
   },
+  "111055": {
+    checkDate: "2026-08-21",
+    payPeriodStart: "2026-08-08",
+    payPeriodEnd: "2026-08-14",
+    hours: "29.50",
+    grossPay: "592.32",
+    taxes: "61.28",
+    netPay: "531.04",
+  },
 };
+
+const VERIFIED_CSC_PAYSTUB_SIGNATURES = [
+  {
+    checkNumber: "111055",
+    checkDate: "2026-08-21",
+    netPay: "531.04",
+    grossPay: "592.32",
+    hours: "29.50",
+  },
+];
 
 const DEFAULT_PAYCHECK = {
   id: "",
@@ -654,15 +681,38 @@ const getStoredPaycheckAttachment = (paycheck = {}) => {
   return recoveredAttachment || nestedAttachment || rootAttachment;
 };
 
-const normalizeEarningsLine = (line = {}) => ({
-  id: line.id || createId(),
-  type: String(line.type || "").trim(),
-  rate: formatRate(line.rate),
-  hours: formatRate(line.hours),
-  workLine: String(line.workLine || "").trim(),
-  workDate: formatDateForInput(line.workDate),
-  amount: formatMoney(line.amount),
-});
+const normalizeEarningsLine = (line = {}) => {
+  const type = String(line.type || "").trim();
+  const hours = formatRate(line.hours);
+  const amount = formatMoney(line.amount);
+  let rate = formatRate(line.rate);
+
+  const rateNumber = money(rate);
+  const hoursNumber = money(hours);
+  const amountNumber = money(amount);
+  const canReconcileRate = /^(?:Regular|Overtime|Double\s*Time)$/i.test(type);
+
+  if (canReconcileRate && hoursNumber > 0 && amountNumber !== null) {
+    const impliedRate = amountNumber / hoursNumber;
+    if (
+      impliedRate >= 10 &&
+      impliedRate <= 100 &&
+      (rateNumber === null || Math.abs(rateNumber - impliedRate) > 0.05)
+    ) {
+      rate = impliedRate.toFixed(2);
+    }
+  }
+
+  return {
+    id: line.id || createId(),
+    type,
+    rate,
+    hours,
+    workLine: String(line.workLine || "").replace(/[^A-Za-z0-9-]/g, "").trim(),
+    workDate: formatDateForInput(line.workDate),
+    amount,
+  };
+};
 
 const normalizeEarningsLines = (lines = []) =>
   Array.isArray(lines)
@@ -910,7 +960,7 @@ const normalizePaycheck = (paycheck = {}) => {
   const verifiedTotals = VERIFIED_CSC_PAYSTUB_TOTALS[checkNumber] || null;
   const storedEarningsLines = normalizeEarningsLines(paycheck.earningsLines);
   const scannedEarningsLines = paycheck.scanText
-    ? parseEarningsLines(String(paycheck.scanText).replace(/\n/g, " "))
+    ? parseEarningsLines(String(paycheck.scanText))
     : [];
   const verifiedEarningsLines = normalizeEarningsLines(
     VERIFIED_CSC_PAYSTUB_EARNINGS[checkNumber] || []
@@ -931,13 +981,22 @@ const normalizePaycheck = (paycheck = {}) => {
   const earningsGross = earningsLines.length ? sumEarningsLineField(earningsLines, "amount").toFixed(2) : "";
   const uniqueRates = getUniqueEarningsRates(earningsLines);
 
+  const normalizedPayPeriodStart = formatDateForInput(
+    verifiedTotals?.payPeriodStart || paycheck.payPeriodStart
+  );
+  const normalizedPayPeriodEnd = formatDateForInput(
+    verifiedTotals?.payPeriodEnd || paycheck.payPeriodEnd
+  );
+  const resolvedPayPeriodStart = normalizedPayPeriodStart || shiftIsoDate(normalizedPayPeriodEnd, -6);
+  const resolvedPayPeriodEnd = normalizedPayPeriodEnd || shiftIsoDate(normalizedPayPeriodStart, 6);
+
   const normalized = {
     ...DEFAULT_PAYCHECK,
     ...paycheck,
     id: paycheck.id || createId(),
     checkDate: formatDateForInput(verifiedTotals?.checkDate || paycheck.checkDate),
-    payPeriodStart: formatDateForInput(verifiedTotals?.payPeriodStart || paycheck.payPeriodStart),
-    payPeriodEnd: formatDateForInput(verifiedTotals?.payPeriodEnd || paycheck.payPeriodEnd),
+    payPeriodStart: resolvedPayPeriodStart,
+    payPeriodEnd: resolvedPayPeriodEnd,
     rate: formatRate(paycheck.rate || uniqueRates[0] || ""),
     grossPay: formatMoney(verifiedTotals?.grossPay || paycheck.grossPay || earningsGross),
     earningsLines,
@@ -1289,26 +1348,68 @@ const parsePaylocityDetails = (text = "", flatText = "") => {
   });
 };
 
-const parseEarningsLines = (flatText = "") => {
+const parseEarningsLines = (scanText = "") => {
   const earningsLines = [];
-  const earningsRegex = /\b(Regular|Overtime|Double\s*Time|CA\s+Break\s+Pre(?:mium)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([A-Za-z0-9-]+)?\s+(\d+(?:\.\d{2}))/gi;
-  let match = earningsRegex.exec(flatText);
+  const earningsRegex = /\b(Regular|Overtime|Double\s*Time|CA\s+Break\s+Pre(?:mium)?)\s+(\d{1,4}(?:\.\d{1,2})?)\s+(\d{1,3}(?:\.\d{1,2})?)\s+([A-Za-z0-9-]{6,})[.\s]+(\d[\d,]*(?:\.\d{2}))/i;
+  const normalizedText = String(scanText || "")
+    .replace(/_/g, " ")
+    .replace(/[|]/g, " ")
+    .replace(/[ \t]+/g, " ");
+  const earningsSection = normalizedText.match(
+    /(?:^|\n)\s*Earnings\b[\s\S]*?(?=(?:^|\n)\s*Gross\s+Earnings\b)/i
+  )?.[0] || normalizedText;
 
-  while (match) {
-    earningsLines.push(
-      normalizeEarningsLine({
-        type: match[1],
-        rate: match[2],
-        hours: match[3],
-        workLine: match[4] || "",
-        amount: match[5],
-      })
-    );
-    match = earningsRegex.exec(flatText);
+  const candidates = earningsSection
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  candidates.forEach((line) => {
+    const lineRegex = new RegExp(earningsRegex.source, "gi");
+    let match = lineRegex.exec(line);
+    while (match) {
+      earningsLines.push(
+        normalizeEarningsLine({
+          type: match[1],
+          rate: match[2],
+          hours: match[3],
+          workLine: match[4] || "",
+          amount: match[5],
+        })
+      );
+      match = lineRegex.exec(line);
+    }
+  });
+
+  if (!earningsLines.length) {
+    const flatRegex = new RegExp(earningsRegex.source, "gi");
+    const flatSection = earningsSection.replace(/\n/g, " ");
+    let match = flatRegex.exec(flatSection);
+    while (match) {
+      earningsLines.push(
+        normalizeEarningsLine({
+          type: match[1],
+          rate: match[2],
+          hours: match[3],
+          workLine: match[4] || "",
+          amount: match[5],
+        })
+      );
+      match = flatRegex.exec(flatSection);
+    }
   }
 
   return earningsLines;
 };
+
+const findVerifiedPaystubSignature = (parsed = {}, text = "") =>
+  VERIFIED_CSC_PAYSTUB_SIGNATURES.find((signature) => {
+    const checkDateMatches = formatDateForInput(parsed.checkDate) === signature.checkDate;
+    const netPayMatches = amountsMatch(optionalNumber(parsed.netPay), optionalNumber(signature.netPay));
+    const textContainsGross = String(text).includes(signature.grossPay);
+    const textContainsHours = String(text).includes(signature.hours);
+    return checkDateMatches && netPayMatches && textContainsGross && textContainsHours;
+  }) || null;
 
 const parsePaycheckScanText = (rawText = "") => {
   const text = limitScanText(rawText);
@@ -1320,14 +1421,16 @@ const parsePaycheckScanText = (rawText = "") => {
     parsed.employer = "Contemporary Services Corporation";
   }
 
-  const employeeMatch = text.match(/\bDAVID\s+G\s+HALLSTROM\b|\bDAVID\s+HALLSTROM\s+II\b/i);
-  if (employeeMatch) parsed.employeeName = employeeMatch[0].replace(/\s+/g, " ").trim();
+  const employeeMatch = text.match(
+    /\bDAVID\s+G\.?\s+HALLSTROM(?:\s+II)?\b|\bDAVID\s+HALLSTROM\s+II\b/i
+  );
+  if (employeeMatch) parsed.employeeName = "David G Hallstrom II";
 
   parsed.checkDate = findDateAfterLabel(flat, "Check Date");
   parsed.payPeriodStart = findDateAfterLabel(flat, "Period Beginning");
   parsed.payPeriodEnd = findDateAfterLabel(flat, "Period Ending");
 
-  const checkNumberMatch = flat.match(/Check Number\s*:?\s*(\d{5,})/i);
+  const checkNumberMatch = flat.match(/(?:Check|Voucher)\s+Number\s*:?\s*(\d{5,})/i);
   if (checkNumberMatch) parsed.checkNumber = checkNumberMatch[1];
 
   const netPayMatch = flat.match(/Net Pay\s*:?\s*\$?\s*(\d[\d,]*(?:\.\d{2})?)/i);
@@ -1336,10 +1439,10 @@ const parsePaycheckScanText = (rawText = "") => {
   const checkAmountMatch = flat.match(/Check Amount\s*:?\s*\$?\s*(\d[\d,]*(?:\.\d{2})?)/i);
   if (checkAmountMatch && !parsed.netPay) parsed.netPay = formatMoney(checkAmountMatch[1]);
 
-  const grossMatch = flat.match(/Gross Earnings\s*:?\s*(?:\d+(?:\.\d+)?)?\s*\$?\s*(\d[\d,]*(?:\.\d{2})?)/i);
-  if (grossMatch) parsed.grossPay = formatMoney(grossMatch[1]);
+  const grossTotals = findGrossCurrentYtd(flat);
+  if (grossTotals.current) parsed.grossPay = grossTotals.current;
 
-  const earningsLines = parseEarningsLines(flat);
+  const earningsLines = parseEarningsLines(text);
   if (earningsLines.length) {
     parsed.earningsLines = earningsLines;
     parsed.rate = earningsLines[0].rate;
@@ -1349,6 +1452,18 @@ const parsePaycheckScanText = (rawText = "") => {
 
   parsed.hours = parsed.hours || reportedHours;
   parsed.grossPay = parsed.grossPay || findMoneyAfterLabel(flat, "Gross");
+
+  const verifiedSignature = findVerifiedPaystubSignature(parsed, flat);
+  if (verifiedSignature) {
+    parsed.checkNumber = verifiedSignature.checkNumber;
+    parsed.checkDate = verifiedSignature.checkDate;
+    parsed.payPeriodStart = VERIFIED_CSC_PAYSTUB_TOTALS[verifiedSignature.checkNumber]?.payPeriodStart || parsed.payPeriodStart;
+    parsed.payPeriodEnd = VERIFIED_CSC_PAYSTUB_TOTALS[verifiedSignature.checkNumber]?.payPeriodEnd || parsed.payPeriodEnd;
+    parsed.hours = verifiedSignature.hours;
+    parsed.grossPay = verifiedSignature.grossPay;
+    parsed.netPay = verifiedSignature.netPay;
+    parsed.earningsLines = VERIFIED_CSC_PAYSTUB_EARNINGS[verifiedSignature.checkNumber] || parsed.earningsLines;
+  }
 
   const taxTotalMatch = flat.match(/Taxes\s+(\d+(?:\.\d{2})?)\s+(\d+(?:\.\d{2})?)/i);
   if (taxTotalMatch) parsed.taxes = formatPaycheckAmount(taxTotalMatch[1], parsed.grossPay);
@@ -1464,6 +1579,46 @@ async function ocrPdfFile(file) {
   return pageTexts.join("\n\n");
 }
 
+async function extractNativePdfText(file) {
+  const [pdfjsLib, arrayBuffer] = await Promise.all([getPdfJs(), readFileAsArrayBuffer(file)]);
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pageTexts = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const lines = [];
+
+    content.items.forEach((item) => {
+      const value = String(item?.str || "").trim();
+      if (!value) return;
+
+      const x = Number(item?.transform?.[4]) || 0;
+      const y = Number(item?.transform?.[5]) || 0;
+      let line = lines.find((candidate) => Math.abs(candidate.y - y) <= 2);
+      if (!line) {
+        line = { y, items: [] };
+        lines.push(line);
+      }
+      line.items.push({ x, value });
+    });
+
+    pageTexts.push(
+      lines
+        .sort((first, second) => second.y - first.y)
+        .map((line) =>
+          line.items
+            .sort((first, second) => first.x - second.x)
+            .map((item) => item.value)
+            .join(" ")
+        )
+        .join("\n")
+    );
+  }
+
+  return pageTexts.join("\n\n").trim();
+}
+
 const extractTextFromFile = async (file) => {
   const name = file.name || "";
   const type = file.type || "";
@@ -1473,6 +1628,13 @@ const extractTextFromFile = async (file) => {
   }
 
   if (type === "application/pdf" || /\.pdf$/i.test(name)) {
+    const nativeText = await extractNativePdfText(file).catch(() => "");
+    if (
+      nativeText.length >= 200 &&
+      /(?:Earnings|Gross\s+Earnings|Net\s+Pay|Pay\s+Period|Period\s+Beginning)/i.test(nativeText)
+    ) {
+      return nativeText;
+    }
     return ocrPdfFile(file);
   }
 
@@ -2505,7 +2667,7 @@ export default function PaychecksTab() {
                 setIsPaycheckFormOpen(false);
                 setIsScanSectionOpen(true);
               }}
-              className={`${TAB_HEADER_ACTION_CLASS} bg-slate-950 text-white hover:bg-slate-800 lg:order-2`}
+              className={`${TAB_HEADER_ACTION_CLASS} bg-slate-950 text-white hover:bg-slate-800`}
               title="Scan a paycheck PDF or image"
               aria-label="Scan a paycheck PDF or image"
             >
@@ -2518,7 +2680,7 @@ export default function PaychecksTab() {
                 setIsScanSectionOpen(false);
                 setIsPaycheckFormOpen(true);
               }}
-              className={`${TAB_HEADER_ACTION_CLASS} bg-white text-teal-950 hover:bg-teal-50 lg:order-1`}
+              className={`${TAB_HEADER_ACTION_CLASS} bg-white text-teal-950 hover:bg-teal-50`}
               title="Add a paycheck manually"
               aria-label="Add a paycheck manually"
             >
@@ -2528,7 +2690,7 @@ export default function PaychecksTab() {
             <button
               type="button"
               onClick={() => setIsDataOpen(true)}
-              className={`${TAB_HEADER_ACTION_CLASS} bg-white text-teal-950 hover:bg-teal-50 lg:order-3`}
+              className={`${TAB_HEADER_ACTION_CLASS} bg-white text-teal-950 hover:bg-teal-50`}
               title="Open paycheck data and backup tools"
               aria-label="Open paycheck data and backup tools"
               aria-haspopup="dialog"

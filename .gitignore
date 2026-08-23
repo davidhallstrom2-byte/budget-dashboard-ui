@@ -85,3 +85,5 @@ Thumbs.db
 * - Copy*.jsx
 *Copy*.jsx
 one-click-*.ps1
+.env.local
+public/restore/*.bak

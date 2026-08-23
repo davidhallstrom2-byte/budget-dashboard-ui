@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Archive,
   CalendarCheck2,
   CalendarDays,
   ChevronDown,
@@ -12,9 +13,11 @@ import {
   ListX,
   ListTodo,
   MapPin,
+  Phone,
   Plus,
   Printer,
   RefreshCcw,
+  RotateCcw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -45,6 +48,9 @@ const TODO_BACKUP_STORAGE_KEY = 'todoTab.tasks.backup.v1';
 const TODO_UPDATE_EVENT = 'todoTab:updated';
 const APP_NAVIGATE_EVENT = 'app:navigate';
 const EVENT_WATCH_REPORT_STORAGE_KEY = 'cscEventWatch.latestReport.v1';
+const EVENT_WATCH_SYNC_STORAGE_KEY = 'cscEventWatch.autoSync.v1';
+const EVENT_WATCH_FEED_URL = '/budget-dashboard-fs/csc-event-watch-feed.php';
+const EVENT_WATCH_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const KIA_FORUM_EVENTS_URL = 'https://thekiaforum.com/events/';
 const SOFI_STADIUM_EVENTS_URL = 'https://www.sofistadium.com/events';
 const INTUIT_DOME_EVENTS_URL = 'https://www.intuitdome.com/events/event-schedule';
@@ -260,6 +266,61 @@ const formatDate = (value) => {
     year: 'numeric',
   });
 };
+
+const getOpportunityDateSearchTerms = (value = '') => {
+  const isoDate = String(value || '').trim();
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return isoDate;
+
+  const [, year, month, day] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0);
+  if (Number.isNaN(date.getTime())) return isoDate;
+
+  const numericMonth = String(Number(month));
+  const numericDay = String(Number(day));
+  const shortYear = year.slice(-2);
+  const shortMonth = date.toLocaleDateString('en-US', { month: 'short' });
+  const longMonth = date.toLocaleDateString('en-US', { month: 'long' });
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'short' });
+
+  return Array.from(
+    new Set([
+      isoDate,
+      `${month}/${day}/${year}`,
+      `${numericMonth}/${numericDay}/${year}`,
+      `${month}/${day}/${shortYear}`,
+      `${numericMonth}/${numericDay}/${shortYear}`,
+      `${month}/${day}`,
+      `${numericMonth}/${numericDay}`,
+      `${shortMonth} ${numericDay}`,
+      `${shortMonth} ${numericDay}, ${year}`,
+      `${shortMonth} ${numericDay} ${year}`,
+      `${longMonth} ${numericDay}`,
+      `${longMonth} ${numericDay}, ${year}`,
+      `${longMonth} ${numericDay} ${year}`,
+      `${weekday}, ${shortMonth} ${numericDay}, ${year}`,
+    ])
+  )
+    .join(' ')
+    .toLowerCase();
+};
+
+const buildOpportunitySearchText = (opportunity = {}, resolvedStatus = '') =>
+  [
+    opportunity.id,
+    opportunity.eventName,
+    opportunity.venue,
+    getOpportunityDateSearchTerms(opportunity.eventDate),
+    opportunity.eventTime,
+    resolvedStatus,
+    opportunity.status,
+    opportunity.notes,
+    opportunity.sourceText,
+    opportunity.archiveReason,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 
 const formatTime = (value) => {
   if (!value) return '';
@@ -609,6 +670,13 @@ const createBlankOpportunity = (defaults = {}) => ({
   activityLog: Array.isArray(defaults.activityLog) ? defaults.activityLog : [],
   lastScannedAt: defaults.lastScannedAt || '',
   lastVerifiedAt: defaults.lastVerifiedAt || '',
+  archivedAt: defaults.archivedAt || '',
+  archiveReason: defaults.archiveReason || '',
+  eventWatchIdentity: defaults.eventWatchIdentity || '',
+  eventWatchAction: defaults.eventWatchAction || '',
+  eventWatchBatchId: defaults.eventWatchBatchId || '',
+  eventWatchLastVerifiedAt: defaults.eventWatchLastVerifiedAt || '',
+  eventWatchSource: defaults.eventWatchSource || '',
   createdAt: defaults.createdAt || new Date().toISOString(),
   updatedAt: defaults.updatedAt || new Date().toISOString(),
 });
@@ -684,6 +752,13 @@ const loadOpportunities = () =>
     readArray(OPPORTUNITIES_STORAGE_KEY, []).map((item) => createBlankOpportunity(item))
   );
 
+const loadArchivedOpportunities = () =>
+  readArray(OPPORTUNITIES_ARCHIVE_STORAGE_KEY, [])
+    .map((item) => createBlankOpportunity(item))
+    .sort((first, second) =>
+      String(second.archivedAt || '').localeCompare(String(first.archivedAt || ''))
+    );
+
 const loadVenueContacts = () => {
   const stored = readArray(VENUE_CONTACTS_STORAGE_KEY, []);
   const defaults = createDefaultContacts();
@@ -705,7 +780,7 @@ const loadVenueContacts = () => {
   });
 };
 
-const writeOpportunitySnapshot = (label, opportunities, contacts) => {
+const writeOpportunitySnapshot = (label, opportunities, contacts, archivedOpportunities = []) => {
   try {
     localStorage.setItem(
       OPPORTUNITIES_SNAPSHOT_STORAGE_KEY,
@@ -714,6 +789,7 @@ const writeOpportunitySnapshot = (label, opportunities, contacts) => {
         label,
         createdAt: new Date().toISOString(),
         opportunities,
+        archivedOpportunities,
         contacts,
       })
     );
@@ -725,8 +801,87 @@ const writeOpportunitySnapshot = (label, opportunities, contacts) => {
 };
 
 
-const opportunityKey = (opportunity = {}) =>
+const opportunityBaseKey = (opportunity = {}) =>
   [canonicalVenueName(opportunity.venue), opportunity.eventDate, normalizeText(opportunity.eventName)].join('|');
+
+const opportunityKey = (opportunity = {}) =>
+  [opportunityBaseKey(opportunity), String(opportunity.eventTime || '').trim()].join('|');
+
+const normalizeEventWatchAction = (value = '') => {
+  const normalized = normalizeText(value);
+  if (normalized === 'rescheduled' || normalized === 'reschedule') return 'rescheduled';
+  if (normalized === 'cancelled' || normalized === 'canceled' || normalized === 'cancel') {
+    return 'cancelled';
+  }
+  return 'new';
+};
+
+const normalizeEventWatchFeedItem = (item = {}) => ({
+  action: normalizeEventWatchAction(item.action),
+  venue: canonicalVenueName(item.venue || ''),
+  eventName: String(item.eventName || item.event || item.title || '').trim(),
+  eventDate: String(item.eventDate || item.date || '').trim(),
+  eventTime: String(item.eventTime || item.time || '').trim(),
+  previousDate: String(item.previousDate || '').trim(),
+  previousTime: String(item.previousTime || '').trim(),
+  officialStatus: String(item.officialStatus || '').trim(),
+  officialUrl: String(item.officialUrl || item.eventUrl || '').trim(),
+  identity: String(item.identity || '').trim(),
+  firstSeenAt: String(item.firstSeenAt || '').trim(),
+  lastVerifiedAt: String(item.lastVerifiedAt || '').trim(),
+  batchId: String(item.batchId || '').trim(),
+});
+
+const isValidEventWatchFeedItem = (item = {}) =>
+  Boolean(item.eventName && item.venue);
+
+const getEventWatchMatchIndex = (items = [], feedItem = {}) => {
+  const normalizedName = normalizeText(feedItem.eventName);
+  const canonicalVenue = canonicalVenueName(feedItem.venue);
+
+  const identityIndex = feedItem.identity
+    ? items.findIndex(
+        (candidate) =>
+          String(candidate.eventWatchIdentity || '').trim() === feedItem.identity
+      )
+    : -1;
+  if (identityIndex >= 0) return identityIndex;
+
+  const sameCurrentEventIndex = items.findIndex((candidate) => {
+    if (canonicalVenueName(candidate.venue) !== canonicalVenue) return false;
+    if (normalizeText(candidate.eventName) !== normalizedName) return false;
+    if (String(candidate.eventDate || '') !== feedItem.eventDate) return false;
+
+    const candidateTime = String(candidate.eventTime || '').trim();
+    return !candidateTime || !feedItem.eventTime || candidateTime === feedItem.eventTime;
+  });
+  if (sameCurrentEventIndex >= 0) return sameCurrentEventIndex;
+
+  if (feedItem.previousDate) {
+    const previousEventIndex = items.findIndex((candidate) => {
+      if (canonicalVenueName(candidate.venue) !== canonicalVenue) return false;
+      if (normalizeText(candidate.eventName) !== normalizedName) return false;
+      if (String(candidate.eventDate || '') !== feedItem.previousDate) return false;
+
+      const candidateTime = String(candidate.eventTime || '').trim();
+      return !candidateTime || !feedItem.previousTime || candidateTime === feedItem.previousTime;
+    });
+    if (previousEventIndex >= 0) return previousEventIndex;
+  }
+
+  if (feedItem.action === 'new' || !feedItem.officialUrl) return -1;
+
+  const urlMatches = items
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(
+      ({ candidate }) =>
+        String(candidate.eventUrl || '').trim() === feedItem.officialUrl &&
+        canonicalVenueName(candidate.venue) === canonicalVenue &&
+        normalizeText(candidate.eventName) === normalizedName
+    );
+
+  return urlMatches.length === 1 ? urlMatches[0].index : -1;
+};
 
 const sanitizeScannedLine = (value = '') =>
   String(value || '')
@@ -2425,14 +2580,18 @@ const EVENT_IDENTITY_NOISE_TOKENS = new Set([
   'dns',
   'event',
   'main',
+  'preseason',
   'production',
   'sec',
   'security',
   'shift',
+  'versus',
+  'vs',
 ]);
 
 const normalizeEventIdentity = (value = '') =>
   normalizeText(value)
+    .replace(/([a-z])vs(?=[a-z0-9])/g, '$1 vs ')
     .replace(/\b(?:and|amp)\b/g, ' ')
     .replace(/\bday\s*(\d+)\b/g, ' n$1 ')
     .replace(/\bnight\s*(\d+)\b/g, ' n$1 ')
@@ -2620,13 +2779,21 @@ const createOpportunityFromScheduledShift = (shift = {}) =>
     sourceText: 'Created automatically from a scheduled CSC shift.',
   });
 
-const repairOpportunityShiftLinks = (items = [], allShifts = readCscShifts()) => {
+const repairOpportunityShiftLinks = (
+  items = [],
+  allShifts = readCscShifts(),
+  archivedItems = []
+) => {
   const currentItems = Array.isArray(items) ? items : [];
   const nonCancelledShifts = allShifts.filter(
     (shift) => shift?.id && !isCancelledShiftStatus(shift.shiftStatus)
   );
   const linkedShiftIds = new Set();
-  const representedShiftIds = new Set();
+  const representedShiftIds = new Set(
+    (Array.isArray(archivedItems) ? archivedItems : [])
+      .map((opportunity) => opportunity.linkedCscShiftId)
+      .filter(Boolean)
+  );
   let changed = false;
 
   const repairedItems = currentItems.map((opportunity) => {
@@ -2810,13 +2977,9 @@ const isSameOpportunityShift = (opportunity = {}, shift = {}) => {
     return false;
   }
 
-  const eventSimilarity = Math.max(
-    getSimilarityScore(opportunity.eventName, shift.event),
-    getSimilarityScore(opportunity.eventName, shift.jobName),
-    getSimilarityScore(opportunity.eventName, shift.shiftName)
-  );
+  const eventSimilarity = getOpportunityShiftEventScore(opportunity, shift);
 
-  return eventSimilarity >= 0.5;
+  return eventSimilarity >= 0.45;
 };
 
 const getScheduledShiftConflicts = (opportunity = {}, allShifts = []) => {
@@ -2932,8 +3095,10 @@ const readStoredTodoTasks = () => readArray(TODO_STORAGE_KEY, []);
 
 const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [opportunities, setOpportunities] = useState(() => loadOpportunities());
+  const [archivedOpportunities, setArchivedOpportunities] = useState(() => loadArchivedOpportunities());
   const [venueContacts, setVenueContacts] = useState(() => loadVenueContacts());
   const [localSearch, setLocalSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [excludedVenues, setExcludedVenues] = useState([]);
   const [showVenueFilter, setShowVenueFilter] = useState(false);
   const [monthFilter, setMonthFilter] = useState('All');
@@ -2947,8 +3112,18 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const [showCreateShiftDrawer, setShowCreateShiftDrawer] = useState(false);
   const [showEventWatchDrawer, setShowEventWatchDrawer] = useState(false);
   const [showDataScreen, setShowDataScreen] = useState(false);
+  const [showArchiveDrawer, setShowArchiveDrawer] = useState(false);
+  const [archiveSearch, setArchiveSearch] = useState('');
   const [eventWatchReport, setEventWatchReport] = useState(() => loadEventWatchReport());
   const [eventWatchReportText, setEventWatchReportText] = useState('');
+  const [eventWatchSyncState, setEventWatchSyncState] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(EVENT_WATCH_SYNC_STORAGE_KEY) || 'null');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
   const [showConflictSection, setShowConflictSection] = useState(false);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [editingOpportunity, setEditingOpportunity] = useState(() => createBlankOpportunity());
@@ -2965,6 +3140,10 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const importInputRef = useRef(null);
   const venueFilterRef = useRef(null);
   const saveMessageTimerRef = useRef(null);
+  const eventWatchSyncInProgressRef = useRef(false);
+  const opportunitiesRef = useRef(opportunities);
+  const archivedOpportunitiesRef = useRef(archivedOpportunities);
+  const venueContactsRef = useRef(venueContacts);
 
   const venueNames = useMemo(
     () => VENUE_DEFINITIONS.map((definition) => definition.venue),
@@ -2988,6 +3167,40 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     },
     []
   );
+
+  useEffect(() => {
+    const hasOpenLayer =
+      showPrintPreview ||
+      showEventWatchDrawer ||
+      showArchiveDrawer ||
+      showCreateShiftDrawer ||
+      showScanDrawer ||
+      showFormDrawer ||
+      showDataScreen;
+    if (!hasOpenLayer) return undefined;
+
+    const closeTopLayer = (event) => {
+      if (event.key !== 'Escape') return;
+      if (showPrintPreview) setShowPrintPreview(false);
+      else if (showEventWatchDrawer) setShowEventWatchDrawer(false);
+      else if (showArchiveDrawer) setShowArchiveDrawer(false);
+      else if (showCreateShiftDrawer) setShowCreateShiftDrawer(false);
+      else if (showScanDrawer) setShowScanDrawer(false);
+      else if (showFormDrawer) setShowFormDrawer(false);
+      else if (showDataScreen) setShowDataScreen(false);
+    };
+
+    document.addEventListener('keydown', closeTopLayer);
+    return () => document.removeEventListener('keydown', closeTopLayer);
+  }, [
+    showArchiveDrawer,
+    showCreateShiftDrawer,
+    showDataScreen,
+    showEventWatchDrawer,
+    showFormDrawer,
+    showPrintPreview,
+    showScanDrawer,
+  ]);
 
   const toggleVenue = (venue) => {
     setExcludedVenues((current) =>
@@ -3019,6 +3232,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   useEffect(() => {
     const removeExpiredOpportunities = () => {
       setOpportunities((current) => archiveExpiredOpportunities(current));
+      setArchivedOpportunities(loadArchivedOpportunities());
     };
 
     const removeExpiredWhenVisible = () => {
@@ -3063,13 +3277,18 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       const allShifts = readCscShifts();
 
       setOpportunities((current) => {
-        const repairResult = repairOpportunityShiftLinks(current, allShifts);
+        const repairResult = repairOpportunityShiftLinks(
+          current,
+          allShifts,
+          archivedOpportunities
+        );
         if (!repairResult.changed) return current;
 
         writeOpportunitySnapshot(
           'Before automatic CSC opportunity and shift link repair',
           current,
-          venueContacts
+          venueContacts,
+          archivedOpportunities
         );
         return archiveExpiredOpportunities(repairResult.opportunities);
       });
@@ -3086,16 +3305,13 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     window.addEventListener('storage', refreshCscShiftSync);
     window.addEventListener('focus', refreshCscShiftSync);
 
-    const intervalId = window.setInterval(refreshCscShiftSync, 2000);
-
     return () => {
       window.removeEventListener(CSC_SHIFT_UPDATE_EVENT, refreshCscShiftSync);
       window.removeEventListener(APP_NAVIGATE_EVENT, refreshCscShiftSync);
       window.removeEventListener('storage', refreshCscShiftSync);
       window.removeEventListener('focus', refreshCscShiftSync);
-      window.clearInterval(intervalId);
     };
-  }, [venueContacts]);
+  }, [archivedOpportunities, venueContacts]);
 
   useEffect(() => {
     let opportunityId = '';
@@ -3113,8 +3329,14 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
     if (!opportunityId) return;
 
+    if (archivedOpportunities.some((opportunity) => opportunity.id === opportunityId)) {
+      setArchiveSearch(opportunityId);
+      setShowArchiveDrawer(true);
+      return;
+    }
+
     setLocalSearch('');
-    setVenueFilter('All');
+    setExcludedVenues([]);
     setMonthFilter('All');
     setStatusFilter('All');
     window.requestAnimationFrame(() => {
@@ -3128,13 +3350,64 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   useEffect(() => {
     localStorage.setItem(OPPORTUNITIES_STORAGE_KEY, JSON.stringify(opportunities));
     window.dispatchEvent(new CustomEvent(OPPORTUNITIES_UPDATE_EVENT, { detail: { opportunities } }));
+    opportunitiesRef.current = opportunities;
   }, [opportunities]);
 
   useEffect(() => {
+    localStorage.setItem(
+      OPPORTUNITIES_ARCHIVE_STORAGE_KEY,
+      JSON.stringify(archivedOpportunities)
+    );
+    archivedOpportunitiesRef.current = archivedOpportunities;
+  }, [archivedOpportunities]);
+
+  useEffect(() => {
     localStorage.setItem(VENUE_CONTACTS_STORAGE_KEY, JSON.stringify(venueContacts));
+    venueContactsRef.current = venueContacts;
   }, [venueContacts]);
 
+  useEffect(() => {
+    localStorage.setItem(EVENT_WATCH_SYNC_STORAGE_KEY, JSON.stringify(eventWatchSyncState));
+  }, [eventWatchSyncState]);
+
   const allCscShiftsForStatus = useMemo(() => readCscShifts(), [cscShiftSyncVersion, opportunities]);
+
+  useEffect(() => {
+    const completed = opportunities.filter(
+      (opportunity) =>
+        getResolvedOpportunityStatus(opportunity, allCscShiftsForStatus) === 'Completed'
+    );
+    if (!completed.length) return;
+
+    writeOpportunitySnapshot(
+      'Before moving completed CSC opportunities to archive',
+      opportunities,
+      venueContacts,
+      archivedOpportunities
+    );
+
+    const archivedAt = new Date().toISOString();
+    setArchivedOpportunities((currentArchived) => {
+      const byId = new Map(currentArchived.map((item) => [item.id, item]));
+      completed.forEach((item) => {
+        byId.set(
+          item.id,
+          createBlankOpportunity({
+            ...item,
+            status: 'Completed',
+            archivedAt: item.archivedAt || archivedAt,
+            archiveReason: 'Linked CSC shift completed',
+          })
+        );
+      });
+      return Array.from(byId.values()).sort((first, second) =>
+        String(second.archivedAt || '').localeCompare(String(first.archivedAt || ''))
+      );
+    });
+    setOpportunities((current) =>
+      current.filter((item) => !completed.some((completedItem) => completedItem.id === item.id))
+    );
+  }, [allCscShiftsForStatus, archivedOpportunities, opportunities, venueContacts]);
 
   const sameDateConflictGroups = useMemo(
     () =>
@@ -3252,7 +3525,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   };
 
   const saveSnapshot = (label) =>
-    writeOpportunitySnapshot(label, opportunities, venueContacts);
+    writeOpportunitySnapshot(
+      label,
+      opportunities,
+      venueContacts,
+      archivedOpportunities
+    );
 
   const getContactForVenue = (venue) =>
     venueContacts.find((contact) => canonicalVenueName(contact.venue) === canonicalVenueName(venue));
@@ -3318,6 +3596,108 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     saveSnapshot('Before CSC opportunity delete');
     setOpportunities((current) => current.filter((item) => item.id !== opportunity.id));
     flashMessage('CSC opportunity deleted.');
+  };
+
+  const handleArchiveOpportunity = (opportunity, reason = 'Archived manually') => {
+    if (!opportunity?.id) return;
+    saveSnapshot('Before CSC opportunity archive');
+    const archivedOpportunity = createBlankOpportunity({
+      ...opportunity,
+      archivedAt: new Date().toISOString(),
+      archiveReason: reason,
+    });
+    setArchivedOpportunities((current) => [
+      archivedOpportunity,
+      ...current.filter((item) => item.id !== opportunity.id),
+    ]);
+    setOpportunities((current) => current.filter((item) => item.id !== opportunity.id));
+    flashMessage('CSC opportunity archived.');
+  };
+
+  const handleRestoreArchivedOpportunity = (opportunity) => {
+    if (!opportunity?.id) return;
+    const linkedShift = getLinkedCscShiftForOpportunity(opportunity, readCscShifts());
+    if (linkedShift && isCompletedShiftStatus(linkedShift.shiftStatus)) {
+      flashMessage(
+        'This opportunity remains archived while its linked CSC shift is Done. Unarchive the shift first if you need to reopen the opportunity.'
+      );
+      return;
+    }
+    saveSnapshot('Before CSC opportunity restore');
+    const restoredOpportunity = createBlankOpportunity({
+      ...opportunity,
+      archivedAt: '',
+      archiveReason: '',
+      status: opportunity.status === 'Completed' ? 'Monitoring' : opportunity.status,
+      updatedAt: new Date().toISOString(),
+    });
+    setOpportunities((current) => [
+      restoredOpportunity,
+      ...current.filter((item) => item.id !== opportunity.id),
+    ]);
+    setArchivedOpportunities((current) =>
+      current.filter((item) => item.id !== opportunity.id)
+    );
+    flashMessage('CSC opportunity restored.');
+  };
+
+  const handleDeleteArchivedOpportunity = (opportunity) => {
+    if (!opportunity?.id || !window.confirm(`Permanently delete ${opportunity.eventName}?`)) {
+      return;
+    }
+    saveSnapshot('Before archived CSC opportunity delete');
+    setArchivedOpportunities((current) =>
+      current.filter((item) => item.id !== opportunity.id)
+    );
+    flashMessage('Archived CSC opportunity permanently deleted.');
+  };
+
+  const handleLogOpportunityCall = (opportunity) => {
+    const now = new Date();
+    const timestamp = now.toISOString();
+    const callEntry = {
+      id: createId('csc-opportunity-call'),
+      outcome: 'Called scheduler',
+      calledAt: timestamp,
+      phone: opportunity.schedulerPhone || '',
+      extension: opportunity.schedulerExtension || '',
+    };
+    saveSnapshot('Before CSC opportunity call log update');
+    updateOpportunity(opportunity.id, {
+      lastCalledDate: timestamp.slice(0, 10),
+      callHistory: [callEntry, ...(opportunity.callHistory || [])],
+      updatedAt: timestamp,
+    });
+    flashMessage('Scheduler call logged for today.');
+  };
+
+  const handleUpdateNextCallDate = (opportunity, nextCallDate) => {
+    saveSnapshot('Before CSC opportunity follow-up date update');
+    updateOpportunity(opportunity.id, {
+      nextCallDate,
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (!opportunity.linkedTodoTaskId) return;
+    const tasks = readStoredTodoTasks();
+    const nextTasks = tasks.map((task) =>
+      task.id === opportunity.linkedTodoTaskId
+        ? {
+            ...task,
+            deadline: nextCallDate,
+            updatedAt: new Date().toISOString(),
+          }
+        : task
+    );
+
+    try {
+      localStorage.setItem(TODO_BACKUP_STORAGE_KEY, JSON.stringify(tasks));
+      localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(nextTasks));
+      window.dispatchEvent(new CustomEvent(TODO_UPDATE_EVENT, { detail: { tasks: nextTasks } }));
+    } catch (error) {
+      console.error('Failed to update linked CSC opportunity To-Do:', error);
+      flashMessage('Follow-up date saved, but the linked To-Do could not be updated.');
+    }
   };
 
   const handleCheckScheduled = (opportunity) => {
@@ -3394,8 +3774,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       details: `CSC opportunity at ${opportunity.venue}`,
       type: 'Work',
       typeOverride: 'Work',
-      date: opportunity.eventDate || '',
-      deadline: opportunity.eventDate || '',
+      date: opportunity.nextCallDate || opportunity.eventDate || '',
+      deadline: opportunity.nextCallDate || opportunity.eventDate || '',
       time: opportunity.eventTime || '',
       organization: opportunity.venue || '',
       address: venueDefinition?.address || '',
@@ -3623,6 +4003,326 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     }
   };
 
+  const performEventWatchAutoSync = async ({ silent = false } = {}) => {
+    if (eventWatchSyncInProgressRef.current) return;
+    eventWatchSyncInProgressRef.current = true;
+
+    const attemptedAt = new Date().toISOString();
+    setEventWatchSyncState((current) => ({
+      ...current,
+      syncing: true,
+      lastAttemptAt: attemptedAt,
+      error: '',
+    }));
+
+    try {
+      const response = await fetch(`${EVENT_WATCH_FEED_URL}?t=${Date.now()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw new Error(`Event Watch feed returned HTTP ${response.status}.`);
+      }
+
+      const payload = await response.json();
+      const feedItems = (Array.isArray(payload?.events) ? payload.events : payload?.rows || [])
+        .map((item) => normalizeEventWatchFeedItem(item))
+        .filter(isValidEventWatchFeedItem);
+
+      if (!feedItems.length) {
+        throw new Error('The Event Watch feed did not contain any valid events.');
+      }
+
+      const currentOpportunities = opportunitiesRef.current.map((item) =>
+        createBlankOpportunity(item)
+      );
+      const currentArchived = archivedOpportunitiesRef.current.map((item) =>
+        createBlankOpportunity(item)
+      );
+      const nextOpportunities = [...currentOpportunities];
+      const syncTime = new Date().toISOString();
+      let added = 0;
+      let updated = 0;
+      let cancelled = 0;
+      let skipped = 0;
+
+      const prepareFeedOpportunity = (feedItem, defaults = {}) => {
+        const definition = getVenueDefinition(feedItem.venue);
+        const contact = venueContactsRef.current.find(
+          (candidate) =>
+            canonicalVenueName(candidate.venue) === canonicalVenueName(feedItem.venue)
+        );
+
+        return createBlankOpportunity({
+          ...defaults,
+          eventName: feedItem.eventName,
+          venue: feedItem.venue,
+          eventDate:
+            defaults.eventDate !== undefined ? defaults.eventDate : feedItem.eventDate,
+          eventTime:
+            defaults.eventTime !== undefined ? defaults.eventTime : feedItem.eventTime,
+          eventUrl: feedItem.officialUrl || defaults.eventUrl || contact?.eventUrl || '',
+          schedulerName:
+            defaults.schedulerName || contact?.schedulerName || definition?.schedulerName || '',
+          schedulerPhone:
+            defaults.schedulerPhone || contact?.schedulerPhone || definition?.schedulerPhone || '',
+          schedulerExtension:
+            defaults.schedulerExtension ||
+            contact?.schedulerExtension ||
+            definition?.schedulerExtension ||
+            '',
+          venueLogo: definition?.logoPath || contact?.venueLogo || defaults.venueLogo || '',
+          sourceText: defaults.sourceText || 'CSC Event Watch automatic feed',
+          lastScannedAt: syncTime,
+          lastVerifiedAt: feedItem.lastVerifiedAt || syncTime,
+          eventWatchIdentity: feedItem.identity,
+          eventWatchAction: feedItem.action,
+          eventWatchBatchId: feedItem.batchId,
+          eventWatchLastVerifiedAt: feedItem.lastVerifiedAt || syncTime,
+          eventWatchSource: 'CSC Event Watch automatic feed',
+          updatedAt: syncTime,
+        });
+      };
+
+      feedItems.forEach((feedItem) => {
+        const archivedIndex = getEventWatchMatchIndex(currentArchived, feedItem);
+        if (archivedIndex >= 0) {
+          skipped += 1;
+          return;
+        }
+
+        const matchIndex = getEventWatchMatchIndex(nextOpportunities, feedItem);
+
+        if (feedItem.action === 'cancelled') {
+          if (matchIndex < 0) {
+            skipped += 1;
+            return;
+          }
+
+          const existing = nextOpportunities[matchIndex];
+          if (normalizeOpportunityStatus(existing.status, existing.linkedCscShiftId) === 'Cancelled') {
+            skipped += 1;
+            return;
+          }
+
+          nextOpportunities[matchIndex] = prepareFeedOpportunity(feedItem, {
+            ...existing,
+            eventDate: existing.eventDate || feedItem.eventDate,
+            eventTime: existing.eventTime || feedItem.eventTime,
+            status: 'Cancelled',
+            id: existing.id,
+            createdAt: existing.createdAt,
+            activityLog: [
+              {
+                id: createId('csc-opportunity-activity'),
+                action: 'Cancelled by CSC Event Watch',
+                detail: `${feedItem.eventName} at ${feedItem.venue}`,
+                createdAt: syncTime,
+              },
+              ...(existing.activityLog || []),
+            ],
+          });
+          cancelled += 1;
+          return;
+        }
+
+        if (matchIndex >= 0) {
+          const existing = nextOpportunities[matchIndex];
+          const isReschedule = feedItem.action === 'rescheduled';
+          const alreadyProcessed =
+            String(existing.eventWatchBatchId || '') === feedItem.batchId &&
+            String(existing.eventWatchIdentity || '') === feedItem.identity &&
+            String(existing.eventWatchAction || '') === feedItem.action &&
+            (!isReschedule ||
+              (String(existing.eventDate || '') === feedItem.eventDate &&
+                String(existing.eventTime || '') === feedItem.eventTime));
+          if (alreadyProcessed) {
+            skipped += 1;
+            return;
+          }
+
+          const nextCandidate = prepareFeedOpportunity(feedItem, {
+            ...existing,
+            eventDate: isReschedule
+              ? feedItem.eventDate || existing.eventDate
+              : existing.eventDate || feedItem.eventDate,
+            eventTime: isReschedule
+              ? feedItem.eventTime || existing.eventTime
+              : existing.eventTime || feedItem.eventTime,
+            id: existing.id,
+            createdAt: existing.createdAt,
+            activityLog: isReschedule
+              ? [
+                  {
+                    id: createId('csc-opportunity-activity'),
+                    action: 'Rescheduled by CSC Event Watch',
+                    detail: `${existing.eventDate || 'Date not entered'}${
+                      existing.eventTime ? ` ${existing.eventTime}` : ''
+                    } to ${feedItem.eventDate || 'Date not entered'}${
+                      feedItem.eventTime ? ` ${feedItem.eventTime}` : ''
+                    }`,
+                    createdAt: syncTime,
+                  },
+                  ...(existing.activityLog || []),
+                ]
+              : existing.activityLog,
+          });
+
+          if (JSON.stringify(nextCandidate) === JSON.stringify(existing)) {
+            skipped += 1;
+          } else {
+            nextOpportunities[matchIndex] = nextCandidate;
+            updated += 1;
+          }
+          return;
+        }
+
+        nextOpportunities.push(
+          prepareFeedOpportunity(feedItem, {
+            status: 'New',
+            createdAt: feedItem.firstSeenAt || syncTime,
+            activityLog: [
+              {
+                id: createId('csc-opportunity-activity'),
+                action: 'Added automatically by CSC Event Watch',
+                detail: `${feedItem.eventName} at ${feedItem.venue}`,
+                createdAt: syncTime,
+              },
+            ],
+          })
+        );
+        added += 1;
+      });
+
+      const changedCount = added + updated + cancelled;
+      if (changedCount) {
+        writeOpportunitySnapshot(
+          'Before automatic CSC Event Watch synchronization',
+          currentOpportunities,
+          venueContactsRef.current,
+          currentArchived
+        );
+
+        const sortedNext = archiveExpiredOpportunities(nextOpportunities).sort(
+          (first, second) =>
+            `${first.eventDate || '9999-99-99'} ${first.eventTime || '99:99'}`.localeCompare(
+              `${second.eventDate || '9999-99-99'} ${second.eventTime || '99:99'}`
+            )
+        );
+        opportunitiesRef.current = sortedNext;
+        setOpportunities(sortedNext);
+      }
+
+      const batchIds = feedItems.map((item) => item.batchId).filter(Boolean).sort();
+      const latestBatchId = batchIds.length ? batchIds[batchIds.length - 1] : '';
+      const latestFeedItems = latestBatchId
+        ? feedItems.filter((item) => item.batchId === latestBatchId)
+        : feedItems;
+      const latestReport = createEmptyEventWatchReport({
+        scanDate:
+          latestBatchId.replace(/^event-watch-/, '') ||
+          String(payload?.generatedAt || '').trim() ||
+          syncTime,
+        savedAt: syncTime,
+        source: 'CSC Event Watch automatic feed',
+        newEvents: latestFeedItems
+          .filter((item) => item.action === 'new')
+          .map((item) =>
+            formatOpportunityForReport({
+              venue: item.venue,
+              eventName: item.eventName,
+              eventDate: item.eventDate,
+              eventTime: item.eventTime,
+            })
+          ),
+        rescheduledEvents: latestFeedItems
+          .filter((item) => item.action === 'rescheduled')
+          .map((item) =>
+            formatOpportunityForReport({
+              venue: item.venue,
+              eventName: item.eventName,
+              eventDate: item.eventDate,
+              eventTime: item.eventTime,
+            })
+          ),
+        cancelledEvents: latestFeedItems
+          .filter((item) => item.action === 'cancelled')
+          .map((item) =>
+            formatOpportunityForReport({
+              venue: item.venue,
+              eventName: item.eventName,
+              eventDate: item.eventDate,
+              eventTime: item.eventTime,
+            })
+          ),
+        scanStatus: [
+          `Automatic sync completed: ${added} added, ${updated} updated, ${cancelled} cancelled, ${skipped} skipped.`,
+        ],
+      });
+
+      localStorage.setItem(EVENT_WATCH_REPORT_STORAGE_KEY, JSON.stringify(latestReport));
+      setEventWatchReport(latestReport);
+
+      const completedState = {
+        syncing: false,
+        lastAttemptAt: attemptedAt,
+        lastSuccessAt: syncTime,
+        feedGeneratedAt: String(payload?.generatedAt || ''),
+        feedCount: feedItems.length,
+        added,
+        updated,
+        cancelled,
+        skipped,
+        error: '',
+      };
+      setEventWatchSyncState(completedState);
+
+      if (!silent && changedCount) {
+        flashMessage(
+          `Event Watch synchronized automatically: ${added} added, ${updated} updated, ${cancelled} cancelled.`
+        );
+      } else if (!silent) {
+        flashMessage('Event Watch is current. No opportunity changes were needed.');
+      }
+    } catch (error) {
+      console.error('Failed to synchronize the CSC Event Watch feed:', error);
+      const failedState = {
+        syncing: false,
+        lastAttemptAt: attemptedAt,
+        error: error?.message || 'Event Watch synchronization failed.',
+      };
+      setEventWatchSyncState((current) => ({ ...current, ...failedState }));
+      if (!silent) flashMessage(failedState.error);
+    } finally {
+      eventWatchSyncInProgressRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    const syncNow = () => {
+      if (document.visibilityState === 'visible') {
+        void performEventWatchAutoSync({ silent: false });
+      }
+    };
+    const syncQuietly = () => {
+      if (document.visibilityState === 'visible') {
+        void performEventWatchAutoSync({ silent: true });
+      }
+    };
+
+    syncNow();
+    const intervalId = window.setInterval(syncQuietly, EVENT_WATCH_SYNC_INTERVAL_MS);
+    window.addEventListener('focus', syncQuietly);
+    document.addEventListener('visibilitychange', syncQuietly);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', syncQuietly);
+      document.removeEventListener('visibilitychange', syncQuietly);
+    };
+  }, []);
+
   const handleScan = () => {
     const parsed = parseVenueEvents(scanText, scanVenue, scanSourceUrl);
 
@@ -3708,33 +4408,84 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
     saveSnapshot('Before CSC opportunities scan import');
     let added = 0;
+    let updated = 0;
     let skipped = 0;
-    setOpportunities((current) => {
-      const byKey = new Map(current.map((item) => [opportunityKey(item), item]));
-      scannedOpportunities.forEach((item) => {
-        const key = opportunityKey(item);
-        if (byKey.has(key)) {
-          skipped += 1;
-          return;
-        }
-        byKey.set(key, createBlankOpportunity(item));
-        added += 1;
-      });
-      return archiveExpiredOpportunities(Array.from(byKey.values())).sort(
-        (first, second) =>
-          `${first.eventDate} ${first.eventTime}`.localeCompare(
-            `${second.eventDate} ${second.eventTime}`
-          )
+    const nextOpportunities = [...opportunities];
+
+    scannedOpportunities.forEach((item) => {
+      const archivedMatch = archivedOpportunities.some(
+        (candidate) =>
+          opportunityKey(candidate) === opportunityKey(item) ||
+          (opportunityBaseKey(candidate) === opportunityBaseKey(item) &&
+            (!candidate.eventTime || !item.eventTime))
       );
+      if (archivedMatch) {
+        skipped += 1;
+        return;
+      }
+
+      const exactIndex = nextOpportunities.findIndex(
+        (candidate) => opportunityKey(candidate) === opportunityKey(item)
+      );
+      if (exactIndex >= 0) {
+        skipped += 1;
+        return;
+      }
+
+      const baseMatchIndex = nextOpportunities.findIndex(
+        (candidate) =>
+          opportunityBaseKey(candidate) === opportunityBaseKey(item) &&
+          (!candidate.eventTime || !item.eventTime)
+      );
+
+      if (baseMatchIndex >= 0) {
+        const existing = nextOpportunities[baseMatchIndex];
+        nextOpportunities[baseMatchIndex] = createBlankOpportunity({
+          ...item,
+          ...existing,
+          eventTime: existing.eventTime || item.eventTime,
+          expectedEndTime: existing.expectedEndTime || item.expectedEndTime,
+          eventUrl: existing.eventUrl || item.eventUrl,
+          sourceText: existing.sourceText || item.sourceText,
+          lastScannedAt: item.lastScannedAt || existing.lastScannedAt,
+          lastVerifiedAt: item.lastVerifiedAt || existing.lastVerifiedAt,
+          id: existing.id,
+          createdAt: existing.createdAt,
+          updatedAt: new Date().toISOString(),
+        });
+        updated += 1;
+        return;
+      }
+
+      nextOpportunities.push(createBlankOpportunity(item));
+      added += 1;
     });
+
+    setOpportunities(
+      archiveExpiredOpportunities(nextOpportunities).sort((first, second) =>
+        `${first.eventDate} ${first.eventTime}`.localeCompare(
+          `${second.eventDate} ${second.eventTime}`
+        )
+      )
+    );
     setScannedOpportunities([]);
     setScanText('');
     setShowScanDrawer(false);
-    flashMessage(`Imported ${added} opportunities. Skipped ${skipped} duplicates.`);
+    flashMessage(
+      `Imported ${added} opportunities, updated ${updated}, skipped ${skipped} existing or archived duplicates.`
+    );
   };
 
   const handleRemoveScanPreview = (id) => {
     setScannedOpportunities((current) => current.filter((item) => item.id !== id));
+  };
+
+  const handleUpdateScanPreview = (id, updates) => {
+    setScannedOpportunities((current) =>
+      current.map((item) =>
+        item.id === id ? createBlankOpportunity({ ...item, ...updates, id: item.id }) : item
+      )
+    );
   };
 
   const handleExport = () => {
@@ -3742,6 +4493,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       {
         exportedAt: new Date().toISOString(),
         opportunities,
+        archivedOpportunities,
         venueContacts,
       },
       `CSC_Opportunities_David_Hallstrom_${todayIso()}.json`
@@ -3757,15 +4509,59 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       try {
         const parsed = JSON.parse(String(loadEvent.target?.result || '{}'));
         const incomingOpportunities = Array.isArray(parsed.opportunities) ? parsed.opportunities : [];
+        const incomingArchivedOpportunities = Array.isArray(parsed.archivedOpportunities)
+          ? parsed.archivedOpportunities
+          : [];
         const incomingContacts = Array.isArray(parsed.venueContacts) ? parsed.venueContacts : [];
         saveSnapshot('Before CSC opportunities JSON import');
+        const activeById = new Map(opportunities.map((item) => [item.id, item]));
+        const protectedArchivedIds = new Set([
+          ...archivedOpportunities.map((item) => item.id),
+          ...incomingArchivedOpportunities.map((item) => item?.id).filter(Boolean),
+        ]);
+        incomingOpportunities.forEach((item) => {
+          const normalized = createBlankOpportunity(item);
+          if (protectedArchivedIds.has(normalized.id)) return;
+          activeById.set(normalized.id, {
+            ...(activeById.get(normalized.id) || {}),
+            ...normalized,
+          });
+        });
+        protectedArchivedIds.forEach((id) => activeById.delete(id));
         setOpportunities(
-          archiveExpiredOpportunities(
-            incomingOpportunities.map((item) => createBlankOpportunity(item))
+          archiveExpiredOpportunities(Array.from(activeById.values())).sort(
+            (first, second) =>
+              `${first.eventDate} ${first.eventTime}`.localeCompare(
+                `${second.eventDate} ${second.eventTime}`
+              )
           )
         );
-        if (incomingContacts.length) setVenueContacts(incomingContacts);
-        flashMessage('CSC opportunities imported.');
+
+        if (incomingArchivedOpportunities.length) {
+          const archivedById = new Map(
+            archivedOpportunities.map((item) => [item.id, item])
+          );
+          incomingArchivedOpportunities.forEach((item) => {
+            const normalized = createBlankOpportunity(item);
+            archivedById.set(normalized.id, {
+              ...(archivedById.get(normalized.id) || {}),
+              ...normalized,
+            });
+          });
+          setArchivedOpportunities(Array.from(archivedById.values()));
+        }
+
+        if (incomingContacts.length) {
+          const contactsByVenue = new Map(
+            venueContacts.map((contact) => [canonicalVenueName(contact.venue), contact])
+          );
+          incomingContacts.forEach((contact) => {
+            const key = canonicalVenueName(contact.venue);
+            contactsByVenue.set(key, { ...(contactsByVenue.get(key) || {}), ...contact });
+          });
+          setVenueContacts(Array.from(contactsByVenue.values()));
+        }
+        flashMessage('CSC opportunities merged safely. Existing records were preserved.');
       } catch (error) {
         console.error('Failed to import CSC opportunities:', error);
         flashMessage('CSC opportunities import failed.');
@@ -3806,9 +4602,17 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       window.removeEventListener('csc-opportunities-toolbar:print', printData);
       window.removeEventListener('csc-opportunities-toolbar:data', openData);
     };
-  }, [opportunities, venueContacts]);
+  }, [archivedOpportunities, opportunities, venueContacts]);
 
   const combinedSearch = [searchQuery, localSearch].filter(Boolean).join(' ').trim().toLowerCase();
+
+  const filteredArchivedOpportunities = useMemo(() => {
+    const query = archiveSearch.trim().toLowerCase();
+    if (!query) return archivedOpportunities;
+    return archivedOpportunities.filter((opportunity) =>
+      buildOpportunitySearchText(opportunity, opportunity.status).includes(query)
+    );
+  }, [archiveSearch, archivedOpportunities]);
 
   const matchesSummaryFilter = (opportunity, resolvedStatus) => {
     if (summaryFilter === 'active') return isActiveOpportunityStatus(resolvedStatus);
@@ -3866,21 +4670,10 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return;
+      if (dateFilter && opportunity.eventDate !== dateFilter) return;
 
       if (combinedSearch) {
-        const haystack = [
-          opportunity.eventName,
-          opportunity.venue,
-          opportunity.eventDate,
-          opportunity.eventTime,
-          resolvedStatus,
-          opportunity.status,
-          opportunity.notes,
-          opportunity.sourceText,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
+        const haystack = buildOpportunitySearchText(opportunity, resolvedStatus);
 
         if (!haystack.includes(combinedSearch)) return;
       }
@@ -3896,6 +4689,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   }, [
     allCscShiftsForStatus,
     combinedSearch,
+    dateFilter,
     opportunities,
     statusFilter,
     summaryFilter,
@@ -3912,27 +4706,17 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       if (statusFilter === 'All' && resolvedStatus === 'Completed') return false;
       if (statusFilter !== 'All' && resolvedStatus !== statusFilter) return false;
       if (!matchesSummaryFilter(opportunity, resolvedStatus)) return false;
+      if (dateFilter && opportunity.eventDate !== dateFilter) return false;
       if (!combinedSearch) return true;
 
-      const haystack = [
-        opportunity.eventName,
-        opportunity.venue,
-        opportunity.eventDate,
-        opportunity.eventTime,
-        resolvedStatus,
-        opportunity.status,
-        opportunity.notes,
-        opportunity.sourceText,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+      const haystack = buildOpportunitySearchText(opportunity, resolvedStatus);
 
       return haystack.includes(combinedSearch);
     });
   }, [
     allCscShiftsForStatus,
     combinedSearch,
+    dateFilter,
     opportunities,
     statusFilter,
     summaryFilter,
@@ -4306,6 +5090,17 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   <Edit3 className="h-4 w-4" />
                   Edit opportunity
                 </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                    handleArchiveOpportunity(opportunity);
+                  }}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold text-violet-700 hover:bg-violet-50 hover:text-violet-900"
+                >
+                  <Archive className="h-4 w-4" />
+                  Archive opportunity
+                </button>
                 <div className="my-1 border-t border-slate-200" />
                 <button
                   type="button"
@@ -4526,6 +5321,58 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                   </>
                 )}
               </span>
+            </div>
+
+            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                    Scheduler Contact
+                  </p>
+                  <p className="mt-1 text-sm font-bold text-slate-950">
+                    {opportunity.schedulerName || 'Scheduler not entered'}
+                  </p>
+                  <p className="text-xs font-semibold text-slate-600">
+                    Last called: {opportunity.lastCalledDate ? formatDate(opportunity.lastCalledDate) : 'Not logged'}
+                    {opportunity.callHistory?.length ? `, ${opportunity.callHistory.length} call${opportunity.callHistory.length === 1 ? '' : 's'} logged` : ''}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {opportunity.schedulerPhone ? (
+                    <a
+                      href={`tel:${opportunity.schedulerPhone.replace(/[^\d+]/g, '')}${opportunity.schedulerExtension ? `,${opportunity.schedulerExtension}` : ''}`}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-700 px-3 text-xs font-extrabold text-white hover:bg-emerald-800"
+                    >
+                      <Phone className="h-4 w-4" />
+                      Call {opportunity.schedulerExtension ? `Ext. ${opportunity.schedulerExtension}` : 'Scheduler'}
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => handleLogOpportunityCall(opportunity)}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-extrabold text-slate-700 hover:bg-slate-100"
+                  >
+                    <ClipboardCheck className="h-4 w-4" />
+                    Log Call Today
+                  </button>
+                </div>
+              </div>
+              <label className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">
+                Next follow-up
+                <input
+                  type="date"
+                  value={opportunity.nextCallDate || ''}
+                  onChange={(event) =>
+                    handleUpdateNextCallDate(opportunity, event.target.value)
+                  }
+                  className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-sm font-normal text-slate-950"
+                />
+                {opportunity.nextCallDate && opportunity.nextCallDate < todayIso() ? (
+                  <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-extrabold text-red-800">
+                    Overdue
+                  </span>
+                ) : null}
+              </label>
             </div>
 
             <div className="csc-opportunity-notes pt-3">
@@ -4885,6 +5732,18 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               </button>
               <button
                 type="button"
+                onClick={() => setShowArchiveDrawer(true)}
+                title={`Open archived opportunities, ${archivedOpportunities.length} saved`}
+                aria-label={`Open archived opportunities, ${archivedOpportunities.length} saved`}
+                aria-haspopup="dialog"
+                aria-expanded={showArchiveDrawer}
+                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-violet-800 text-white hover:bg-violet-700`}
+              >
+                <Archive className="h-4 w-4" />
+                <span className="csc-header-action-label">Archive ({archivedOpportunities.length})</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowDataScreen(true)}
                 title="Open CSC opportunity data and backup tools"
                 aria-label="Open CSC opportunity data and backup tools"
@@ -4910,7 +5769,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 icon: Download,
                 tone: 'sky',
                 title: 'Export Opportunities',
-                description: 'Download opportunities and venue contacts as one JSON backup file.',
+                description: 'Download active and archived opportunities plus venue contacts as one JSON backup file.',
                 buttonLabel: 'Export Opportunities',
                 onClick: handleExport,
               },
@@ -4918,8 +5777,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 key: 'import',
                 icon: Upload,
                 tone: 'indigo',
-                title: 'Import Backup',
-                description: 'Restore opportunities and venue contacts from a previously exported JSON file.',
+                title: 'Merge Backup',
+                description: 'Merge opportunities and venue contacts from a backup without deleting current records.',
                 buttonLabel: 'Choose Backup File',
                 onClick: () => importInputRef.current?.click(),
               },
@@ -5110,11 +5969,38 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <input
                   value={localSearch}
                   onChange={(event) => setLocalSearch(event.target.value)}
-                  placeholder="Search event or venue"
-                  aria-label="Search opportunities by event or venue"
+                  placeholder="Search event, venue, or date"
+                  aria-label="Search opportunities by event, venue, or date"
                   className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
                 />
               </label>
+              <div className="csc-filter-date flex min-w-[11.5rem] items-center gap-1">
+                <div className="relative min-w-0 flex-1">
+                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-violet-700" />
+                  <input
+                    type="date"
+                    value={dateFilter}
+                    onChange={(event) => {
+                      setDateFilter(event.target.value);
+                      setMonthFilter('All');
+                    }}
+                    aria-label="Filter opportunities by exact date"
+                    title="Choose an exact event date"
+                    className="h-10 w-full rounded-lg border border-violet-200 bg-violet-50 pl-9 pr-2 text-sm font-bold text-violet-950 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                  />
+                </div>
+                {dateFilter ? (
+                  <button
+                    type="button"
+                    onClick={() => setDateFilter('')}
+                    aria-label="Clear selected date"
+                    title="Clear selected date"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-white text-violet-800 hover:bg-violet-50 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
               <div ref={venueFilterRef} className="csc-venue-filter-wrap relative">
                 <button
                   type="button"
@@ -5204,11 +6090,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               Showing <span className="text-slate-950">{filteredOpportunities.length}</span> of{' '}
               <span className="text-slate-950">{activeOpportunities.length}</span> active opportunities
             </p>
-            {localSearch || excludedVenues.length || monthFilter !== 'All' || statusFilter !== 'All' || summaryFilter !== 'active' ? (
+            {localSearch || dateFilter || excludedVenues.length || monthFilter !== 'All' || statusFilter !== 'All' || summaryFilter !== 'active' ? (
               <button
                 type="button"
                 onClick={() => {
                   setLocalSearch('');
+                  setDateFilter('');
                   setExcludedVenues([]);
                   setMonthFilter('All');
                   setStatusFilter('All');
@@ -5311,11 +6198,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       </div>
 
       {showPrintPreview ? (
-        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/70 p-3 sm:p-5">
+        <div role="dialog" aria-modal="true" aria-labelledby="csc-opportunity-print-title" className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/70 p-3 sm:p-5">
           <div className="flex max-h-[94vh] w-full max-w-[96rem] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
               <div>
-                <h3 className="text-xl font-black text-slate-950">CSC Opportunities List</h3>
+                <h3 id="csc-opportunity-print-title" className="text-xl font-black text-slate-950">CSC Opportunities List</h3>
                 <p className="text-sm font-semibold text-slate-600">
                   {printOpportunityRows.length} active opportunities, compact landscape preview
                 </p>
@@ -5400,13 +6287,13 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       ) : null}
 
       {showEventWatchDrawer ? (
-        <div className="fixed inset-0 z-[90] flex justify-end bg-slate-950/60">
+        <div role="dialog" aria-modal="true" aria-labelledby="csc-event-watch-title" className="fixed inset-0 z-[90] flex justify-end bg-slate-950/60">
           <div className="h-full w-full max-w-3xl overflow-y-auto bg-slate-50 p-5 shadow-2xl sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-emerald-800">
                   <CalendarCheck2 className="h-6 w-6" />
-                  <h3 className="text-2xl font-black text-slate-950">Latest Event Watch Report</h3>
+                  <h3 id="csc-event-watch-title" className="text-2xl font-black text-slate-950">Latest Event Watch Report</h3>
                 </div>
                 <p className="mt-1 text-sm font-semibold text-slate-600">
                   {eventWatchReport.scanDate
@@ -5424,6 +6311,48 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               </div>
               <CloseScreenButton onClick={() => setShowEventWatchDrawer(false)} />
             </div>
+
+            <section className="mt-5 rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h4 className="text-base font-black text-emerald-950">
+                    Automatic Opportunity Import
+                  </h4>
+                  <p className="mt-1 text-sm font-semibold text-emerald-900">
+                    Event Watch checks for feed changes when this page opens, regains focus, and every five minutes while visible.
+                  </p>
+                  <p className="mt-2 text-xs font-bold text-emerald-800">
+                    {eventWatchSyncState.lastSuccessAt
+                      ? `Last successful sync: ${formatShortDateTime(eventWatchSyncState.lastSuccessAt)}`
+                      : 'No successful automatic sync has completed yet.'}
+                  </p>
+                  {eventWatchSyncState.lastSuccessAt ? (
+                    <p className="mt-1 text-xs font-bold text-emerald-800">
+                      {Number(eventWatchSyncState.added || 0)} added,{' '}
+                      {Number(eventWatchSyncState.updated || 0)} updated,{' '}
+                      {Number(eventWatchSyncState.cancelled || 0)} cancelled,{' '}
+                      {Number(eventWatchSyncState.skipped || 0)} skipped
+                    </p>
+                  ) : null}
+                  {eventWatchSyncState.error ? (
+                    <p className="mt-2 text-sm font-extrabold text-red-700">
+                      {eventWatchSyncState.error}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void performEventWatchAutoSync({ silent: false })}
+                  disabled={Boolean(eventWatchSyncState.syncing)}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-extrabold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70"
+                >
+                  <RefreshCcw
+                    className={`h-4 w-4 ${eventWatchSyncState.syncing ? 'animate-spin' : ''}`}
+                  />
+                  {eventWatchSyncState.syncing ? 'Syncing' : 'Sync Now'}
+                </button>
+              </div>
+            </section>
 
             <div className="mt-5 grid gap-4">
               {[
@@ -5513,12 +6442,96 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         </div>
       ) : null}
 
+      {showArchiveDrawer ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="csc-opportunity-archive-title"
+          className="fixed inset-0 z-[92] flex justify-end bg-slate-950/60"
+        >
+          <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
+              <div>
+                <h3 id="csc-opportunity-archive-title" className="text-2xl font-black text-slate-950">
+                  Archived CSC Opportunities
+                </h3>
+                <p className="text-sm text-slate-600">
+                  Completed, expired, and manually archived opportunities remain recoverable.
+                </p>
+              </div>
+              <CloseScreenButton onClick={() => setShowArchiveDrawer(false)} />
+            </div>
+            <div className="border-b border-slate-200 bg-slate-50 p-4 sm:px-6">
+              <label className="relative block">
+                <span className="sr-only">Search archived opportunities</span>
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={archiveSearch}
+                  onChange={(event) => setArchiveSearch(event.target.value)}
+                  placeholder="Search archived event, venue, date, or reason"
+                  className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                />
+              </label>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+              {filteredArchivedOpportunities.length ? (
+                <div className="grid gap-3">
+                  {filteredArchivedOpportunities.map((opportunity) => (
+                    <article key={opportunity.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <h4 className="break-words text-base font-black text-slate-950">
+                            {opportunity.eventName || 'Event not entered'}
+                          </h4>
+                          <p className="mt-1 text-sm font-bold text-slate-700">
+                            {opportunity.venue || 'Venue not entered'}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {opportunity.eventDate ? formatDate(opportunity.eventDate) : 'Date not entered'}
+                            {opportunity.eventTime ? ` at ${formatTime(opportunity.eventTime)}` : ''}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            {opportunity.archiveReason || 'Archived'}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreArchivedOpportunity(opportunity)}
+                            className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-700 px-3 text-sm font-extrabold text-white hover:bg-emerald-800"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Restore
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteArchivedOpportunity(opportunity)}
+                            className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-extrabold text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-600">
+                  No archived opportunities match this search.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showFormDrawer ? (
-        <div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/60">
+        <div role="dialog" aria-modal="true" aria-labelledby="csc-opportunity-form-title" className="fixed inset-0 z-[80] flex justify-end bg-slate-950/60">
           <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-2xl font-black text-slate-950">CSC Opportunity</h3>
+                <h3 id="csc-opportunity-form-title" className="text-2xl font-black text-slate-950">CSC Opportunity</h3>
                 <p className="text-sm text-slate-600">Enter the venue event details and notes.</p>
               </div>
               <CloseScreenButton onClick={() => setShowFormDrawer(false)} />
@@ -5562,6 +6575,18 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               <label className="md:col-span-2 text-sm font-bold text-slate-700">Event URL
                 <input value={editingOpportunity.eventUrl} onChange={(event) => setEditingOpportunity((current) => ({ ...current, eventUrl: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
               </label>
+              <label className="text-sm font-bold text-slate-700">Scheduler name
+                <input value={editingOpportunity.schedulerName} onChange={(event) => setEditingOpportunity((current) => ({ ...current, schedulerName: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
+              </label>
+              <label className="text-sm font-bold text-slate-700">Scheduler phone
+                <input type="tel" value={editingOpportunity.schedulerPhone} onChange={(event) => setEditingOpportunity((current) => ({ ...current, schedulerPhone: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
+              </label>
+              <label className="text-sm font-bold text-slate-700">Scheduler extension
+                <input value={editingOpportunity.schedulerExtension} onChange={(event) => setEditingOpportunity((current) => ({ ...current, schedulerExtension: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
+              </label>
+              <label className="text-sm font-bold text-slate-700">Next follow-up date
+                <input type="date" value={editingOpportunity.nextCallDate} onChange={(event) => setEditingOpportunity((current) => ({ ...current, nextCallDate: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
+              </label>
               <label className="md:col-span-2 text-sm font-bold text-slate-700">Notes
                 <textarea rows={4} value={editingOpportunity.notes} onChange={(event) => setEditingOpportunity((current) => ({ ...current, notes: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal" />
               </label>
@@ -5576,11 +6601,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       ) : null}
 
       {showScanDrawer ? (
-        <div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/60">
+        <div role="dialog" aria-modal="true" aria-labelledby="csc-opportunity-scan-title" className="fixed inset-0 z-[80] flex justify-end bg-slate-950/60">
           <div className="h-full w-full max-w-3xl overflow-y-auto bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-2xl font-black text-slate-950">Scan Venue Events</h3>
+                <h3 id="csc-opportunity-scan-title" className="text-2xl font-black text-slate-950">Scan Venue Events</h3>
                 <p className="text-sm text-slate-600">Open the venue page, copy the event listings, paste them here, then review before importing.</p>
               </div>
               <CloseScreenButton onClick={() => setShowScanDrawer(false)} />
@@ -5627,13 +6652,43 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 <h4 className="text-lg font-black text-slate-950">Review Found Events ({scannedOpportunities.length})</h4>
                 <div className="mt-3 grid gap-2">
                   {scannedOpportunities.map((opportunity) => (
-                    <div key={opportunity.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <div>
-                        <p className="font-normal text-slate-950">
-                          <span className="font-extrabold">{opportunity.venue}:</span>{' '}
-                          <FormattedEventName value={opportunity.eventName} />
-                        </p>
-                        <p className="text-sm text-slate-600">{formatDate(opportunity.eventDate)}</p>
+                    <div key={opportunity.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-extrabold text-slate-950">{opportunity.venue}</p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
+                          <label className="text-xs font-bold text-slate-600">
+                            Event
+                            <input
+                              value={opportunity.eventName}
+                              onChange={(event) =>
+                                handleUpdateScanPreview(opportunity.id, { eventName: event.target.value })
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-950"
+                            />
+                          </label>
+                          <label className="text-xs font-bold text-slate-600">
+                            Date
+                            <input
+                              type="date"
+                              value={opportunity.eventDate}
+                              onChange={(event) =>
+                                handleUpdateScanPreview(opportunity.id, { eventDate: event.target.value })
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-950"
+                            />
+                          </label>
+                          <label className="text-xs font-bold text-slate-600">
+                            Time
+                            <input
+                              type="time"
+                              value={opportunity.eventTime || ''}
+                              onChange={(event) =>
+                                handleUpdateScanPreview(opportunity.id, { eventTime: event.target.value })
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal text-slate-950"
+                            />
+                          </label>
+                        </div>
                       </div>
                       <button type="button" onClick={() => handleRemoveScanPreview(opportunity.id)} className="rounded-lg bg-red-600 p-2 text-white" title="Remove from import" aria-label="Remove from import"><X className="h-4 w-4" /></button>
                     </div>
@@ -5650,11 +6705,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       ) : null}
 
       {showCreateShiftDrawer && shiftDraft ? (
-        <div className="fixed inset-0 z-[85] flex justify-end bg-slate-950/60">
+        <div role="dialog" aria-modal="true" aria-labelledby="csc-opportunity-create-shift-title" className="fixed inset-0 z-[85] flex justify-end bg-slate-950/60">
           <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-2xl font-black text-slate-950">Create CSC Shift</h3>
+                <h3 id="csc-opportunity-create-shift-title" className="text-2xl font-black text-slate-950">Create CSC Shift</h3>
                 <p className="text-sm text-slate-600">Confirm the exact shift window before creating the CSC shift.</p>
               </div>
               <CloseScreenButton onClick={() => setShowCreateShiftDrawer(false)} />

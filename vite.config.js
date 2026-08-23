@@ -64,6 +64,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/budget-dashboard-fs/csc-event-watch-feed.php': {
+        target: 'http://main-dashboard.local',
+        changeOrigin: true,
+        secure: false,
+      },
       '/budget-dashboard-fs/upload-paycheck-file.php': {
         target: 'http://main-dashboard.local',
         changeOrigin: true,
