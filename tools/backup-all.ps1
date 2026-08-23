@@ -11,6 +11,7 @@ param(
     [switch]$SkipGit = $false,
     [switch]$SkipBuild = $false,
     [switch]$SkipDatabase = $false,
+    [switch]$SkipAppData = $false,
     [string]$AppDataExportPath = ""
 )
 
@@ -432,7 +433,7 @@ function Write-RunManifest {
     }
 
     $Manifest = [ordered]@{
-        ScriptVersion = "2026-08-23.5"
+        ScriptVersion = "2026-08-23.6"
         Timestamp = $State.Timestamp
         BackupLabel = $State.BackupLabel
         ProjectRoot = $State.ProjectRoot
@@ -445,7 +446,7 @@ function Write-RunManifest {
         GitRemote = $State.GitRemote
         GitTag = $State.GitTag
         AppDataExportStatus = $State.AppDataExportStatus
-        BrowserLocalStorage = "Not captured directly. Use the app Data export and pass its path with -AppDataExportPath."
+        BrowserLocalStorage = $State.BrowserLocalStorage
         ProjectFileCount = $State.ProjectFileCount
         ProjectTotalBytes = $State.ProjectTotalBytes
         ChecksumFile = $State.ChecksumFile
@@ -484,6 +485,9 @@ $UIFolder = Split-Path -Parent $ScriptDir
 $ProjectRoot = Split-Path -Parent $UIFolder
 $WordPressRoot = Split-Path -Parent $ProjectRoot
 $BackupsFolder = Join-Path $ProjectRoot "backups"
+$AutomaticAppDataExportPath = Join-Path $ProjectRoot "private-data\app-data-export.json"
+$AppDataRestorePendingPath = Join-Path $ProjectRoot "private-data\app-data-restore-pending.json"
+$ResolvedAppDataExportPath = ""
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
 if ([string]::IsNullOrWhiteSpace($CommitMessage)) {
@@ -522,8 +526,9 @@ $RunState = [ordered]@{
     GitBranch = ""
     GitRemote = ""
     GitTag = ""
-    AppDataExportStatus = if ([string]::IsNullOrWhiteSpace($AppDataExportPath)) {
-        "Not supplied"
+    AppDataExportStatus = if ($SkipAppData) { "Skipped by request" } else { "Not started" }
+    BrowserLocalStorage = if ($SkipAppData) {
+        "Not included because -SkipAppData was used."
     } else {
         "Not started"
     }
@@ -596,6 +601,43 @@ try {
         throw "Neither budget-data.json source exists. Expected $BudgetDataRootPath or $BudgetDataRestorePath."
     }
 
+    if (-not $SkipAppData) {
+        if (Test-Path -LiteralPath $AppDataRestorePendingPath -PathType Leaf) {
+            throw "A restored app-data snapshot is still waiting to load. Open the dashboard once, allow it to reload, and run the backup again."
+        }
+
+        $ResolvedAppDataExportPath = if ([string]::IsNullOrWhiteSpace($AppDataExportPath)) {
+            $AutomaticAppDataExportPath
+        } else {
+            $AppDataExportPath
+        }
+
+        if (!(Test-Path -LiteralPath $ResolvedAppDataExportPath -PathType Leaf)) {
+            throw "The automatic app-data export is missing: $ResolvedAppDataExportPath. Open the dashboard once, wait a few seconds, and run the backup again."
+        }
+
+        try {
+            $ParsedAppDataExport = Get-Content -LiteralPath $ResolvedAppDataExportPath -Raw | ConvertFrom-Json
+        } catch {
+            throw "The app-data export is not valid JSON: $ResolvedAppDataExportPath"
+        }
+
+        $AppDataTypeProperty = $ParsedAppDataExport.PSObject.Properties["type"]
+        $AppDataItemsProperty = $ParsedAppDataExport.PSObject.Properties["items"]
+        $AppDataSnapshotProperty = $ParsedAppDataExport.PSObject.Properties["snapshotId"]
+
+        if ($null -eq $AppDataTypeProperty -or
+            [string]$AppDataTypeProperty.Value -ne "budget-dashboard-mobile-migration" -or
+            $null -eq $AppDataItemsProperty -or
+            $null -eq $AppDataSnapshotProperty -or
+            [string]::IsNullOrWhiteSpace([string]$AppDataSnapshotProperty.Value)) {
+            throw "The app-data export has an invalid format: $ResolvedAppDataExportPath"
+        }
+
+        $RunState.AppDataExportStatus = "Validated automatic export"
+        $RunState.BrowserLocalStorage = "Included through the automatic app-data export mirror."
+    }
+
     if (-not $SkipDatabase) {
         $WordPressConfigPath = Join-Path $WordPressRoot "wp-config.php"
         if (!(Test-Path -LiteralPath $WordPressConfigPath -PathType Leaf)) {
@@ -636,7 +678,9 @@ try {
         "node_modules",
         "dist",
         ".vite",
-        ".git"
+        ".git",
+        "/XF",
+        "app-data-restore-pending.json"
     )
 
     & $RoboCopyPath @RoboCopyArguments
@@ -771,24 +815,29 @@ try {
         $RunState.DatabaseStatus = "Included, $($DatabaseFile.Length) bytes"
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($AppDataExportPath)) {
-        Write-Host "Including the supplied app Data export..." -ForegroundColor Green
-        if (!(Test-Path -LiteralPath $AppDataExportPath)) {
-            throw "The supplied app Data export does not exist: $AppDataExportPath"
-        }
-
+    if (-not $SkipAppData) {
+        Write-Host "Including the automatic app-data export..." -ForegroundColor Green
         $AppDataDestination = Join-Path $StagingFolder "app-data-export"
         New-Item -ItemType Directory -Path $AppDataDestination -Force | Out-Null
-        Copy-Item -LiteralPath $AppDataExportPath -Destination $AppDataDestination -Recurse -Force
-        $RunState.AppDataExportStatus = "Included from $AppDataExportPath"
+        $AppDataBackupPath = Join-Path $AppDataDestination "app-data-export.json"
+        Copy-Item -LiteralPath $ResolvedAppDataExportPath -Destination $AppDataBackupPath -Force
+        $AppDataFile = Get-Item -LiteralPath $AppDataBackupPath
+        $RunState.AppDataExportStatus = "Included, $($AppDataFile.Length) bytes"
     }
 
-    $LocalStorageNoticePath = Join-Path $StagingFolder "BROWSER-LOCAL-STORAGE-NOT-INCLUDED.txt"
-    @(
-        "Browser localStorage cannot be captured safely by this PowerShell script.",
-        "Before a major recovery checkpoint, use the app Data export function.",
-        "Pass that exported file to this script with -AppDataExportPath to include it."
-    ) | Set-Content -LiteralPath $LocalStorageNoticePath -Encoding UTF8
+    $AppDataStatusPath = Join-Path $StagingFolder "APP-DATA-BACKUP-STATUS.txt"
+    if ($SkipAppData) {
+        @(
+            "Automatic app-data export was skipped by request.",
+            "Browser localStorage is not included in this backup."
+        ) | Set-Content -LiteralPath $AppDataStatusPath -Encoding UTF8
+    } else {
+        @(
+            "Automatic app-data export included.",
+            "Source: $ResolvedAppDataExportPath",
+            "Saved copy: app-data-export\app-data-export.json"
+        ) | Set-Content -LiteralPath $AppDataStatusPath -Encoding UTF8
+    }
 
     Write-Host "Creating SHA-256 checksums..." -ForegroundColor Green
     $FilesToHash = @(
@@ -999,11 +1048,12 @@ try {
     Write-Host "Backup completed successfully." -ForegroundColor Green
     Write-Host "Location: $BackupFolder" -ForegroundColor Cyan
     Write-Host "Database: $($RunState.DatabaseStatus)" -ForegroundColor Cyan
+    Write-Host "App data: $($RunState.AppDataExportStatus)" -ForegroundColor Cyan
     Write-Host "Build: $($RunState.BuildStatus)" -ForegroundColor Cyan
     Write-Host "Git: $($RunState.GitStatus)" -ForegroundColor Cyan
 
-    if ([string]::IsNullOrWhiteSpace($AppDataExportPath)) {
-        Write-Host "Browser localStorage was not captured. Use the app Data export for a complete application-data checkpoint." -ForegroundColor Yellow
+    if ($SkipAppData) {
+        Write-Host "Browser localStorage was not included because -SkipAppData was used." -ForegroundColor Yellow
     }
 } catch {
     $RunState.Error = $_.Exception.Message

@@ -6,6 +6,7 @@ import path from 'path';
 const LAN_IP = '192.168.1.116'; // update if your PC IP changes
 const MODE = (process.env.VITE_DEV_HOST || 'lan').toLowerCase(); // 'localhost' | 'lan'
 const useLan = MODE === 'lan';
+const LOCALWP_TARGET = 'https://main-dashboard.local';
 
 const CERT_DIR = path.resolve(__dirname, 'certs');
 const KEY_LOCAL = path.join(CERT_DIR, 'localhost-key.pem');
@@ -26,7 +27,10 @@ const rewriteBudgetBase = {
       server.middlewares.use((req, _res, next) => {
         if (!req.url) return next();
 
-        if (req.url === '/budget-dashboard-fs' || req.url === '/budget-dashboard-fs/') {
+        if (
+          req.url === '/budget-dashboard-fs' ||
+          req.url === '/budget-dashboard-fs/'
+        ) {
           req.url = '/';
         } else if (req.url.startsWith('/budget-dashboard-fs/')) {
           const isAsset = /\.\w+$/.test(req.url.split('?')[0]);
@@ -42,59 +46,70 @@ const rewriteBudgetBase = {
 export default defineConfig({
   plugins: [react(), rewriteBudgetBase],
   base: '/budget-dashboard-fs/',
+
   server: {
     host: useLan ? '0.0.0.0' : '127.0.0.1',
     port: 4174,
     strictPort: true,
     https: useLan ? false : localHttps,
+
     watch: {
       ignored: [
         '**/uploads/**',
         '**/private-data/**',
       ],
     },
+
     proxy: {
       '/wp-json': {
-        target: 'http://main-dashboard.local',
+        target: LOCALWP_TARGET,
         changeOrigin: true,
         secure: false,
       },
+
       '/budget-dashboard-fs/save.php': {
-        target: 'http://main-dashboard.local',
+        target: LOCALWP_TARGET,
         changeOrigin: true,
         secure: false,
       },
+
       '/budget-dashboard-fs/csc-event-watch-feed.php': {
-        target: 'http://main-dashboard.local',
+        target: LOCALWP_TARGET,
         changeOrigin: true,
         secure: false,
       },
+
       '/budget-dashboard-fs/upload-paycheck-file.php': {
-        target: 'http://main-dashboard.local',
+        target: LOCALWP_TARGET,
         changeOrigin: true,
         secure: false,
       },
+
       '/budget-dashboard-fs/upload-credit-report.php': {
-        target: 'http://main-dashboard.local',
+        target: LOCALWP_TARGET,
         changeOrigin: true,
         secure: false,
       },
     },
+
     hmr: {
       host: useLan ? LAN_IP : 'localhost',
       port: 4174,
       protocol: useLan ? 'ws' : hasLocalCert ? 'wss' : 'ws',
     },
   },
+
   preview: {
     host: useLan ? '0.0.0.0' : '127.0.0.1',
     port: 4174,
     strictPort: true,
     https: useLan ? false : localHttps,
   },
+
   build: {
     manifest: 'manifest.json',
     outDir: 'dist',
+
     rollupOptions: {
       input: 'index.html',
     },

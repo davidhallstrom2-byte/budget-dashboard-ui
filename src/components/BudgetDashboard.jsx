@@ -50,6 +50,143 @@ const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
 const RIDES_STORAGE_EVENT = 'modivcareRides:updated';
 const PAYCHECK_ARCHIVE_STORAGE_KEY = 'paychecksTab.archived.v1';
 const PAYCHECK_STORAGE_EVENT = 'paychecksChanged';
+const APP_DATA_EXPORT_URL = '/budget-dashboard-fs/save.php?action=app_data_export';
+const APP_DATA_RESTORE_APPLIED_URL = '/budget-dashboard-fs/save.php?action=app_data_restore_applied';
+const APP_DATA_RESTORE_MARKER_KEY = 'budgetDashboard.appDataRestoreApplied.v1';
+const APP_DATA_CHANGED_EVENT = 'budget-dashboard:app-data-changed';
+const APP_DATA_AUTO_EXPORT_INTERVAL_MS = 30 * 1000;
+
+const isExcludedDashboardStorageKey = (key = '') =>
+  !key ||
+  key === APP_DATA_RESTORE_MARKER_KEY ||
+  key === 'budgetMobileSync.keyMeta.v1' ||
+  key.startsWith('budgetMobileSync.') ||
+  key.startsWith('googleCalendar.') ||
+  /(?:accessToken|refreshToken|idToken|tokenExpiresAt|openLinked|returnContext|createDraft)/i.test(key);
+
+const getAutomaticAppDataUrls = () => [
+  '/budget-dashboard-fs/save.php?action=app_data_download',
+];
+
+const hashDashboardAppData = (value = '') => {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
+const collectDashboardStorageItems = (budgetState = null) => {
+  if (typeof localStorage === 'undefined') {
+    throw new Error('Browser storage is unavailable.');
+  }
+
+  const keys = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && !isExcludedDashboardStorageKey(key)) keys.push(key);
+  }
+
+  const items = {};
+  keys.sort().forEach((key) => {
+    const value = localStorage.getItem(key);
+    if (value !== null) items[key] = value;
+  });
+
+  if (budgetState) {
+    items['budget-dashboard-state-v2'] = JSON.stringify(budgetState);
+  }
+
+  return items;
+};
+
+const buildDashboardAppDataExport = (budgetState = null) => {
+  const items = collectDashboardStorageItems(budgetState);
+  const itemsJson = JSON.stringify(items);
+
+  return {
+    type: 'budget-dashboard-mobile-migration',
+    version: 2,
+    snapshotId: `dashboard-${hashDashboardAppData(itemsJson)}-${itemsJson.length}`,
+    exportedAt: new Date().toISOString(),
+    items,
+  };
+};
+
+const loadAutomaticAppDataExport = async () => {
+  for (const url of getAutomaticAppDataUrls()) {
+    try {
+      const separator = url.includes('?') ? '&' : '?';
+      const response = await fetch(`${url}${separator}t=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) continue;
+
+      const exportData = await response.json();
+      if (
+        exportData?.type === 'budget-dashboard-mobile-migration' &&
+        exportData?.items &&
+        typeof exportData.items === 'object' &&
+        typeof exportData.snapshotId === 'string' &&
+        exportData.snapshotId
+      ) {
+        return exportData;
+      }
+    } catch {
+      // Try the next supported restore URL.
+    }
+  }
+
+  return null;
+};
+
+const acknowledgeAutomaticAppDataRestore = async (snapshotId) => {
+  try {
+    const response = await fetch(APP_DATA_RESTORE_APPLIED_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ snapshotId }),
+      credentials: 'same-origin',
+      keepalive: true,
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+const restoreAutomaticAppDataIfNeeded = async () => {
+  if (typeof localStorage === 'undefined') return false;
+
+  const exportData = await loadAutomaticAppDataExport();
+  if (!exportData) return false;
+
+  const appliedSnapshotId = localStorage.getItem(APP_DATA_RESTORE_MARKER_KEY);
+  if (appliedSnapshotId === exportData.snapshotId) {
+    await acknowledgeAutomaticAppDataRestore(exportData.snapshotId);
+    return false;
+  }
+
+  const currentKeys = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && !isExcludedDashboardStorageKey(key)) currentKeys.push(key);
+  }
+
+  currentKeys.forEach((key) => localStorage.removeItem(key));
+
+  Object.entries(exportData.items).forEach(([key, value]) => {
+    if (!isExcludedDashboardStorageKey(key) && typeof value === 'string') {
+      localStorage.setItem(key, value);
+    }
+  });
+
+  localStorage.setItem(APP_DATA_RESTORE_MARKER_KEY, exportData.snapshotId);
+  await acknowledgeAutomaticAppDataRestore(exportData.snapshotId);
+  return true;
+};
 
 const getTodoTaskType = (task = {}) => task.typeOverride || task.type || '';
 
@@ -512,11 +649,20 @@ const BudgetDashboard = () => {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [, setToolbarRefreshKey] = useState(0);
   const budgetImportInputRef = useRef(null);
+  const latestBudgetStateRef = useRef(null);
+  const lastAutomaticAppDataSnapshotRef = useRef('');
+  const automaticAppDataTimerRef = useRef(null);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
+        const restoredAutomaticAppData = await restoreAutomaticAppDataIfNeeded();
+        if (restoredAutomaticAppData) {
+          window.location.reload();
+          return;
+        }
+
         const initialState = await initializeState();
         if (mounted) setState(initialState);
       } catch (err) {
@@ -544,6 +690,176 @@ const BudgetDashboard = () => {
 
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    latestBudgetStateRef.current = state;
+
+    if (state && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT));
+    }
+  }, [state]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof Storage === 'undefined') return undefined;
+
+    let exportInProgress = false;
+    let exportQueued = false;
+
+    const persistAutomaticAppData = async () => {
+      const currentBudgetState = latestBudgetStateRef.current;
+      if (!currentBudgetState) return;
+
+      if (exportInProgress) {
+        exportQueued = true;
+        return;
+      }
+
+      let exportData;
+      try {
+        exportData = buildDashboardAppDataExport(currentBudgetState);
+      } catch (error) {
+        console.error('Automatic app-data export could not collect dashboard storage:', error);
+        return;
+      }
+
+      if (exportData.snapshotId === lastAutomaticAppDataSnapshotRef.current) return;
+
+      exportInProgress = true;
+      try {
+        const response = await fetch(APP_DATA_EXPORT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(exportData),
+          credentials: 'same-origin',
+        });
+
+        if (response.status === 409) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        lastAutomaticAppDataSnapshotRef.current = exportData.snapshotId;
+      } catch (error) {
+        console.error('Automatic app-data export failed:', error);
+      } finally {
+        exportInProgress = false;
+        if (exportQueued) {
+          exportQueued = false;
+          window.setTimeout(persistAutomaticAppData, 250);
+        }
+      }
+    };
+
+    const scheduleAutomaticAppDataExport = (event) => {
+      const changedKey = String(event?.detail?.key || '');
+      if (changedKey && isExcludedDashboardStorageKey(changedKey)) return;
+
+      if (automaticAppDataTimerRef.current) {
+        window.clearTimeout(automaticAppDataTimerRef.current);
+      }
+
+      automaticAppDataTimerRef.current = window.setTimeout(
+        persistAutomaticAppData,
+        750
+      );
+    };
+
+    const originalSetItem = Storage.prototype.setItem;
+    const originalRemoveItem = Storage.prototype.removeItem;
+    const originalClear = Storage.prototype.clear;
+
+    const patchedSetItem = function patchedSetItem(key, value) {
+      const result = originalSetItem.call(this, key, value);
+      if (this === window.localStorage) {
+        window.dispatchEvent(
+          new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: { key: String(key || '') } })
+        );
+      }
+      return result;
+    };
+
+    const patchedRemoveItem = function patchedRemoveItem(key) {
+      const result = originalRemoveItem.call(this, key);
+      if (this === window.localStorage) {
+        window.dispatchEvent(
+          new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: { key: String(key || '') } })
+        );
+      }
+      return result;
+    };
+
+    const patchedClear = function patchedClear() {
+      const result = originalClear.call(this);
+      if (this === window.localStorage) {
+        window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT));
+      }
+      return result;
+    };
+
+    Storage.prototype.setItem = patchedSetItem;
+    Storage.prototype.removeItem = patchedRemoveItem;
+    Storage.prototype.clear = patchedClear;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') scheduleAutomaticAppDataExport();
+    };
+
+    const handlePageHide = () => {
+      const currentBudgetState = latestBudgetStateRef.current;
+      if (!currentBudgetState || typeof navigator.sendBeacon !== 'function') return;
+
+      try {
+        const exportData = buildDashboardAppDataExport(currentBudgetState);
+        if (exportData.snapshotId === lastAutomaticAppDataSnapshotRef.current) return;
+
+        const payload = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
+        if (navigator.sendBeacon(APP_DATA_EXPORT_URL, payload)) {
+          lastAutomaticAppDataSnapshotRef.current = exportData.snapshotId;
+        }
+      } catch (error) {
+        console.error('Final automatic app-data export failed:', error);
+      }
+    };
+
+    window.addEventListener(APP_DATA_CHANGED_EVENT, scheduleAutomaticAppDataExport);
+    window.addEventListener('storage', scheduleAutomaticAppDataExport);
+    window.addEventListener('focus', scheduleAutomaticAppDataExport);
+    window.addEventListener('pagehide', handlePageHide);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const intervalId = window.setInterval(
+      persistAutomaticAppData,
+      APP_DATA_AUTO_EXPORT_INTERVAL_MS
+    );
+    scheduleAutomaticAppDataExport();
+
+    return () => {
+      if (automaticAppDataTimerRef.current) {
+        window.clearTimeout(automaticAppDataTimerRef.current);
+        automaticAppDataTimerRef.current = null;
+      }
+
+      window.clearInterval(intervalId);
+      window.removeEventListener(APP_DATA_CHANGED_EVENT, scheduleAutomaticAppDataExport);
+      window.removeEventListener('storage', scheduleAutomaticAppDataExport);
+      window.removeEventListener('focus', scheduleAutomaticAppDataExport);
+      window.removeEventListener('pagehide', handlePageHide);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      if (Storage.prototype.setItem === patchedSetItem) {
+        Storage.prototype.setItem = originalSetItem;
+      }
+      if (Storage.prototype.removeItem === patchedRemoveItem) {
+        Storage.prototype.removeItem = originalRemoveItem;
+      }
+      if (Storage.prototype.clear === patchedClear) {
+        Storage.prototype.clear = originalClear;
+      }
     };
   }, []);
 
@@ -972,36 +1288,8 @@ const BudgetDashboard = () => {
     }
 
     try {
-      const items = {};
-
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-
-        if (
-          !key ||
-          key === 'budgetMobileSync.keyMeta.v1' ||
-          key.startsWith('budgetMobileSync.') ||
-          key.startsWith('googleCalendar.') ||
-          /(?:accessToken|tokenExpiresAt|openLinked|returnContext|createDraft)/i.test(key)
-        ) {
-          continue;
-        }
-
-        items[key] = localStorage.getItem(key);
-      }
-
-      if (state) {
-        items['budget-dashboard-state-v2'] = JSON.stringify(state);
-      }
-
-      const exportedAt = new Date().toISOString();
-      const exportData = {
-        type: 'budget-dashboard-mobile-migration',
-        version: 1,
-        exportedAt,
-        items,
-      };
-      const filename = `budget-dashboard-mobile-data-${exportedAt.slice(0, 10)}.json`;
+      const exportData = buildDashboardAppDataExport(state);
+      const filename = `budget-dashboard-mobile-data-${exportData.exportedAt.slice(0, 10)}.json`;
       const dataBlob = new Blob([JSON.stringify(exportData, null, 2)], {
         type: 'application/json',
       });
@@ -1019,7 +1307,7 @@ const BudgetDashboard = () => {
 
       setSaveStatus({
         type: 'success',
-        message: `Exported ${Object.keys(items).length} dashboard data items.`,
+        message: `Exported ${Object.keys(exportData.items).length} dashboard data items.`,
       });
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
