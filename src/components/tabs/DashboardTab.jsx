@@ -11,6 +11,7 @@ import CollapseToggleButton, { COLLAPSE_TOGGLE_CLASS } from '../common/CollapseT
 import EmergencyFundWidget from '../modern/EmergencyFundWidget';
 import CloseScreenButton from '../common/CloseScreenButton.jsx';
 import { reconcileStoredCscShiftsWithPaychecks } from '../../utils/cscPaycheckReconciliation.js';
+import { formatAppShortDate } from '../../utils/cscDisplay.js';
 
 const categoryIcons = {
   income:         { icon: DollarSign,  color: 'text-green-600' },
@@ -230,13 +231,7 @@ const normalizeDashboardDate = (value = '') => {
   ].join('-');
 };
 
-const formatDashboardDate = (value = '') => {
-  const normalized = normalizeDashboardDate(value);
-  if (!normalized) return '';
-
-  const [year, month, day] = normalized.split('-');
-  return `${month}/${day}/${year}`;
-};
+const formatDashboardDate = (value = '') => formatAppShortDate(value);
 
 const formatDashboardUpdatedAt = (value = '') => {
   const parsed = new Date(value);

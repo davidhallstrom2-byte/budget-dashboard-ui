@@ -28,6 +28,7 @@ import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from '../common/TabPageHeader.
 import CloseScreenButton from '../common/CloseScreenButton.jsx';
 import { createGoogleCalendarEvent } from '../../utils/googleCalendarApi';
 import { formatPhoneInput, formatPhoneNumber } from '../../utils/phone';
+import { formatAppShortDate } from '../../utils/cscDisplay.js';
 
 const RIDES_STORAGE_KEY = 'modivcareRides.v1';
 const RIDES_ARCHIVE_STORAGE_KEY = 'modivcareRides.archived.v1';
@@ -81,17 +82,7 @@ const formatDateForInput = (value = '') => {
   ].join('-');
 };
 
-const formatDateForDisplay = (value = '') => {
-  const isoDate = formatDateForInput(value);
-  if (!isoDate) return 'No date';
-
-  const [year, month, day] = isoDate.split('-').map(Number);
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(new Date(year, month - 1, day));
-};
+const formatDateForDisplay = (value = '') => formatAppShortDate(value, 'No date');
 
 const parseMoneyAmount = (value = 0) => {
   const match = String(value ?? '').replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);

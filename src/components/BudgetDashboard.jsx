@@ -56,6 +56,17 @@ const APP_DATA_RESTORE_MARKER_KEY = 'budgetDashboard.appDataRestoreApplied.v1';
 const APP_DATA_CHANGED_EVENT = 'budget-dashboard:app-data-changed';
 const APP_DATA_AUTO_EXPORT_INTERVAL_MS = 30 * 1000;
 
+const supportsAutomaticFileAppData = () => {
+  if (typeof window === 'undefined') return false;
+
+  const hostname = String(window.location.hostname || '').toLowerCase();
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.endsWith('.local')
+  );
+};
+
 const isExcludedDashboardStorageKey = (key = '') =>
   !key ||
   key === APP_DATA_RESTORE_MARKER_KEY ||
@@ -158,7 +169,7 @@ const acknowledgeAutomaticAppDataRestore = async (snapshotId) => {
 };
 
 const restoreAutomaticAppDataIfNeeded = async () => {
-  if (typeof localStorage === 'undefined') return false;
+  if (!supportsAutomaticFileAppData() || typeof localStorage === 'undefined') return false;
 
   const exportData = await loadAutomaticAppDataExport();
   if (!exportData) return false;
@@ -702,7 +713,13 @@ const BudgetDashboard = () => {
   }, [state]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof Storage === 'undefined') return undefined;
+    if (
+      typeof window === 'undefined' ||
+      typeof Storage === 'undefined' ||
+      !supportsAutomaticFileAppData()
+    ) {
+      return undefined;
+    }
 
     let exportInProgress = false;
     let exportQueued = false;

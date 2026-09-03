@@ -284,6 +284,73 @@ export const ensureGoogleCalendarEventLabel = async ({
   return updatedLabel;
 };
 
+export const listGoogleCalendarEvents = async ({
+  timeMin = "",
+  timeMax = "",
+  query = "",
+  maxResults = 2500,
+} = {}) => {
+  const token = await getGoogleCalendarAccessToken();
+  const events = [];
+  let pageToken = "";
+  const safeMaxResults = Math.min(
+    Math.max(Number(maxResults) || 2500, 1),
+    2500
+  );
+
+  do {
+    const url = new URL(GOOGLE_CALENDAR_EVENTS_ENDPOINT);
+
+    if (timeMin) {
+      const parsedTimeMin = new Date(timeMin);
+      if (!Number.isFinite(parsedTimeMin.getTime())) {
+        throw new Error("Invalid Google Calendar timeMin value.");
+      }
+      url.searchParams.set("timeMin", parsedTimeMin.toISOString());
+    }
+
+    if (timeMax) {
+      const parsedTimeMax = new Date(timeMax);
+      if (!Number.isFinite(parsedTimeMax.getTime())) {
+        throw new Error("Invalid Google Calendar timeMax value.");
+      }
+      url.searchParams.set("timeMax", parsedTimeMax.toISOString());
+    }
+
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("showDeleted", "false");
+    url.searchParams.set("orderBy", "startTime");
+    url.searchParams.set("maxResults", String(safeMaxResults));
+
+    if (String(query || "").trim()) {
+      url.searchParams.set("q", String(query).trim());
+    }
+
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const data = await readGoogleCalendarResponse(
+      response,
+      "Google Calendar event lookup failed."
+    );
+
+    if (Array.isArray(data?.items)) {
+      events.push(...data.items);
+    }
+
+    pageToken = String(data?.nextPageToken || "").trim();
+  } while (pageToken);
+
+  return events;
+};
+
 export const createGoogleCalendarEvent = async (eventPayload) => {
   const token = await getGoogleCalendarAccessToken();
 
@@ -328,4 +395,42 @@ export const updateGoogleCalendarEvent = async (eventId, eventPayload) => {
     response,
     "Google Calendar event update failed."
   );
+};
+
+export const deleteGoogleCalendarEvent = async (eventId) => {
+  const normalizedEventId = String(eventId || "").trim();
+
+  if (!normalizedEventId) {
+    throw new Error("Missing Google Calendar event ID. The old calendar event could not be deleted.");
+  }
+
+  const token = await getGoogleCalendarAccessToken();
+  const endpoint = buildGoogleCalendarEventsEndpoint(normalizedEventId);
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  // Google may return 404 or 410 when the event was already removed.
+  // Treat that as a successful synchronization because the stale event is gone.
+  if (response.status === 404 || response.status === 410) {
+    return {
+      id: normalizedEventId,
+      deleted: true,
+      alreadyMissing: true,
+    };
+  }
+
+  await readGoogleCalendarResponse(
+    response,
+    "Google Calendar event deletion failed."
+  );
+
+  return {
+    id: normalizedEventId,
+    deleted: true,
+    alreadyMissing: false,
+  };
 };

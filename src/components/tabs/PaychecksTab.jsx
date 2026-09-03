@@ -28,6 +28,7 @@ import PageContainer from "../common/PageContainer";
 import TabPageHeader, { TAB_HEADER_ACTION_CLASS } from "../common/TabPageHeader.jsx";
 import DataToolsScreen from "../common/DataToolsScreen.jsx";
 import { reconcileStoredCscShiftsWithPaychecks } from "../../utils/cscPaycheckReconciliation.js";
+import { cleanCscDisplayTitle, cleanCscVenueDisplay, formatAppShortDate } from "../../utils/cscDisplay.js";
 
 const PAYCHECK_STORAGE_KEY = "paychecksTab.paychecks.v1";
 const PAYCHECK_ARCHIVE_STORAGE_KEY = "paychecksTab.archived.v1";
@@ -322,23 +323,9 @@ const formatDateForInput = (value = "") => {
   ].join("-");
 };
 
-const formatDateForDisplay = (value = "") => {
-  const iso = formatDateForInput(value);
-  if (!iso) return "";
+const formatDateForDisplay = (value = "") => formatAppShortDate(value);
 
-  const [year, month, day] = iso.split("-");
-  return `${month}/${day}/${year}`;
-};
-
-const formatCompactDate = (value = "") => {
-  const iso = formatDateForInput(value);
-  if (!iso) return "";
-
-  const [, year, month, day] = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/) || [];
-  if (!year || !month || !day) return "";
-
-  return `${Number(month)}/${Number(day)}/${String(year).slice(-2)}`;
-};
+const formatCompactDate = (value = "") => formatAppShortDate(value);
 
 const shiftIsoDate = (value = "", days = 0) => {
   const iso = formatDateForInput(value);
@@ -406,18 +393,7 @@ const normalizeCscShiftStatus = (value = "") => {
   return "Scheduled";
 };
 
-const formatCscShiftDate = (value = "") => {
-  const iso = formatDateForInput(value);
-  if (!iso) return "";
-
-  const [year, month, day] = iso.split("-").map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-};
+const formatCscShiftDate = (value = "") => formatAppShortDate(value);
 
 const formatCscShiftTime = (value = "") => {
   const [hours, minutes] = String(value || "").split(":").map(Number);
@@ -3363,10 +3339,10 @@ export default function PaychecksTab() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <h3 className="text-lg font-extrabold text-slate-950">{shift.venue || "CSC Shift"}</h3>
-                          <p className="mt-0.5 text-sm font-bold text-slate-700">{shift.event || "Event not entered"}</p>
+                          <h3 className="text-lg font-extrabold text-slate-950">{cleanCscVenueDisplay(shift.venue) || "CSC Shift"}</h3>
+                          <p className="mt-0.5 text-sm font-bold text-slate-700">{cleanCscDisplayTitle(shift.event || "Event not entered")}</p>
                           {shouldShowDistinctCscJobName(shift) ? (
-                            <p className="mt-0.5 text-xs font-semibold text-slate-500">{shift.jobName}</p>
+                            <p className="mt-0.5 text-xs font-semibold text-slate-500">{cleanCscDisplayTitle(shift.jobName)}</p>
                           ) : null}
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1.5">

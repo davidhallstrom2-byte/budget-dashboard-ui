@@ -40,6 +40,7 @@ import ArchivedDrawer from "../ui/ArchivedDrawer";
 import ContactManager from "../contacts/ContactManager";
 import { createGoogleCalendarEvent } from "../../utils/googleCalendarApi";
 import { formatPhoneInput, formatPhoneNumber } from "../../utils/phone";
+import { cleanCscDisplayShift, formatAppShortDate, formatAppShortDateTime } from "../../utils/cscDisplay.js";
 import {
   CONTACT_APPLY_FIELDS,
   createEmptyContact,
@@ -454,18 +455,7 @@ const safeJsonParse = (value, fallback) => {
   }
 };
 
-const formatDateTime = (value) => {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
+const formatDateTime = (value) => formatAppShortDateTime(value, String(value || ""));
 
 const escapeFormattedHtml = (value = "") =>
   String(value ?? "")
@@ -1222,10 +1212,12 @@ const readScheduledCscShifts = () => {
     const parsed = JSON.parse(localStorage.getItem(CSC_SHIFTS_STORAGE_KEY) || "[]");
     if (!Array.isArray(parsed)) return [];
 
-    return parsed.filter((shift) => {
-      const status = String(shift?.shiftStatus || "Scheduled").trim().toLowerCase();
-      return shift?.startDate && !["cancelled", "canceled", "done", "complete", "completed"].includes(status);
-    });
+    return parsed
+      .filter((shift) => {
+        const status = String(shift?.shiftStatus || "Scheduled").trim().toLowerCase();
+        return shift?.startDate && !["cancelled", "canceled", "done", "complete", "completed"].includes(status);
+      })
+      .map(cleanCscDisplayShift);
   } catch {
     return [];
   }
@@ -1297,8 +1289,8 @@ const getTodoCscShiftConflictResult = (task = {}, shifts = []) => {
 };
 
 const formatCscShiftConflictWindow = (shift = {}) => {
-  const startDate = formatTodoDateForTextInput(shift.startDate);
-  const finishDate = formatTodoDateForTextInput(shift.finishDate || shift.startDate);
+  const startDate = formatAppShortDate(shift.startDate);
+  const finishDate = formatAppShortDate(shift.finishDate || shift.startDate);
   const startTime = formatTodoTimeForTextInput(shift.startTime);
   const finishTime = formatTodoTimeForTextInput(shift.finishTime);
   const finish = finishDate && finishDate !== startDate ? `${finishDate} ${finishTime}` : finishTime;
@@ -1341,7 +1333,7 @@ const isTaskFollowUpDue = (task = {}, nowTimestamp = Date.now()) => {
 };
 
 const formatTaskFollowUpSchedule = (task = {}) =>
-  [task.followUpDate, task.followUpTime ? formatTodoTimeForTextInput(task.followUpTime) : ""]
+  [formatAppShortDate(task.followUpDate), task.followUpTime ? formatTodoTimeForTextInput(task.followUpTime) : ""]
     .filter(Boolean)
     .join(" at ");
 
@@ -1844,7 +1836,7 @@ const splitInsuranceDmvTask = (task = {}) => {
     task.company ? `Company: ${task.company}` : '',
     task.policyNumber ? `Policy #: ${task.policyNumber}` : '',
     task.policyStatus ? `Policy status: ${task.policyStatus}` : '',
-    task.effectiveDate ? `Effective date: ${task.effectiveDate}` : '',
+    task.effectiveDate ? `Effective date: ${formatAppShortDate(task.effectiveDate)}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -5696,7 +5688,7 @@ const addParsedTasks = () => {
                       <div key={task.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
                         <div className="font-semibold">{task.taskName}</div>
                         <div className="text-slate-600">Type: {task.type}</div>
-                        {task.deadline && <div className="text-slate-600">Deadline: {task.deadline}</div>}
+                        {task.deadline && <div className="text-slate-600">Deadline: {formatAppShortDate(task.deadline)}</div>}
                         {task.caseNumber && <div className="text-slate-600">{getFieldLabel(task, "caseNumber")}: {task.caseNumber}</div>}
                         {task.phone && <div className="text-slate-600">Phone: {task.phone}</div>}
                       </div>
