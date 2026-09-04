@@ -19,6 +19,8 @@ import NotificationPanel from './modern/NotificationPanel';
 import CloseScreenButton from './common/CloseScreenButton.jsx';
 import DataToolsScreen from './common/DataToolsScreen.jsx';
 import { formatPhoneNumber } from '../utils/phone';
+
+const BWC_DASHBOARD_MARK_SRC = `${import.meta.env.BASE_URL}bwc-dashboard-mark.png`;
 import {
   Search,
   X,
@@ -663,6 +665,37 @@ const BudgetDashboard = () => {
   const latestBudgetStateRef = useRef(null);
   const lastAutomaticAppDataSnapshotRef = useRef('');
   const automaticAppDataTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+
+    const previousTitle = document.title;
+    const existingIcon = document.querySelector('link[rel~="icon"]');
+    const previousIconHref = existingIcon?.getAttribute('href') || '';
+    const iconLink = existingIcon || document.createElement('link');
+
+    iconLink.setAttribute('rel', 'icon');
+    iconLink.setAttribute('type', 'image/png');
+    iconLink.setAttribute('href', BWC_DASHBOARD_MARK_SRC);
+
+    if (!existingIcon) {
+      document.head.appendChild(iconLink);
+    }
+
+    document.title = 'BWC Dashboard';
+
+    return () => {
+      document.title = previousTitle;
+
+      if (existingIcon) {
+        if (previousIconHref) {
+          existingIcon.setAttribute('href', previousIconHref);
+        }
+      } else if (iconLink.parentNode) {
+        iconLink.parentNode.removeChild(iconLink);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -1787,6 +1820,17 @@ const BudgetDashboard = () => {
                     : activeTabConfig?.activeClass || tabs[0].activeClass
                 }`}
               >
+                <div
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-700 bg-slate-950 shadow-sm"
+                  title="Business Web Creations"
+                >
+                  <img
+                    src={BWC_DASHBOARD_MARK_SRC}
+                    alt="Business Web Creations"
+                    className="h-9 w-9 object-contain"
+                  />
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setIsMobileNavOpen((current) => !current)}
@@ -1880,6 +1924,17 @@ const BudgetDashboard = () => {
             </div>
 
             <div className="hidden w-full min-w-0 flex-nowrap items-center gap-1 lg:flex xl:gap-1.5">
+              <div
+                className="mr-1 inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-700 bg-slate-950 shadow-sm"
+                title="Business Web Creations"
+              >
+                <img
+                  src={BWC_DASHBOARD_MARK_SRC}
+                  alt="Business Web Creations"
+                  className="h-10 w-10 object-contain"
+                />
+              </div>
+
               {tabs.map((tab) => {
                 const TabIcon = tab.icon;
                 const isActive = activeTab === tab.id;

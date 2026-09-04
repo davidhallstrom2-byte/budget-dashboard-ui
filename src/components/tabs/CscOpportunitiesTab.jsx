@@ -38,6 +38,7 @@ const OPPORTUNITIES_ARCHIVE_STORAGE_KEY = 'cscOpportunities.archived.v1';
 const VENUE_CONTACTS_STORAGE_KEY = 'cscVenueContacts.v1';
 const OPPORTUNITIES_SNAPSHOT_STORAGE_KEY = 'cscOpportunities.safetySnapshot.v1';
 const OPPORTUNITIES_DEDUPE_BACKUP_STORAGE_KEY = 'cscOpportunities.dedupeBackup.v1';
+const OPPORTUNITIES_EXCLUDED_BACKUP_STORAGE_KEY = 'cscOpportunities.excludedBackup.v1';
 const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
 const OPPORTUNITIES_UPDATE_EVENT = 'cscOpportunities:updated';
@@ -742,6 +743,19 @@ const getVenueDefinition = (value = '') => {
   return VENUE_DEFINITIONS.find((item) => item.venue === canonical) || null;
 };
 
+const isExcludedOpportunityEvent = (opportunity = {}) => {
+  const venue = canonicalVenueName(opportunity.venue);
+  const eventName = normalizeText(opportunity.eventName);
+
+  // Public venue tours are visitor attractions, not CSC staffing opportunities.
+  return venue === 'Rose Bowl' && /^(public tour|public tours)$/.test(eventName);
+};
+
+const removeExcludedOpportunityRecords = (items = []) =>
+  (Array.isArray(items) ? items : []).filter(
+    (item) => !isExcludedOpportunityEvent(item)
+  );
+
 const getCscGoogleClientId = () => {
   const envClientId =
     import.meta.env?.VITE_GOOGLE_CALENDAR_CLIENT_ID ||
@@ -1366,15 +1380,21 @@ const archiveExpiredOpportunities = (items = []) => {
 
 const loadOpportunities = () =>
   archiveExpiredOpportunities(
-    readArray(OPPORTUNITIES_STORAGE_KEY, []).map((item) => createBlankOpportunity(item))
+    removeExcludedOpportunityRecords(
+      readArray(OPPORTUNITIES_STORAGE_KEY, []).map((item) =>
+        createBlankOpportunity(item)
+      )
+    )
   );
 
 const loadArchivedOpportunities = () =>
-  readArray(OPPORTUNITIES_ARCHIVE_STORAGE_KEY, [])
-    .map((item) => createBlankOpportunity(item))
-    .sort((first, second) =>
-      String(second.archivedAt || '').localeCompare(String(first.archivedAt || ''))
-    );
+  removeExcludedOpportunityRecords(
+    readArray(OPPORTUNITIES_ARCHIVE_STORAGE_KEY, []).map((item) =>
+      createBlankOpportunity(item)
+    )
+  ).sort((first, second) =>
+    String(second.archivedAt || '').localeCompare(String(first.archivedAt || ''))
+  );
 
 const loadVenueContacts = () => {
   const stored = readArray(VENUE_CONTACTS_STORAGE_KEY, []);
@@ -2018,9 +2038,9 @@ const parseSofiEvents = (text = '', sourceUrl = SOFI_STADIUM_EVENTS_URL) => {
     );
   }
 
-  const byKey = new Map();
-  parsed.forEach((item) => byKey.set(opportunityKey(item), item));
-  return Array.from(byKey.values());
+  return dedupeScannedOpportunities(
+    parsed.filter((item) => !isExcludedOpportunityEvent(item))
+  );
 };
 
 
@@ -4220,6 +4240,44 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   }, []);
 
   useEffect(() => {
+    const activeExcluded = opportunities.filter(isExcludedOpportunityEvent);
+    const archivedExcluded = archivedOpportunities.filter(
+      isExcludedOpportunityEvent
+    );
+
+    if (!activeExcluded.length && !archivedExcluded.length) return;
+
+    try {
+      localStorage.setItem(
+        OPPORTUNITIES_EXCLUDED_BACKUP_STORAGE_KEY,
+        JSON.stringify({
+          createdAt: new Date().toISOString(),
+          reason: 'Before removing non-CSC opportunity records',
+          activeExcluded,
+          archivedExcluded,
+        })
+      );
+    } catch (error) {
+      console.error(
+        'Failed to save excluded CSC opportunity recovery backup:',
+        error
+      );
+    }
+
+    if (activeExcluded.length) {
+      setOpportunities((current) =>
+        current.filter((item) => !isExcludedOpportunityEvent(item))
+      );
+    }
+
+    if (archivedExcluded.length) {
+      setArchivedOpportunities((current) =>
+        current.filter((item) => !isExcludedOpportunityEvent(item))
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem(OPPORTUNITIES_STORAGE_KEY, JSON.stringify(opportunities));
     window.dispatchEvent(new CustomEvent(OPPORTUNITIES_UPDATE_EVENT, { detail: { opportunities } }));
     opportunitiesRef.current = opportunities;
@@ -4469,6 +4527,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const prepared = applyVenueDefaults(editingOpportunity, editingOpportunity.venue);
     if (!prepared.eventName || !prepared.venue || !prepared.eventDate) {
       flashMessage('Event name, venue, and event date are required.');
+      return;
+    }
+
+    if (isExcludedOpportunityEvent(prepared)) {
+      flashMessage('Public Tours are not CSC opportunities and will not be added.');
       return;
     }
 
@@ -4932,7 +4995,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       const payload = await response.json();
       const feedItems = (Array.isArray(payload?.events) ? payload.events : payload?.rows || [])
         .map((item) => normalizeEventWatchFeedItem(item))
-        .filter(isValidEventWatchFeedItem);
+        .filter(isValidEventWatchFeedItem)
+        .filter((item) => !isExcludedOpportunityEvent(item));
 
       if (!feedItems.length) {
         throw new Error('The Event Watch feed did not contain any valid events.');
@@ -5248,7 +5312,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
     const currentDate = todayIso();
     const currentOpportunities = withDefaults.filter(
-      (item) => !isExpiredOpportunity(item, currentDate)
+      (item) =>
+        !isExpiredOpportunity(item, currentDate) &&
+        !isExcludedOpportunityEvent(item)
     );
     const expiredCount = withDefaults.length - currentOpportunities.length;
 
@@ -5345,6 +5411,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const nextOpportunities = [...opportunities];
 
     scannedOpportunities.forEach((item) => {
+      if (isExcludedOpportunityEvent(item)) {
+        skipped += 1;
+        return;
+      }
+
       const archivedMatch = archivedOpportunities.some((candidate) =>
         areLikelyDuplicateOpportunities(candidate, item)
       );
@@ -5421,10 +5492,14 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     reader.onload = (loadEvent) => {
       try {
         const parsed = JSON.parse(String(loadEvent.target?.result || '{}'));
-        const incomingOpportunities = Array.isArray(parsed.opportunities) ? parsed.opportunities : [];
-        const incomingArchivedOpportunities = Array.isArray(parsed.archivedOpportunities)
-          ? parsed.archivedOpportunities
-          : [];
+        const incomingOpportunities = removeExcludedOpportunityRecords(
+          Array.isArray(parsed.opportunities) ? parsed.opportunities : []
+        );
+        const incomingArchivedOpportunities = removeExcludedOpportunityRecords(
+          Array.isArray(parsed.archivedOpportunities)
+            ? parsed.archivedOpportunities
+            : []
+        );
         const incomingContacts = Array.isArray(parsed.venueContacts) ? parsed.venueContacts : [];
         saveSnapshot('Before CSC opportunities JSON import');
         const activeById = new Map(opportunities.map((item) => [item.id, item]));
@@ -6650,6 +6725,24 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             transform: rotate(180deg);
           }
 
+          .csc-opportunities-header .csc-header-actions {
+            width: auto;
+            max-width: 100%;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+          }
+
+          .csc-opportunities-header .csc-add-opportunity-action {
+            border-color: #334155 !important;
+            background-color: #020617 !important;
+            color: #ffffff !important;
+          }
+
+          .csc-opportunities-header .csc-add-opportunity-action:hover {
+            background-color: #1e293b !important;
+            color: #ffffff !important;
+          }
+
           @media (prefers-reduced-motion: reduce) {
             .csc-opportunities-page *,
             .csc-opportunities-page *::before,
@@ -6888,17 +6981,17 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         <TabPageHeader
           icon={Sparkles}
           title="CSC Opportunities"
-          subtitle="Track venue events, editable notes, and links to actual CSC shifts."
+          subtitle="Events, editable notes, and links to actual CSC shifts."
           theme="violet"
-          className="budget-mobile-header"
+          className="budget-mobile-header csc-opportunities-header"
           actions={
-            <div className="csc-header-actions flex w-max flex-nowrap items-center gap-2">
+            <div className="csc-header-actions flex max-w-full flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={openAddOpportunity}
                 title="Add opportunity"
                 aria-label="Add opportunity"
-                className={`csc-header-action csc-add-opportunity-action ${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 shadow-sm hover:bg-violet-50`}
+                className={`csc-header-action csc-add-opportunity-action ${TAB_HEADER_ACTION_CLASS} border border-slate-700 bg-slate-950 text-white shadow-sm hover:bg-slate-800`}
               >
                 <Plus className="h-4 w-4" />
                 <span className="csc-header-action-label">Add Opportunity</span>
