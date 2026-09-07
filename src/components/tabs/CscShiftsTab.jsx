@@ -53,6 +53,7 @@ const CSC_DELETED_SEED_STORAGE_KEY = 'cscShifts.deletedSeedIds.v1';
 const CSC_SNAPSHOT_STORAGE_KEY = 'cscShifts.safetySnapshot.v1';
 const CSC_SEPT_1_2026_RECOVERY_STORAGE_KEY = 'cscShifts.recovery.2026-09-01-sofi-bts.v1';
 const CSC_CALENDAR_ADDED_STORAGE_KEY = 'cscShifts.googleCalendarAdded.v1';
+const CSC_WISH_ESS_LATEST_STORAGE_KEY = 'cscShifts.wishEssLatest.v1';
 const CSC_SHIFT_UPDATE_EVENT = 'cscShifts:updated';
 const CSC_OPEN_SHIFT_STORAGE_KEY = 'cscShifts.openLinkedShiftId.v1';
 const CSC_RETURN_CONTEXT_STORAGE_KEY = 'cscShifts.returnContext.v1';
@@ -76,7 +77,7 @@ const DOUBLE_TIME_RATE_MULTIPLIER = 2;
 const DEFAULT_VISIBLE_SHIFT_COUNT = 5;
 const CSC_GOOGLE_CALENDAR_LABEL_ID = 'c5c5c5c5-5c5c-4c5c-8c5c-c5c5c5c5c5c5';
 const CSC_GOOGLE_CALENDAR_LABEL_NAME = 'CSC Shifts';
-const CSC_GOOGLE_CALENDAR_BACKGROUND_COLOR = '#B8860B';
+const CSC_GOOGLE_CALENDAR_BACKGROUND_COLOR = '#8E24AA';
 
 const CSC_COMPANY = {
   name: 'Contemporary Services Corporation',
@@ -687,6 +688,10 @@ const normalizeShift = (shift = {}) => {
     googleCalendarEventId: shift.googleCalendarEventId || '',
     googleCalendarEventLink: shift.googleCalendarEventLink || '',
     googleCalendarAddedAt: shift.googleCalendarAddedAt || '',
+    scheduleSource: shift.scheduleSource || '',
+    wishEssStatus: shift.wishEssStatus || '',
+    wishEssVerifiedAt: shift.wishEssVerifiedAt || '',
+    wishEssSnapshotId: shift.wishEssSnapshotId || '',
     archivedAt: shift.archivedAt || '',
   };
 };
@@ -1522,6 +1527,116 @@ const mergeStaleScannerDuplicateRecords = (existingShift = {}, incomingShift = {
   });
 };
 
+const isStoredWishEssDuplicateShift = (firstShift = {}, secondShift = {}) => {
+  const firstIsWishEss =
+    firstShift.scheduleSource === 'wish-ess' ||
+    firstShift.wishEssStatus === 'confirmed';
+  const secondIsWishEss =
+    secondShift.scheduleSource === 'wish-ess' ||
+    secondShift.wishEssStatus === 'confirmed';
+
+  if (!firstIsWishEss && !secondIsWishEss) return false;
+  if (!storedScannerVenuesMatch(firstShift, secondShift)) return false;
+
+  /*
+   * Wish ESS is authoritative. If two active records have the same venue and
+   * exact complete work window, they are the same scheduled assignment even
+   * when older CSC email text used a different event/job label.
+   */
+  return storedScannerWindowsMatch(firstShift, secondShift);
+};
+
+const mergeStoredWishEssDuplicateRecords = (
+  existingShift = {},
+  incomingShift = {}
+) => {
+  const existingIsWishEss =
+    existingShift.scheduleSource === 'wish-ess' ||
+    existingShift.wishEssStatus === 'confirmed';
+  const incomingIsWishEss =
+    incomingShift.scheduleSource === 'wish-ess' ||
+    incomingShift.wishEssStatus === 'confirmed';
+
+  const wishEssShift = incomingIsWishEss
+    ? incomingShift
+    : existingIsWishEss
+      ? existingShift
+      : incomingShift;
+
+  const enrichedShift =
+    hasStoredScannerCalendarLinkage(existingShift) ||
+    existingShift.shiftName ||
+    existingShift.roleName ||
+    existingShift.uniform
+      ? existingShift
+      : incomingShift;
+
+  const merged = mergeDuplicateShiftRecords(
+    enrichedShift,
+    wishEssShift,
+    true
+  );
+
+  return normalizeShift({
+    ...merged,
+    id: enrichedShift.id || existingShift.id || incomingShift.id,
+    shiftName:
+      enrichedShift.shiftName ||
+      existingShift.shiftName ||
+      incomingShift.shiftName ||
+      '',
+    roleName:
+      enrichedShift.roleName ||
+      existingShift.roleName ||
+      incomingShift.roleName ||
+      '',
+    uniform:
+      enrichedShift.uniform ||
+      existingShift.uniform ||
+      incomingShift.uniform ||
+      '',
+    notes: cleanCscShiftNotes(
+      appendUniqueShiftTextBlock(existingShift.notes, incomingShift.notes),
+      enrichedShift.uniform ||
+        existingShift.uniform ||
+        incomingShift.uniform ||
+        ''
+    ),
+    googleCalendarEventId:
+      existingShift.googleCalendarEventId ||
+      incomingShift.googleCalendarEventId ||
+      '',
+    googleCalendarEventLink:
+      existingShift.googleCalendarEventLink ||
+      incomingShift.googleCalendarEventLink ||
+      '',
+    googleCalendarAddedAt:
+      existingShift.googleCalendarAddedAt ||
+      incomingShift.googleCalendarAddedAt ||
+      '',
+    createdFromOpportunityId:
+      existingShift.createdFromOpportunityId ||
+      incomingShift.createdFromOpportunityId ||
+      '',
+    linkedOpportunityId:
+      existingShift.linkedOpportunityId ||
+      incomingShift.linkedOpportunityId ||
+      '',
+    scheduleSource: 'wish-ess',
+    wishEssStatus: 'confirmed',
+    wishEssVerifiedAt:
+      wishEssShift.wishEssVerifiedAt ||
+      existingShift.wishEssVerifiedAt ||
+      incomingShift.wishEssVerifiedAt ||
+      new Date().toISOString(),
+    wishEssSnapshotId:
+      wishEssShift.wishEssSnapshotId ||
+      existingShift.wishEssSnapshotId ||
+      incomingShift.wishEssSnapshotId ||
+      '',
+  });
+};
+
 const dedupeShiftRecords = (records = []) => {
   const deduped = [];
   const removedIds = [];
@@ -1531,6 +1646,7 @@ const dedupeShiftRecords = (records = []) => {
     const shift = normalizeShift(rawShift);
     const duplicateIndex = deduped.findIndex(
       (existingShift) =>
+        isStoredWishEssDuplicateShift(existingShift, shift) ||
         areLikelyDuplicateShifts(existingShift, shift) ||
         areStaleScannerDuplicateShifts(existingShift, shift)
     );
@@ -1541,14 +1657,29 @@ const dedupeShiftRecords = (records = []) => {
     }
 
     const existingShift = deduped[duplicateIndex];
-    const staleScannerDuplicate = areStaleScannerDuplicateShifts(existingShift, shift);
-    deduped[duplicateIndex] = staleScannerDuplicate
-      ? mergeStaleScannerDuplicateRecords(existingShift, shift)
-      : mergeDuplicateShiftRecords(existingShift, shift, false);
+    const wishEssDuplicate = isStoredWishEssDuplicateShift(
+      existingShift,
+      shift
+    );
+    const staleScannerDuplicate =
+      areStaleScannerDuplicateShifts(existingShift, shift);
 
-    if (shift.id && shift.id !== existingShift.id) {
+    deduped[duplicateIndex] = wishEssDuplicate
+      ? mergeStoredWishEssDuplicateRecords(existingShift, shift)
+      : staleScannerDuplicate
+        ? mergeStaleScannerDuplicateRecords(existingShift, shift)
+        : mergeDuplicateShiftRecords(existingShift, shift, false);
+
+    const keptShiftId = deduped[duplicateIndex].id || existingShift.id;
+
+    if (shift.id && shift.id !== keptShiftId) {
       removedIds.push(shift.id);
-      replacementIds.set(shift.id, existingShift.id);
+      replacementIds.set(shift.id, keptShiftId);
+    }
+
+    if (existingShift.id && existingShift.id !== keptShiftId) {
+      removedIds.push(existingShift.id);
+      replacementIds.set(existingShift.id, keptShiftId);
     }
   });
 
@@ -1556,7 +1687,7 @@ const dedupeShiftRecords = (records = []) => {
     shifts: deduped.sort((first, second) =>
       `${first.startDate}T${first.startTime}`.localeCompare(`${second.startDate}T${second.startTime}`)
     ),
-    removedIds,
+    removedIds: Array.from(new Set(removedIds)),
     replacementIds,
   };
 };
@@ -2539,6 +2670,8 @@ const parseWishEssUpcomingSchedules = (text) => {
         notes: 'Imported from Wish ESS Upcoming Schedules.',
         parking: '',
         uniform: '',
+        scheduleSource: 'wish-ess',
+        wishEssStatus: 'confirmed',
       });
 
       return normalizeShift({
@@ -2549,6 +2682,15 @@ const parseWishEssUpcomingSchedules = (text) => {
     .filter(Boolean);
 };
 
+const tagSecondaryCscEmailShifts = (items = []) =>
+  items.map((shift) =>
+    normalizeShift({
+      ...shift,
+      scheduleSource: shift.scheduleSource || 'csc-email',
+      wishEssStatus: shift.wishEssStatus || 'email-only',
+    })
+  );
+
 const parseAcceptanceEmails = (text) => {
   const wishEssShifts = parseWishEssUpcomingSchedules(text);
 
@@ -2556,45 +2698,25 @@ const parseAcceptanceEmails = (text) => {
 
   const tableShifts = parseSchedulingDetailsTableEmail(text);
 
-  if (tableShifts.length) return tableShifts;
+  if (tableShifts.length) return tagSecondaryCscEmailShifts(tableShifts);
 
   const kiaForumShifts = parseKiaForumScheduleEmail(text);
 
-  if (kiaForumShifts.length) return kiaForumShifts;
+  if (kiaForumShifts.length) return tagSecondaryCscEmailShifts(kiaForumShifts);
 
   const singleShift = parseAcceptanceEmail(text);
 
-  return singleShift ? [singleShift] : [];
+  return singleShift ? tagSecondaryCscEmailShifts([singleShift]) : [];
 };
 
-
-const isAuthoritativeScheduleUpdateText = (text = '', parsedShifts = []) => {
-  const source = String(text || '')
-    .replace(/\u00a0/g, ' ')
-    .replace(/\r/g, '\n')
-    .trim();
-
-  if (!source) return false;
-
-  const hasScheduleTableHeader =
-    /Job Name/i.test(source) &&
-    /Venue/i.test(source) &&
-    /Shift Name/i.test(source) &&
-    /Start Time/i.test(source) &&
-    /End Time/i.test(source);
-  const hasScheduleUpdateTitle = /Your\s+Scheduling\s+Details/i.test(source);
-  const hasWishUpcomingSchedules = /Your\s+Upcoming\s+Schedules/i.test(source);
-  const looksLikeMultiRowScheduleTable =
-    parsedShifts.length > 1 &&
-    (/(?:^|\n)\s*\|/.test(source) || /\t/.test(source));
-
-  return (
-    hasScheduleTableHeader ||
-    hasScheduleUpdateTitle ||
-    hasWishUpcomingSchedules ||
-    looksLikeMultiRowScheduleTable
+const isWishEssScheduleUpdateText = (text = '') =>
+  /Your\s+Upcoming\s+Schedules/i.test(
+    String(text || '').replace(/\u00a0/g, ' ')
   );
-};
+
+const isAuthoritativeScheduleUpdateText = (text = '', parsedShifts = []) =>
+  Boolean(parsedShifts.length && isWishEssScheduleUpdateText(text));
+
 
 const normalizeForScanCompare = (value = '') =>
   String(value || '')
@@ -2725,8 +2847,83 @@ const getScannedShiftMatchScore = (existingShift = {}, scannedShift = {}) => {
   return score;
 };
 
+const isWishEssScannedShift = (shift = {}) =>
+  shift.scheduleSource === 'wish-ess';
+
+const wishEssVenueOrAddressMatches = (existingShift = {}, scannedShift = {}) =>
+  scanTextIncludes(existingShift.venue, scannedShift.venue) ||
+  scanTextIncludes(existingShift.address, scannedShift.address);
+
+const normalizeWishEssAssignmentIdentity = (shift = {}) =>
+  normalizeForScanCompare(
+    [shift.jobName, shift.event, shift.shiftName]
+      .filter(Boolean)
+      .join(' ')
+  )
+    .replace(/\br\s+and\s+b\b/g, ' rnb ')
+    .replace(/\brandb\b/g, ' rnb ')
+    .replace(/\br\s*&\s*b\b/g, ' rnb ')
+    .replace(/\bproduction\b/g, ' prod ')
+    .replace(/\bsecurity\b/g, ' sec ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const wishEssAssignmentIdentityMatches = (existingShift = {}, scannedShift = {}) => {
+  if (scannerAssignmentIdentityMatches(existingShift, scannedShift)) return true;
+
+  const existingIdentity = normalizeWishEssAssignmentIdentity(existingShift);
+  const scannedIdentity = normalizeWishEssAssignmentIdentity(scannedShift);
+
+  if (!existingIdentity || !scannedIdentity) return false;
+  if (
+    existingIdentity === scannedIdentity ||
+    existingIdentity.includes(scannedIdentity) ||
+    scannedIdentity.includes(existingIdentity)
+  ) {
+    return true;
+  }
+
+  const existingTokens = existingIdentity.split(' ').filter(Boolean);
+  const scannedTokens = scannedIdentity.split(' ').filter(Boolean);
+  const existingSet = new Set(existingTokens);
+  const sharedTokens = scannedTokens.filter((token) => existingSet.has(token));
+  const shorterLength = Math.min(existingTokens.length, scannedTokens.length);
+
+  return shorterLength >= 2 && sharedTokens.length / shorterLength >= 0.6;
+};
+
+const isWishEssAuthoritativeMatch = (existingShift = {}, scannedShift = {}) => {
+  if (!isWishEssScannedShift(scannedShift)) return false;
+  if (!hasCompleteShiftWindow(existingShift) || !hasCompleteShiftWindow(scannedShift)) return false;
+
+  const existingStatus = normalizeShiftStatus(existingShift.shiftStatus);
+  if (existingStatus === 'Done' || existingStatus === 'Cancelled') return false;
+  if (!wishEssVenueOrAddressMatches(existingShift, scannedShift)) return false;
+
+  /*
+   * Wish ESS is David's personal authoritative schedule. If Wish ESS and an
+   * existing active record have the exact same venue and complete work window,
+   * they represent one scheduled assignment even when email/event labels differ.
+   * This is the key safeguard against duplicate Wish ESS rows.
+   */
+  if (shiftWindowsMatch(existingShift, scannedShift)) return true;
+
+  /*
+   * Schedule changes can move the time. In that case require the same work date,
+   * venue, and a strong assignment identity before allowing Wish ESS to update
+   * the existing record.
+   */
+  return (
+    existingShift.startDate === scannedShift.startDate &&
+    wishEssAssignmentIdentityMatches(existingShift, scannedShift)
+  );
+};
+
 const isScannedAssignmentCandidate = (existingShift = {}, scannedShift = {}) => {
   if (!hasCompleteShiftWindow(existingShift) || !hasCompleteShiftWindow(scannedShift)) return false;
+
+  if (isWishEssAuthoritativeMatch(existingShift, scannedShift)) return true;
+
   if (existingShift.startDate !== scannedShift.startDate) return false;
 
   const existingStatus = normalizeShiftStatus(existingShift.shiftStatus);
@@ -2744,15 +2941,15 @@ const isScannedAssignmentCandidate = (existingShift = {}, scannedShift = {}) => 
   const assignmentConflicts = scannerAssignmentIdentityConflicts(existingShift, scannedShift);
 
   if (assignmentMatches) {
-    // Strong event identity plus the same date and venue is sufficient for a
-    // schedule update even when both start and finish moved outside the old window.
     return true;
   }
 
+  /*
+   * For ordinary CSC email scans, assignment conflicts still block a merge.
+   * Wish ESS has already been handled above with stricter authoritative rules.
+   */
   if (assignmentConflicts) return false;
 
-  // Without a useful event/job identity, keep the stricter time-window rules so
-  // unrelated shifts at the same venue cannot overwrite one another.
   if (exactWindow) return getScannedShiftMatchScore(existingShift, scannedShift) >= 4;
   if (windowsOverlap) return getScannedShiftMatchScore(existingShift, scannedShift) >= 6;
 
@@ -2760,6 +2957,7 @@ const isScannedAssignmentCandidate = (existingShift = {}, scannedShift = {}) => 
 };
 
 const isSafeScannedDuplicateForCleanup = (existingShift = {}, scannedShift = {}) => {
+  if (isWishEssAuthoritativeMatch(existingShift, scannedShift)) return true;
   if (!isScannedAssignmentCandidate(existingShift, scannedShift)) return false;
   if (shiftWindowsMatch(existingShift, scannedShift)) return true;
   if (scannerShiftWindowsOverlap(existingShift, scannedShift)) return true;
@@ -2770,9 +2968,6 @@ const isSafeScannedDuplicateForCleanup = (existingShift = {}, scannedShift = {})
 
   if (existingCalendared !== scannedCalendared) return true;
 
-  // When neither side is calendared, require exact event/job text for a
-  // non-overlapping cleanup. This keeps the broad matcher useful for schedule
-  // updates without deleting a distinct same-day assignment on weak evidence.
   return (
     scanTextEquals(existingShift.jobName, scannedShift.jobName) ||
     scanTextEquals(existingShift.event, scannedShift.event)
@@ -2790,10 +2985,38 @@ const isScannedScheduleChangeMatch = (existingShift = {}, scannedShift = {}) =>
 const findMatchingShiftIdForScannedEmail = (currentShifts = [], scannedShift = {}) => {
   if (!scannedShift?.startDate || !scannedShift?.startTime) return '';
 
-  // A scanner-generated ID is deterministic for the same source row. If it is
-  // already present, always reuse it. This makes identical rescans idempotent.
   const exactIdMatch = currentShifts.find((shift) => shift.id === scannedShift.id);
   if (exactIdMatch) return exactIdMatch.id;
+
+  /*
+   * Wish ESS gets its own first-pass matcher. Prefer an existing canonical
+   * record with the exact authoritative work window so importing Wish ESS
+   * enriches that record instead of creating a second row.
+   */
+  if (isWishEssScannedShift(scannedShift)) {
+    const wishCandidates = currentShifts
+      .filter((shift) => isWishEssAuthoritativeMatch(shift, scannedShift))
+      .map((shift, index) => ({
+        shift,
+        index,
+        exactWindow: shiftWindowsMatch(shift, scannedShift) ? 1 : 0,
+        calendared: isShiftCalendared(shift) ? 1 : 0,
+        linked:
+          shift.linkedOpportunityId || shift.createdFromOpportunityId ? 1 : 0,
+        identityMatch: wishEssAssignmentIdentityMatches(shift, scannedShift) ? 1 : 0,
+        score: getScannedShiftMatchScore(shift, scannedShift),
+      }))
+      .sort((first, second) =>
+        second.exactWindow - first.exactWindow ||
+        second.calendared - first.calendared ||
+        second.linked - first.linked ||
+        second.identityMatch - first.identityMatch ||
+        second.score - first.score ||
+        first.index - second.index
+      );
+
+    if (wishCandidates.length) return wishCandidates[0].shift.id;
+  }
 
   const candidates = currentShifts.filter((shift) =>
     isScannedAssignmentCandidate(shift, scannedShift)
@@ -2853,19 +3076,86 @@ const createUniqueScannedShiftId = (currentById, scannedShift = {}) => {
   return uniqueId;
 };
 
-const mergeScannedShiftWithExisting = (existingShift = {}, scannedShift = {}) =>
-  normalizeShift({
-    ...mergeDuplicateShiftRecords(existingShift, scannedShift, true),
-    // A new CSC schedule email is the source of truth for the current assignment.
-    // Preserve the old value only when the scan does not contain the field.
-    shiftName: scannedShift.shiftName || existingShift.shiftName || '',
-    roleName: scannedShift.roleName || existingShift.roleName || '',
+const mergeScannedShiftWithExisting = (existingShift = {}, scannedShift = {}) => {
+  const incomingIsWishEss = scannedShift.scheduleSource === 'wish-ess';
+  const existingIsWishEssConfirmed =
+    existingShift.scheduleSource === 'wish-ess' &&
+    existingShift.wishEssStatus === 'confirmed';
+
+  if (existingIsWishEssConfirmed && !incomingIsWishEss) {
+    return normalizeShift({
+      ...existingShift,
+      shiftName: scannedShift.shiftName || existingShift.shiftName || '',
+      roleName: scannedShift.roleName || existingShift.roleName || '',
+      notes: cleanCscShiftNotes(
+        appendUniqueShiftTextBlock(existingShift.notes, scannedShift.notes),
+        existingShift.uniform || scannedShift.uniform || ''
+      ),
+      parking: scannedShift.parking || existingShift.parking,
+      uniform:
+        scannedShift.uniform ||
+        existingShift.uniform ||
+        normalizeCscUniformType(scannedShift.notes || existingShift.notes || ''),
+      supervisor: scannedShift.supervisor || existingShift.supervisor,
+      scheduleSource: 'wish-ess',
+      wishEssStatus: 'confirmed',
+      wishEssVerifiedAt: existingShift.wishEssVerifiedAt || '',
+      wishEssSnapshotId: existingShift.wishEssSnapshotId || '',
+    });
+  }
+
+  const merged = mergeDuplicateShiftRecords(
+    existingShift,
+    scannedShift,
+    incomingIsWishEss
+  );
+
+  return normalizeShift({
+    ...merged,
+    /*
+     * Wish ESS does not provide shift name or role in Upcoming Schedules.
+     * Preserve those richer secondary-email fields when Wish ESS confirms the
+     * authoritative date/time/venue/event/job.
+     */
+    shiftName:
+      incomingIsWishEss
+        ? existingShift.shiftName || scannedShift.shiftName || ''
+        : scannedShift.shiftName || existingShift.shiftName || '',
+    roleName:
+      incomingIsWishEss
+        ? existingShift.roleName || scannedShift.roleName || ''
+        : scannedShift.roleName || existingShift.roleName || '',
+    uniform:
+      incomingIsWishEss
+        ? existingShift.uniform || scannedShift.uniform || ''
+        : scannedShift.uniform || existingShift.uniform || '',
+    scheduleSource:
+      incomingIsWishEss
+        ? 'wish-ess'
+        : existingShift.scheduleSource || scannedShift.scheduleSource || 'csc-email',
+    wishEssStatus:
+      incomingIsWishEss
+        ? 'confirmed'
+        : existingShift.wishEssStatus || scannedShift.wishEssStatus || 'email-only',
+    wishEssVerifiedAt:
+      incomingIsWishEss
+        ? scannedShift.wishEssVerifiedAt || new Date().toISOString()
+        : existingShift.wishEssVerifiedAt || '',
+    wishEssSnapshotId:
+      incomingIsWishEss
+        ? scannedShift.wishEssSnapshotId || existingShift.wishEssSnapshotId || ''
+        : existingShift.wishEssSnapshotId || '',
   });
+};
 
 const hasShiftCalendarTimeChanged = (existingShift = {}, updatedShift = {}) =>
   hasCompleteShiftWindow(existingShift) &&
   hasCompleteShiftWindow(updatedShift) &&
   getShiftWindowKey(existingShift) !== getShiftWindowKey(updatedShift);
+
+const hasShiftCalendarPayloadChanged = (existingShift = {}, updatedShift = {}) =>
+  JSON.stringify(buildShiftCalendarEventPayload(existingShift)) !==
+  JSON.stringify(buildShiftCalendarEventPayload(updatedShift));
 
 const parseCsv = (text) => {
   const lines = text
@@ -3821,15 +4111,22 @@ const getCscGoogleCalendarEventMatchScore = (
 ) => {
   const shiftStartKey = getCscShiftCalendarStartKey(shift);
   const eventStartKey = getCscGoogleCalendarEventStartKey(event);
+  const isLinkedEvent = Boolean(
+    linkedEventId && String(event?.id || '') === linkedEventId
+  );
 
-  if (!shiftStartKey || shiftStartKey !== eventStartKey) {
+  // A persisted Google event ID is stronger evidence than the old event time.
+  // If CSC changed the shift time, the linked Google event will still contain
+  // the previous time until we PATCH it. Do not reject that known event merely
+  // because its start time or venue is stale.
+  if (!isLinkedEvent && (!shiftStartKey || shiftStartKey !== eventStartKey)) {
     return Number.NEGATIVE_INFINITY;
   }
 
   const shiftVenue = normalizeCalendarVenueIdentity(shift.venue);
   const eventVenue = getCscGoogleCalendarEventVenueIdentity(event);
 
-  if (shiftVenue && eventVenue && shiftVenue !== eventVenue) {
+  if (!isLinkedEvent && shiftVenue && eventVenue && shiftVenue !== eventVenue) {
     return Number.NEGATIVE_INFINITY;
   }
 
@@ -3838,11 +4135,7 @@ const getCscGoogleCalendarEventMatchScore = (
   );
   const eventSummary = normalizeShiftIdentityText(event?.summary || '');
   const eventText = getCscGoogleCalendarEventSearchText(event);
-  let score = 100;
-
-  if (linkedEventId && String(event?.id || '') === linkedEventId) {
-    score += 1000;
-  }
+  let score = isLinkedEvent ? 1100 : 100;
 
   if (desiredSummary && desiredSummary === eventSummary) {
     score += 200;
@@ -3898,6 +4191,28 @@ const findBestCscGoogleCalendarEventForShift = (
         return firstCreated.localeCompare(secondCreated);
       })[0]?.event || null
   );
+};
+
+const GOOGLE_CALENDAR_WINDOW_NAME = 'budget-dashboard-google-calendar';
+
+const openCscGoogleCalendarEvent = (eventLink = '') => {
+  const url = String(eventLink || '').trim();
+  if (!url) return null;
+
+  // IMPORTANT: do not pass "noopener" here. Browsers can treat a named target
+  // with noopener like a fresh _blank context, which defeats tab reuse.
+  // Using a stable window name lets later CSC calendar clicks reuse the same
+  // Google Calendar tab that this dashboard previously opened.
+  const calendarWindow = window.open(url, GOOGLE_CALENDAR_WINDOW_NAME);
+
+  try {
+    if (calendarWindow) calendarWindow.opener = null;
+  } catch {
+    // Ignore cross-origin restrictions after Google Calendar navigation.
+  }
+
+  calendarWindow?.focus?.();
+  return calendarWindow;
 };
 
 const getCscGoogleCalendarDayBounds = (dateValue = '') => {
@@ -4437,7 +4752,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const remoteState = calendarVerificationByShiftId[shift.id];
 
     if (remoteState) return remoteState;
-    return isShiftCalendared(shift) ? 'checking' : 'missing';
+
+    // Calendar linkage is persisted on the shift and in the CSC calendar
+    // registry. Treat that persisted linkage as calendared immediately after
+    // a refresh. The background Google Calendar verification can still
+    // downgrade the record to missing if the remote event no longer exists.
+    return isShiftCalendared(shift) ? 'verified' : 'missing';
   };
 
   const isShiftCalendarVerified = (shift = {}) =>
@@ -4516,7 +4836,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       const next = { ...current };
 
       candidates.forEach((shift) => {
-        next[shift.id] = 'checking';
+        // Preserve persisted calendar linkage across refresh. A shift that
+        // already has an event id/link/registry entry should continue to show
+        // as calendared while the background verification runs.
+        next[shift.id] = isShiftCalendared(shift) ? 'verified' : 'checking';
       });
 
       return next;
@@ -4535,6 +4858,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           timeMin: rangeStart.toISOString(),
           timeMax: rangeEnd.toISOString(),
           query: 'CSC Shift',
+          interactive: false,
         });
         const cscRemoteEvents = remoteEvents.filter(
           isCscManagedGoogleCalendarEvent
@@ -4608,19 +4932,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               return normalizeShift({ ...shift, ...fields });
             }
 
-            if (
-              shift.googleCalendarEventId ||
-              shift.googleCalendarEventLink ||
-              shift.googleCalendarAddedAt
-            ) {
-              return normalizeShift({
-                ...shift,
-                googleCalendarEventId: '',
-                googleCalendarEventLink: '',
-                googleCalendarAddedAt: '',
-              });
-            }
-
+            // Do not erase persisted calendar linkage merely because the broad
+            // Calendar list scan did not rediscover the event. That was causing
+            // a refresh to turn a previously calendared CSC shift back into the
+            // "not calendared" state.
             return shift;
           })
         );
@@ -4629,7 +4944,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           const next = { ...current };
 
           candidates.forEach((shift) => {
-            next[shift.id] = matchedFieldsByShiftId.has(shift.id)
+            if (matchedFieldsByShiftId.has(shift.id)) {
+              next[shift.id] = 'verified';
+              return;
+            }
+
+            // Persisted CSC calendar linkage remains authoritative for the icon
+            // after refresh. Only shifts with no stored linkage are "missing".
+            next[shift.id] = isShiftCalendared(shift)
               ? 'verified'
               : 'missing';
           });
@@ -4645,7 +4967,11 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           const next = { ...current };
 
           candidates.forEach((shift) => {
-            next[shift.id] = 'unverified';
+            // A temporary Google API/authentication problem must not erase the
+            // app's persisted knowledge that this shift is already calendared.
+            next[shift.id] = isShiftCalendared(shift)
+              ? 'verified'
+              : 'unverified';
           });
 
           return next;
@@ -4671,6 +4997,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     }
 
     const registryEntry = findCalendarRegistryEntry(shift);
+    const linkedEventId = String(
+      shift.googleCalendarEventId || registryEntry?.googleCalendarEventId || ''
+    ).trim();
 
     try {
       calendarAddLockRef.current.add(shift.id);
@@ -4679,6 +5008,63 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         ...current,
         [shift.id]: 'checking',
       }));
+
+      // If this shift already has a Google Calendar event ID, update that exact
+      // event first. This is the safe path when CSC changes a shift time because
+      // the existing Google event still contains the old time and cannot be
+      // rediscovered by searching only the new time window.
+      if (linkedEventId) {
+        try {
+          await ensureCscGoogleCalendarLabel();
+          const updatedEvent = await updateGoogleCalendarEvent(
+            linkedEventId,
+            buildShiftCalendarEventPayload(shift)
+          );
+          const verifiedFields = {
+            googleCalendarEventId: updatedEvent?.id || linkedEventId,
+            googleCalendarEventLink:
+              updatedEvent?.htmlLink ||
+              shift.googleCalendarEventLink ||
+              registryEntry?.googleCalendarEventLink ||
+              '',
+            googleCalendarAddedAt:
+              shift.googleCalendarAddedAt ||
+              registryEntry?.googleCalendarAddedAt ||
+              updatedEvent?.created ||
+              new Date().toISOString(),
+          };
+
+          saveCalendarRegistryEntry(shift, verifiedFields);
+          updateShift(shift.id, verifiedFields);
+          setCalendarVerificationByShiftId((current) => ({
+            ...current,
+            [shift.id]: 'verified',
+          }));
+          setSaveMessage('CSC shift updated and verified in Google Calendar.');
+          window.setTimeout(() => setSaveMessage(''), 3500);
+
+          if (verifiedFields.googleCalendarEventLink) {
+            openCscGoogleCalendarEvent(
+              verifiedFields.googleCalendarEventLink
+            );
+          }
+
+          return;
+        } catch (error) {
+          const eventMissing = error?.status === 404 || error?.status === 410;
+
+          if (!eventMissing) throw error;
+
+          // The stored event ID points to an event that no longer exists.
+          // Clear only that stale linkage, then safely search/create below.
+          removeCalendarRegistryEntriesForShift(shift);
+          updateShift(shift.id, {
+            googleCalendarEventId: '',
+            googleCalendarEventLink: '',
+            googleCalendarAddedAt: '',
+          });
+        }
+      }
 
       const dayBounds = getCscGoogleCalendarDayBounds(shift.startDate);
       if (!dayBounds) {
@@ -4720,19 +5106,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         window.setTimeout(() => setSaveMessage(''), 3500);
 
         if (verifiedFields.googleCalendarEventLink) {
-          window.open(
-            verifiedFields.googleCalendarEventLink,
-            '_blank',
-            'noopener,noreferrer'
+          openCscGoogleCalendarEvent(
+            verifiedFields.googleCalendarEventLink
           );
         }
 
         return;
       }
 
-      // The app had local linkage, but Google Calendar does not contain the
-      // corresponding event. Remove the stale local marker before creating a
-      // replacement so the UI cannot continue to say "Added" incorrectly.
       removeCalendarRegistryEntriesForShift(shift);
       updateShift(shift.id, {
         googleCalendarEventId: '',
@@ -4766,7 +5147,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       console.error('Could not verify or add CSC Google Calendar event:', error);
       setCalendarVerificationByShiftId((current) => ({
         ...current,
-        [shift.id]: 'unverified',
+        [shift.id]: isShiftCalendared(shift) ? 'verified' : 'unverified',
       }));
       window.alert(
         error?.message ||
@@ -4932,8 +5313,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     );
   };
 
-  const handleAddShift = () => {
-    const preparedShift = normalizeShift({
+  const handleAddShift = async () => {
+    let preparedShift = normalizeShift({
       ...newShift,
       id: editingShiftId || newShift.id,
       finishDate: newShift.finishDate || newShift.startDate,
@@ -4943,6 +5324,79 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       setSaveMessage('Save skipped. Start date, start time, finish time, and venue are required.');
       setTimeout(() => setSaveMessage(''), 3000);
       return;
+    }
+
+    let calendarEditMessage = '';
+
+    if (editingShiftId && editingShiftLocation === 'active') {
+      const existingShift = shifts.find((shift) => shift.id === editingShiftId);
+      const registryEntry = existingShift
+        ? findCalendarRegistryEntry(existingShift)
+        : null;
+      const linkedEventId = String(
+        existingShift?.googleCalendarEventId ||
+          registryEntry?.googleCalendarEventId ||
+          ''
+      ).trim();
+      const shouldSyncCalendar = Boolean(
+        existingShift &&
+          linkedEventId &&
+          hasShiftCalendarPayloadChanged(existingShift, preparedShift)
+      );
+
+      if (shouldSyncCalendar) {
+        try {
+          calendarAddLockRef.current.add(editingShiftId);
+          setCalendarAddingShiftId(editingShiftId);
+          setCalendarVerificationByShiftId((current) => ({
+            ...current,
+            [editingShiftId]: 'checking',
+          }));
+
+          await ensureCscGoogleCalendarLabel();
+          const updatedEvent = await updateGoogleCalendarEvent(
+            linkedEventId,
+            buildShiftCalendarEventPayload(preparedShift)
+          );
+          const calendarFields = {
+            googleCalendarEventId: updatedEvent?.id || linkedEventId,
+            googleCalendarEventLink:
+              updatedEvent?.htmlLink ||
+              existingShift.googleCalendarEventLink ||
+              registryEntry?.googleCalendarEventLink ||
+              '',
+            googleCalendarAddedAt:
+              existingShift.googleCalendarAddedAt ||
+              registryEntry?.googleCalendarAddedAt ||
+              new Date().toISOString(),
+          };
+
+          preparedShift = normalizeShift({
+            ...preparedShift,
+            ...calendarFields,
+          });
+          saveCalendarRegistryEntry(preparedShift, calendarFields);
+          setCalendarVerificationByShiftId((current) => ({
+            ...current,
+            [editingShiftId]: 'verified',
+          }));
+          calendarEditMessage = ' Google Calendar updated.';
+        } catch (error) {
+          console.error('Failed to update Google Calendar after CSC shift edit:', error);
+          setCalendarVerificationByShiftId((current) => ({
+            ...current,
+            [editingShiftId]: isShiftCalendared(existingShift)
+              ? 'verified'
+              : 'unverified',
+          }));
+          calendarEditMessage = ` Google Calendar update failed: ${
+            error?.message || 'Unknown Google Calendar error'
+          }`;
+        } finally {
+          calendarAddLockRef.current.delete(editingShiftId);
+          setCalendarAddingShiftId('');
+        }
+      }
     }
 
     if (editingShiftId) {
@@ -4972,7 +5426,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           setShowActiveOnly(true);
           setVisibleShiftLimit(Number.MAX_SAFE_INTEGER);
           setIsShiftTableCollapsed(false);
-          setSaveMessage('CSC shift moved to Scheduled Shifts.');
+          setSaveMessage(`CSC shift moved to Scheduled Shifts.${calendarEditMessage}`);
         } else {
           setArchivedShifts((currentArchived) =>
             currentArchived
@@ -4986,7 +5440,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               )
               .sort((a, b) => String(b.archivedAt || '').localeCompare(String(a.archivedAt || '')))
           );
-          setSaveMessage('Past CSC shift updated.');
+          setSaveMessage(`Past CSC shift updated.${calendarEditMessage}`);
         }
       } else {
         setShifts((currentShifts) =>
@@ -4994,7 +5448,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             .map((shift) => (shift.id === editingShiftId ? preparedShift : shift))
             .sort((a, b) => `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`))
         );
-        setSaveMessage('CSC shift updated.');
+        setSaveMessage(`CSC shift updated.${calendarEditMessage}`);
       }
     } else {
       setShifts((currentShifts) =>
@@ -5007,7 +5461,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     setEditingShiftId(null);
     setEditingShiftLocation('active');
     setShowAddDrawer(false);
-    setTimeout(() => setSaveMessage(''), 2500);
+    setTimeout(() => setSaveMessage(''), calendarEditMessage.includes('failed') ? 6000 : 3000);
   };
 
   const handleOpenAddShift = () => {
@@ -7537,50 +7991,53 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     setScannedShifts(parsedShifts);
     setSaveMessage(
       missingFields.length
-        ? `Email scanned ${parsedShifts.length} shift${parsedShifts.length === 1 ? '' : 's'} with missing ${missingFields.join(', ')}. Review before adding or updating.`
+        ? `Schedule scanned ${parsedShifts.length} shift${parsedShifts.length === 1 ? '' : 's'} with missing ${missingFields.join(', ')}. Review before updating.`
         : authoritativeScheduleUpdate
-          ? `CSC schedule update scanned ${parsedShifts.length} shift${parsedShifts.length === 1 ? '' : 's'}. For every date in this update, only the shifts listed in the email will remain active.`
-          : `CSC email scanned ${parsedShifts.length} shift${parsedShifts.length === 1 ? '' : 's'}. Review the preview, then import.`
+          ? `Wish ESS scanned ${parsedShifts.length} authoritative upcoming shift${parsedShifts.length === 1 ? '' : 's'}. Wish ESS will override conflicting CSC email data without deleting unlisted shifts automatically.`
+          : `CSC email scanned ${parsedShifts.length} secondary shift record${parsedShifts.length === 1 ? '' : 's'}. Wish ESS-confirmed schedule fields will not be overwritten.`
     );
     setTimeout(() => setSaveMessage(''), 4000);
   };
 
   const handleAddScannedShift = async () => {
     if (!scannedShifts.length) {
-      setSaveMessage('Scan a CSC email before adding shifts.');
+      setSaveMessage('Scan a CSC schedule before updating shifts.');
       setTimeout(() => setSaveMessage(''), 3000);
       return;
     }
 
-    writeCscSafetySnapshot('Before CSC email scan import', shifts, archivedShifts);
+    const wishEssImport = isWishEssScheduleUpdateText(shiftEmailText);
+    const importedAt = new Date().toISOString();
+    const wishEssSnapshotId = wishEssImport ? `wish-ess-${Date.now()}` : '';
 
-    const normalizedScannedShifts = scannedShifts.map((shift) => normalizeShift(shift));
-    const authoritativeScheduleUpdate = isAuthoritativeScheduleUpdateText(
-      shiftEmailText,
-      normalizedScannedShifts
+    writeCscSafetySnapshot(
+      wishEssImport
+        ? 'Before authoritative Wish ESS schedule reconciliation'
+        : 'Before secondary CSC email scan import',
+      shifts,
+      archivedShifts
     );
-    const authoritativeDates = new Set(
-      authoritativeScheduleUpdate
-        ? normalizedScannedShifts.map((shift) => shift.startDate).filter(Boolean)
-        : []
+
+    const normalizedScannedShifts = scannedShifts.map((shift) =>
+      normalizeShift({
+        ...shift,
+        scheduleSource: wishEssImport ? 'wish-ess' : shift.scheduleSource || 'csc-email',
+        wishEssStatus: wishEssImport ? 'confirmed' : shift.wishEssStatus || 'email-only',
+        wishEssVerifiedAt: wishEssImport ? importedAt : shift.wishEssVerifiedAt || '',
+        wishEssSnapshotId: wishEssImport ? wishEssSnapshotId : shift.wishEssSnapshotId || '',
+      })
     );
+    const authoritativeScheduleUpdate = wishEssImport;
     const authoritativeKeepIds = new Set();
-    const authoritativeRemovedShiftIds = new Set();
-    const authoritativeRemovedSeedIds = new Set();
 
     let updatedCount = 0;
     let addedCount = 0;
     let collisionSafeCount = 0;
     let reconciledDuplicateCount = 0;
-    let removedInvalidSameDayCount = 0;
-    let removedInvalidSameDayCalendarCount = 0;
+    let wishEssNotListedCount = 0;
     let skippedArchivedCount = 0;
     let calendarLinkWithoutIdCount = 0;
-    let calendarDeleteMissingIdCount = 0;
     const calendarSyncRequests = new Map();
-    const calendarDeleteRequests = new Map();
-    const calendarRemovalDates = new Set();
-    const calendarBlockedReplacementDates = new Set();
     const scannerReplacementIds = new Map();
     const currentById = new Map(shifts.map((shift) => [shift.id, shift]));
 
@@ -7661,56 +8118,47 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       addedCount += 1;
     });
 
-    // A full CSC schedule update is authoritative for every date it contains.
-    // Any active Scheduled shift on one of those dates that is absent from the
-    // email is stale. Capture its calendar event before removing the app record.
-    if (authoritativeScheduleUpdate && authoritativeDates.size) {
-      Array.from(currentById.values()).forEach((candidateShift) => {
-        if (!authoritativeDates.has(candidateShift.startDate)) return;
-        if (authoritativeKeepIds.has(candidateShift.id)) return;
+    /*
+     * Wish ESS is authoritative for the upcoming schedule, but disappearance
+     * from the list is not destructive. Keep unlisted future shifts and flag
+     * them for review instead of deleting app records or calendar events.
+     */
+    if (wishEssImport) {
+      const currentDate = new Date().toISOString().slice(0, 10);
+
+      Array.from(currentById.entries()).forEach(([shiftId, candidateShift]) => {
+        if (authoritativeKeepIds.has(shiftId)) return;
+        if (!candidateShift.startDate || candidateShift.startDate < currentDate) return;
 
         const candidateStatus = normalizeShiftStatus(candidateShift.shiftStatus);
         if (candidateStatus === 'Done' || candidateStatus === 'Cancelled') return;
 
-        const calendarLinkage = getShiftCalendarLinkage(candidateShift);
-        const calendarEventId = String(
-          candidateShift.googleCalendarEventId ||
-            calendarLinkage?.googleCalendarEventId ||
-            ''
-        ).trim();
-        const hasCalendarLinkage = Boolean(
-          calendarEventId ||
-            candidateShift.googleCalendarEventLink ||
-            candidateShift.googleCalendarAddedAt ||
-            calendarLinkage?.googleCalendarEventLink ||
-            calendarLinkage?.googleCalendarAddedAt
+        currentById.set(
+          shiftId,
+          normalizeShift({
+            ...candidateShift,
+            wishEssStatus: 'not-listed',
+            wishEssVerifiedAt: importedAt,
+            wishEssSnapshotId,
+          })
         );
-
-        if (hasCalendarLinkage) {
-          removedInvalidSameDayCalendarCount += 1;
-          calendarRemovalDates.add(candidateShift.startDate);
-
-          if (calendarEventId) {
-            calendarDeleteRequests.set(calendarEventId, {
-              eventId: calendarEventId,
-              shiftId: candidateShift.id,
-              startDate: candidateShift.startDate,
-              shift: candidateShift,
-            });
-          } else {
-            calendarDeleteMissingIdCount += 1;
-            calendarBlockedReplacementDates.add(candidateShift.startDate);
-          }
-        }
-
-        if (seedShifts.some((seedShift) => seedShift.id === candidateShift.id)) {
-          authoritativeRemovedSeedIds.add(candidateShift.id);
-        }
-
-        currentById.delete(candidateShift.id);
-        authoritativeRemovedShiftIds.add(candidateShift.id);
-        removedInvalidSameDayCount += 1;
+        wishEssNotListedCount += 1;
       });
+
+      try {
+        localStorage.setItem(
+          CSC_WISH_ESS_LATEST_STORAGE_KEY,
+          JSON.stringify({
+            id: wishEssSnapshotId,
+            importedAt,
+            source: 'Wish ESS Upcoming Schedules',
+            rowCount: normalizedScannedShifts.length,
+            shifts: normalizedScannedShifts,
+          })
+        );
+      } catch (error) {
+        console.error('Failed to save latest Wish ESS schedule snapshot:', error);
+      }
     }
 
     const dedupeResult = dedupeShiftRecords(Array.from(currentById.values()));
@@ -7747,53 +8195,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       writeCalendarRegistry(calendarRegistry);
     }
 
-    let calendarDeletedCount = 0;
     let calendarCreatedCount = 0;
     let calendarUpdatedCount = 0;
-    const calendarDeleteFailures = [];
     const calendarCreateFailures = [];
     const calendarUpdateFailures = [];
-
-    // Delete stale calendar events first. Replacement events are only auto-created
-    // for a date when every stale event on that date was removed successfully.
-    for (const [eventId, request] of calendarDeleteRequests) {
-      try {
-        await deleteGoogleCalendarEvent(eventId);
-        calendarDeletedCount += 1;
-      } catch (error) {
-        console.error('Failed to delete the stale Google Calendar event:', error);
-        calendarBlockedReplacementDates.add(request.startDate);
-        calendarDeleteFailures.push(
-          `${request.startDate}: ${error?.message || 'Unknown Google Calendar error'}`
-        );
-      }
-    }
-
-    // The authoritative email has now decided which app shifts remain. Remove
-    // stale calendar registry entries so a deleted shift cannot make a new shift
-    // appear calendared through an old identity key.
-    if (authoritativeRemovedShiftIds.size) {
-      const calendarRegistry = readCalendarRegistry()
-        .map((entry) => {
-          const identityKeys = Array.isArray(entry.identityKeys) ? entry.identityKeys : [];
-          const cleanedIdentityKeys = identityKeys.filter((identityKey) => {
-            if (!identityKey.startsWith('shift:')) return true;
-            return !authoritativeRemovedShiftIds.has(identityKey.slice('shift:'.length));
-          });
-
-          if (authoritativeRemovedShiftIds.has(entry.shiftId)) return null;
-
-          return {
-            ...entry,
-            identityKeys: cleanedIdentityKeys,
-          };
-        })
-        .filter(Boolean);
-
-      writeCalendarRegistry(calendarRegistry);
-    }
-
-    authoritativeRemovedSeedIds.forEach((id) => saveDeletedSeedShiftId(id));
 
     setShifts(dedupeResult.shifts);
 
@@ -7810,19 +8215,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     setScannedShifts([]);
     setShowScanDrawer(false);
 
-    const replacementCalendarDates = new Set(
-      Array.from(calendarRemovalDates).filter(
-        (dateValue) => dateValue && !calendarBlockedReplacementDates.has(dateValue)
-      )
-    );
-    const calendarCreateRequests = dedupeResult.shifts.filter((shift) => {
-      if (!replacementCalendarDates.has(shift.startDate)) return false;
-      if (['Done', 'Cancelled'].includes(normalizeShiftStatus(shift.shiftStatus))) return false;
-      return !isShiftCalendared(shift);
-    });
+    const calendarCreateRequests = [];
 
-    const needsCalendarLabel =
-      calendarSyncRequests.size > 0 || calendarCreateRequests.length > 0;
+    const needsCalendarLabel = calendarSyncRequests.size > 0;
     let calendarLabelReady = true;
 
     if (needsCalendarLabel) {
@@ -7833,7 +8228,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         calendarLabelReady = false;
         const message = error?.message || 'Google Calendar background setup failed';
         if (calendarSyncRequests.size) calendarUpdateFailures.push(message);
-        if (calendarCreateRequests.length) calendarCreateFailures.push(message);
       }
     }
 
@@ -7910,17 +8304,14 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const details = [
       `Updated ${updatedCount}`,
       `added ${addedCount}`,
-      calendarDeletedCount
-        ? `deleted ${calendarDeletedCount} stale Google Calendar event${calendarDeletedCount === 1 ? '' : 's'}`
-        : '',
-      calendarCreatedCount
-        ? `added ${calendarCreatedCount} replacement Google Calendar event${calendarCreatedCount === 1 ? '' : 's'}`
-        : '',
       calendarUpdatedCount
         ? `updated ${calendarUpdatedCount} Google Calendar event${calendarUpdatedCount === 1 ? '' : 's'}`
         : '',
-      removedInvalidSameDayCount
-        ? `removed ${removedInvalidSameDayCount} stale same-day shift${removedInvalidSameDayCount === 1 ? '' : 's'} not listed in the schedule update`
+      wishEssImport
+        ? `Wish ESS confirmed ${authoritativeKeepIds.size} upcoming shift${authoritativeKeepIds.size === 1 ? '' : 's'}`
+        : '',
+      wishEssNotListedCount
+        ? `flagged ${wishEssNotListedCount} future shift${wishEssNotListedCount === 1 ? '' : 's'} as not listed in the latest Wish ESS schedule`
         : '',
       removedDuplicateCount
         ? `removed ${removedDuplicateCount} duplicate${removedDuplicateCount === 1 ? '' : 's'}`
@@ -7936,30 +8327,17 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         : '',
     ].filter(Boolean);
 
-    const blockedReplacementDateCount = calendarBlockedReplacementDates.size;
     const calendarWarnings = [
-      calendarDeleteMissingIdCount
-        ? `${calendarDeleteMissingIdCount} stale calendar-linked shift${calendarDeleteMissingIdCount === 1 ? '' : 's'} could not be deleted automatically because the Google event ID is missing`
-        : '',
-      calendarDeleteFailures.length
-        ? `${calendarDeleteFailures.length} stale Google Calendar deletion${calendarDeleteFailures.length === 1 ? '' : 's'} failed: ${calendarDeleteFailures.join('; ')}`
-        : '',
-      blockedReplacementDateCount
-        ? `replacement calendar events were not auto-added on ${blockedReplacementDateCount} date${blockedReplacementDateCount === 1 ? '' : 's'} where an old calendar event could not be confirmed deleted`
-        : '',
       calendarLinkWithoutIdCount
         ? `${calendarLinkWithoutIdCount} linked calendar event could not be updated because its Google event ID is missing`
         : '',
       calendarUpdateFailures.length
         ? `${calendarUpdateFailures.length} Google Calendar update${calendarUpdateFailures.length === 1 ? '' : 's'} failed: ${calendarUpdateFailures.join('; ')}`
         : '',
-      calendarCreateFailures.length
-        ? `${calendarCreateFailures.length} replacement Google Calendar creation${calendarCreateFailures.length === 1 ? '' : 's'} failed: ${calendarCreateFailures.join('; ')}`
-        : '',
     ].filter(Boolean);
 
     setSaveMessage(
-      `CSC email imported safely. ${details.join(', ')}.${
+      `${wishEssImport ? 'Wish ESS reconciled safely' : 'CSC email imported as secondary data'}. ${details.join(', ')}.${
         calendarWarnings.length ? ` Calendar warning: ${calendarWarnings.join('. ')}.` : ''
       }`
     );
@@ -8108,10 +8486,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             disabled={calendarBusy}
             className={`inline-flex h-[30px] w-full items-center justify-center rounded text-white disabled:cursor-wait sm:w-[34px] ${
               calendarAdded
-                ? 'bg-green-700 ring-2 ring-green-200 hover:bg-green-800'
+                ? 'bg-[#8E24AA] ring-2 ring-[#E1BEE7] hover:bg-[#7B1FA2]'
                 : calendarBusy
-                  ? 'bg-emerald-400'
-                  : 'bg-emerald-600 hover:bg-emerald-700'
+                  ? 'bg-[#CE93D8]'
+                  : 'bg-[#8E24AA] hover:bg-[#7B1FA2]'
             }`}
             aria-label={calendarAdded ? 'Open this shift in Google Calendar' : 'Add shift to Google Calendar'}
             title={calendarAdded ? 'Open in Google Calendar' : calendarBusy ? 'Adding to Google Calendar' : 'Add to Google Calendar'}
@@ -9336,7 +9714,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           }
         }
       `}</style>
-      <div className="flex min-w-0 flex-col gap-3 overflow-x-hidden bg-amber-50 py-3 sm:gap-4 sm:py-4">
+      <div className="flex min-w-0 flex-col gap-3 overflow-x-clip bg-amber-50 py-3 sm:gap-4 sm:py-4">
         <TabPageHeader
           icon={BriefcaseBusiness}
           title="CSC Shifts"
@@ -9361,12 +9739,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               <button
                 type="button"
                 onClick={() => setShowScanDrawer(true)}
-                title="Scan CSC shift email"
-                aria-label="Scan CSC shift email"
+                title="Scan CSC schedule"
+                aria-label="Scan CSC schedule"
                 className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !gap-2 !px-3 !text-sm border border-blue-800 bg-blue-700 text-white hover:bg-blue-600`}
               >
                 <StickyNote className="h-4 w-4" />
-                <span>Scan Email</span>
+                <span>Scan Schedule</span>
               </button>
 
               <button
@@ -9607,10 +9985,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   disabled={calendarAddingShiftId === nextActionShift.id}
                   className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-extrabold text-white disabled:cursor-wait ${
                     nextActionIsCalendared
-                      ? 'bg-green-700 ring-2 ring-green-200 hover:bg-green-800'
+                      ? 'bg-[#8E24AA] ring-2 ring-[#E1BEE7] hover:bg-[#7B1FA2]'
                       : calendarAddingShiftId === nextActionShift.id
-                        ? 'bg-emerald-400'
-                        : 'bg-emerald-700 hover:bg-emerald-800'
+                        ? 'bg-[#CE93D8]'
+                        : 'bg-[#8E24AA] hover:bg-[#7B1FA2]'
                   }`}
                   title={
                     nextActionIsCalendared
@@ -11094,7 +11472,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                     onClick={() => {
                                       const linkage = getShiftCalendarLinkage(shift);
                                       if (linkage?.googleCalendarEventLink) {
-                                        window.open(linkage.googleCalendarEventLink, '_blank', 'noopener,noreferrer');
+                                        openCscGoogleCalendarEvent(
+                                          linkage.googleCalendarEventLink
+                                        );
                                       } else {
                                         handleOpenAiShiftDetails(shift);
                                       }
@@ -11311,7 +11691,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                     type="button"
                     onClick={handleAddMissingAiOverviewCalendarEvents}
                     disabled={!aiOverview.calendarMissing.length}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-700 bg-emerald-700 px-3 text-xs font-extrabold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-300 sm:text-sm"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-[#8E24AA] bg-[#8E24AA] px-3 text-xs font-extrabold text-white hover:bg-[#7B1FA2] disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-300 sm:text-sm"
                   >
                     <CalendarPlus className="h-4 w-4" />
                     Add Missing Calendar Events
@@ -12545,15 +12925,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             <div className="flex h-[100dvh] min-w-0 w-full max-w-3xl flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl">
               <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-3 py-3 sm:px-5 sm:py-4">
                 <div className="min-w-0">
-                  <h2 id="csc-shift-scan-title" className="text-lg font-extrabold text-slate-950 sm:text-xl">Scan CSC Email</h2>
-                  <p className="text-sm text-slate-800">Paste a CSC email, Kia Forum schedule, or Wish ESS Upcoming Schedules list. Scan the list, then use Update Shift Schedule to save every detected shift.</p>
+                  <h2 id="csc-shift-scan-title" className="text-lg font-extrabold text-slate-950 sm:text-xl">Scan CSC Schedule</h2>
+                  <p className="text-sm text-slate-800">Paste Wish ESS Upcoming Schedules or a CSC scheduling email. Wish ESS is authoritative. CSC email is secondary and cannot overwrite Wish ESS-confirmed schedule fields.</p>
                 </div>
                 <CloseScreenButton onClick={() => setShowScanDrawer(false)} />
               </div>
 
               <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  CSC email text
+                  Schedule text
                   <textarea
                     value={shiftEmailText}
                     onChange={(event) => {

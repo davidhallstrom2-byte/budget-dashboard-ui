@@ -98,23 +98,7 @@ export const clearGoogleCalendarAccessToken = () => {
   });
 };
 
-export const getGoogleCalendarAccessToken = async () => {
-  const existingToken = readStoredAccessToken();
-
-  if (existingToken) {
-    return existingToken;
-  }
-
-  const clientId = getGoogleCalendarClientId();
-
-  if (!clientId) {
-    throw new Error(
-      "Missing Google Calendar Client ID. Add VITE_GOOGLE_CALENDAR_CLIENT_ID to .env.local or save googleCalendar.clientId in localStorage."
-    );
-  }
-
-  await loadGoogleIdentityScript();
-
+const requestGoogleCalendarAccessToken = (clientId) => {
   if (!window.google?.accounts?.oauth2) {
     throw new Error("Google Identity Services is not available.");
   }
@@ -162,11 +146,49 @@ export const getGoogleCalendarAccessToken = async () => {
       },
     });
 
+    // This call must happen during a user gesture whenever authorization is
+    // required. The GIS script is preloaded below so a calendar button click
+    // can open Google's consent window without first awaiting script loading.
     googleTokenClient.requestAccessToken({ prompt: "consent" });
   });
 
   return pendingTokenRequest;
 };
+
+export const getGoogleCalendarAccessToken = async ({ interactive = true } = {}) => {
+  const existingToken = readStoredAccessToken();
+
+  if (existingToken) {
+    return existingToken;
+  }
+
+  if (!interactive) {
+    return "";
+  }
+
+  const clientId = getGoogleCalendarClientId();
+
+  if (!clientId) {
+    throw new Error(
+      "Missing Google Calendar Client ID. Add VITE_GOOGLE_CALENDAR_CLIENT_ID to .env.local or save googleCalendar.clientId in localStorage."
+    );
+  }
+
+  // In the normal path the script has already been preloaded, so there is no
+  // await before requestAccessToken and the browser still recognizes the
+  // original calendar-button click as the popup-opening user gesture.
+  if (!window.google?.accounts?.oauth2) {
+    await loadGoogleIdentityScript();
+  }
+
+  return requestGoogleCalendarAccessToken(clientId);
+};
+
+if (typeof window !== "undefined" && typeof document !== "undefined") {
+  loadGoogleIdentityScript().catch((error) => {
+    console.warn("Google Identity Services preload failed:", error);
+  });
+}
 
 const readGoogleCalendarResponse = async (response, fallbackMessage) => {
   const data = await response.json().catch(() => ({}));
@@ -177,11 +199,13 @@ const readGoogleCalendarResponse = async (response, fallbackMessage) => {
     }
 
     const apiMessage = String(data?.error?.message || "").trim();
-    throw new Error(
+    const error = new Error(
       apiMessage
         ? `${fallbackMessage} ${apiMessage}`
         : `${fallbackMessage} Status ${response.status}.`
     );
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -289,9 +313,16 @@ export const listGoogleCalendarEvents = async ({
   timeMax = "",
   query = "",
   maxResults = 2500,
+  interactive = true,
 } = {}) => {
-  const token = await getGoogleCalendarAccessToken();
+  const token = await getGoogleCalendarAccessToken({ interactive });
   const events = [];
+
+  // Background verification must never trigger Google's consent popup. If no
+  // valid token is already stored, return no remote rows and let persisted CSC
+  // calendar linkage remain authoritative until the user clicks a calendar
+  // action and authorizes interactively.
+  if (!token) return events;
   let pageToken = "";
   const safeMaxResults = Math.min(
     Math.max(Number(maxResults) || 2500, 1),

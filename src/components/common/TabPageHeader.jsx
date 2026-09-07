@@ -68,9 +68,11 @@ export default function TabPageHeader({
   const selectedTheme = THEME_CLASSES[theme] || THEME_CLASSES.blue;
   const shellLayoutClass =
     'min-h-0 rounded-2xl px-3 py-3 sm:px-4 lg:h-[136px] lg:min-h-[136px] lg:px-5 lg:py-3';
-  const contentLayoutClass = 'gap-2 lg:grid lg:h-full lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-4';
+  const contentLayoutClass =
+    'grid w-full min-w-0 grid-cols-1 gap-3 xl:h-full xl:grid-cols-[minmax(18rem,1fr)_minmax(0,60vw)] xl:items-center xl:gap-4';
   const iconLayoutClass = 'h-10 w-10 rounded-xl';
-  const titleLayoutClass = 'text-xl leading-7 sm:text-2xl sm:leading-8';
+  const titleLayoutClass =
+    'min-w-0 break-normal whitespace-normal text-xl leading-7 sm:text-2xl sm:leading-8';
   const subtitleLayoutClass = compactMobile ? 'hidden sm:block' : '';
   const messageLayoutClass = compactMobile && !message ? 'hidden lg:block' : 'hidden lg:block';
 
@@ -79,22 +81,22 @@ export default function TabPageHeader({
       className={`tab-page-header box-border w-full min-w-0 flex-none overflow-hidden border-2 text-white shadow-lg ${shellLayoutClass} ${selectedTheme.shell} ${className}`}
       aria-labelledby={`tab-page-header-${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
     >
-      <div className={`flex flex-col ${contentLayoutClass}`}>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3">
+      <div className={contentLayoutClass}>
+        <div className="w-full min-w-0">
+          <div className="flex w-full min-w-0 items-center gap-3">
             <span className={`inline-flex shrink-0 items-center justify-center ring-1 ${iconLayoutClass} ${selectedTheme.icon}`}>
               {Icon ? <Icon className={compactMobile ? 'h-5 w-5 sm:h-6 sm:w-6' : 'h-6 w-6'} aria-hidden="true" /> : null}
             </span>
             <h1
               id={`tab-page-header-${String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
-              className={`min-w-0 font-black tracking-tight text-white ${titleLayoutClass}`}
+              className={`w-full min-w-0 flex-1 font-black tracking-tight text-white ${titleLayoutClass}`}
             >
               {title}
             </h1>
           </div>
 
           <p
-            className={`mt-2 min-h-10 max-h-10 max-w-full overflow-hidden whitespace-normal break-words text-sm font-semibold leading-5 ${subtitleLayoutClass} ${selectedTheme.subtitle}`}
+            className={`mt-2 w-full min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-5 lg:min-h-10 lg:max-h-10 lg:overflow-hidden ${subtitleLayoutClass} ${selectedTheme.subtitle}`}
             title={typeof subtitle === 'string' ? subtitle : undefined}
           >
             {subtitle}
@@ -110,7 +112,7 @@ export default function TabPageHeader({
         </div>
 
         {actions ? (
-          <div className="tab-page-header-actions min-h-11 w-full min-w-0 shrink-0 overflow-x-hidden overflow-y-hidden rounded-xl border border-white/30 bg-slate-950/20 p-1 shadow-sm lg:min-h-14 lg:w-auto lg:max-w-[62vw] lg:overflow-x-auto lg:overscroll-x-contain lg:p-1.5 [&>div]:!flex [&>div]:!w-full [&>div]:!min-w-0 [&>div]:!flex-wrap [&>div]:!items-center [&>div]:!gap-2 lg:[&>div]:!w-max lg:[&>div]:!min-w-max lg:[&>div]:!flex-nowrap lg:[&>div]:!gap-2 lg:[&_button]:!h-11 lg:[&_button]:!min-w-[112px] lg:[&_button]:!gap-2 lg:[&_button]:!rounded-xl lg:[&_button]:!px-3 lg:[&_button]:!text-sm lg:[&_button]:!font-extrabold lg:[&_button]:!leading-none lg:[&_svg]:!h-4 lg:[&_svg]:!w-4 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-white [&_button]:focus-visible:ring-offset-2 [&_button]:focus-visible:ring-offset-slate-800 [&_label]:focus-within:ring-2 [&_label]:focus-within:ring-white [&_label]:focus-within:ring-offset-2 [&_label]:focus-within:ring-offset-slate-800 [&_svg]:shrink-0">
+          <div className="tab-page-header-actions relative z-10 min-h-11 w-full min-w-0 overflow-hidden rounded-xl border border-white/30 bg-slate-950/20 p-1 shadow-sm xl:min-h-14 xl:w-auto xl:max-w-none xl:justify-self-end xl:p-1.5 [&>div]:!flex [&>div]:!w-auto [&>div]:!min-w-0 [&>div]:!flex-nowrap [&>div]:!items-center [&>div]:!gap-2 [&_button]:!shrink-0 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-white [&_button]:focus-visible:ring-offset-2 [&_button]:focus-visible:ring-offset-slate-800 [&_label]:!shrink-0 [&_label]:focus-within:ring-2 [&_label]:focus-within:ring-white [&_label]:focus-within:ring-offset-2 [&_label]:focus-within:ring-offset-slate-800 [&_svg]:shrink-0">
             {actions}
           </div>
         ) : (

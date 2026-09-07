@@ -646,7 +646,7 @@ const DashboardOverviewStrip = ({ state, onNavigateToTab }) => {
 
 const BudgetDashboard = () => {
   const [state, setState] = useState(null);
-  const [activeTab, setActiveTab] = useState('todo');
+  const [activeTab, setActiveTab] = useState('cscShifts');
   const [activeBudgetTab, setActiveBudgetTab] = useState('overview');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -992,22 +992,6 @@ const BudgetDashboard = () => {
   const tabs = useMemo(
     () => [
       {
-        id: 'todo',
-        label: 'To-Do',
-        icon: ListTodo,
-        bgColor: 'bg-lime-100',
-        activeClass: 'bg-gradient-to-r from-emerald-900 via-emerald-700 to-teal-700 text-white border-emerald-500 shadow-md shadow-emerald-300/40',
-        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
-      },
-      {
-        id: 'rides',
-        label: 'Rides',
-        icon: Car,
-        bgColor: 'bg-sky-50',
-        activeClass: 'bg-gradient-to-r from-sky-900 via-sky-700 to-cyan-700 text-white border-sky-500 shadow-md shadow-sky-300/40',
-        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
-      },
-      {
         id: 'cscShifts',
         label: 'CSC Shifts',
         icon: BriefcaseBusiness,
@@ -1029,6 +1013,22 @@ const BudgetDashboard = () => {
         icon: CircleDollarSign,
         bgColor: 'bg-slate-50',
         activeClass: 'bg-gradient-to-r from-teal-900 via-teal-700 to-emerald-700 text-white border-teal-500 shadow-md shadow-teal-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
+      },
+      {
+        id: 'todo',
+        label: 'To-Do',
+        icon: ListTodo,
+        bgColor: 'bg-lime-100',
+        activeClass: 'bg-gradient-to-r from-emerald-900 via-emerald-700 to-teal-700 text-white border-emerald-500 shadow-md shadow-emerald-300/40',
+        inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
+      },
+      {
+        id: 'rides',
+        label: 'Rides',
+        icon: Car,
+        bgColor: 'bg-sky-50',
+        activeClass: 'bg-gradient-to-r from-sky-900 via-sky-700 to-cyan-700 text-white border-sky-500 shadow-md shadow-sky-300/40',
         inactiveClass: 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200 hover:border-slate-300 hover:shadow-sm',
       },
       {
@@ -1708,8 +1708,36 @@ const BudgetDashboard = () => {
   if (isLoading) return <LoadingGate />;
 
   return (
-    <div className={`min-h-screen ${activeContentBackgroundClass}`}>
+    <div className={`budget-dashboard-app min-h-screen ${activeContentBackgroundClass}`}>
       <style>{`
+        /*
+         * Keep every full-screen dashboard overlay below the persistent
+         * cloud-sync + main navigation header stack. This applies globally
+         * to drawers, details screens, archives, scanners, print previews,
+         * data tools, and similar fixed inset overlays across all tabs.
+         *
+         * Exclusions:
+         * - pointer-events-none layers are status/toast shells.
+         * - z-0 is the mobile navigation click-away backdrop.
+         */
+        .budget-dashboard-app .fixed.inset-0:not(.pointer-events-none):not(.z-0) {
+          top: calc(
+            var(--budget-session-bar-height, 0px) +
+            var(--budget-toolbar-height, 0px)
+          ) !important;
+        }
+
+        /*
+         * Many existing drawers use 100dvh internally. Once the overlay starts
+         * below the sticky header, cap the immediate panel to the overlay's
+         * remaining viewport height so its header and bottom actions stay visible.
+         */
+        .budget-dashboard-app
+          .fixed.inset-0:not(.pointer-events-none):not(.z-0)
+          > :is(div, section, main, article) {
+          max-height: 100% !important;
+        }
+
         @media (max-width: 639px) {
           ${activeTab === 'todo' ? `
             html,

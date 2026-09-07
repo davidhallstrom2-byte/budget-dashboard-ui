@@ -1,88 +1,83 @@
 // src/components/common/StickyToolbar.jsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 
 /**
- * Sticky, translucent toolbar that pins to the viewport top.
- * Pass a Tailwind bg tint (e.g., "bg-blue-100") to match the active tab.
- * Centers content to the same width as PageContainer (max-w-6xl).
+ * Sticky dashboard toolbar.
+ *
+ * On production, MobileAccessGate publishes the live cloud-session bar height
+ * through --budget-session-bar-height. This toolbar uses that value as its
+ * sticky top offset so the cloud bar and dashboard navigation remain stacked
+ * together while scrolling.
+ *
+ * On local development there is no cloud-session bar, so the offset is 0.
  */
-export default function StickyToolbar({ children, bgTint = "", contentClassName = "" }) {
-  const hasCustomTint = Boolean(String(bgTint || "").trim());
+export default function StickyToolbar({
+  children,
+  bgTint = "",
+  contentClassName = "",
+}) {
   const toolbarRef = useRef(null);
-  const [desktopTopOffset, setDesktopTopOffset] = useState(0);
-  const [desktopToolbarHeight, setDesktopToolbarHeight] = useState(0);
+  const hasCustomTint = Boolean(String(bgTint || "").trim());
 
   useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") {
+      return undefined;
+    }
+
+    const root = document.documentElement;
     const toolbar = toolbarRef.current;
-    if (!toolbar || typeof window === "undefined") return undefined;
 
-    const dashboardRoot = toolbar.parentElement;
-    const sessionBar = dashboardRoot?.previousElementSibling;
-    const desktopQuery = window.matchMedia("(min-width: 1280px)");
+    const updateToolbarHeight = () => {
+      const height = toolbar
+        ? Math.ceil(toolbar.getBoundingClientRect().height)
+        : 0;
 
-    const updateDesktopTopOffset = () => {
-      if (!desktopQuery.matches || !(sessionBar instanceof HTMLElement)) {
-        setDesktopTopOffset(0);
-        setDesktopToolbarHeight(
-          desktopQuery.matches ? Math.ceil(toolbar.getBoundingClientRect().height) : 0
-        );
-        return;
-      }
-
-      const sessionBarStyles = window.getComputedStyle(sessionBar);
-      const isVisible =
-        sessionBarStyles.display !== "none" &&
-        sessionBarStyles.visibility !== "hidden";
-
-      setDesktopTopOffset(
-        isVisible ? Math.ceil(sessionBar.getBoundingClientRect().height) : 0
+      root.style.setProperty(
+        "--budget-toolbar-height",
+        `${Math.max(height, 0)}px`
       );
-      setDesktopToolbarHeight(Math.ceil(toolbar.getBoundingClientRect().height));
     };
 
-    updateDesktopTopOffset();
-    window.addEventListener("resize", updateDesktopTopOffset);
+    updateToolbarHeight();
+    window.addEventListener("resize", updateToolbarHeight);
 
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(updateDesktopTopOffset)
+        ? new ResizeObserver(updateToolbarHeight)
         : null;
 
-    resizeObserver?.observe(toolbar);
-    if (sessionBar instanceof HTMLElement) {
-      resizeObserver?.observe(sessionBar);
+    if (toolbar) {
+      resizeObserver?.observe(toolbar);
     }
 
     return () => {
-      window.removeEventListener("resize", updateDesktopTopOffset);
+      window.removeEventListener("resize", updateToolbarHeight);
       resizeObserver?.disconnect();
+      root.style.removeProperty("--budget-toolbar-height");
     };
   }, []);
 
   return (
-    <>
+    <div
+      ref={toolbarRef}
+      style={{ top: "var(--budget-session-bar-height, 0px)" }}
+      className={[
+        "sticky z-[90] w-full border-b backdrop-blur",
+        hasCustomTint
+          ? bgTint
+          : "bg-white/80 supports-[backdrop-filter]:bg-white/60",
+        hasCustomTint ? "border-slate-800 shadow-lg" : "shadow-sm",
+      ].join(" ")}
+      role="navigation"
+      aria-label="Budget Dashboard toolbar"
+    >
       <div
-        className="hidden xl:block"
-        style={{ height: `${desktopToolbarHeight}px` }}
-        aria-hidden="true"
-      />
-
-      <div
-        ref={toolbarRef}
-        style={{ top: `${desktopTopOffset}px` }}
-        className={[
-          "sticky z-30 w-full border-b backdrop-blur xl:fixed xl:inset-x-0 xl:z-30",
-          hasCustomTint ? bgTint : "bg-white/80 supports-[backdrop-filter]:bg-white/60",
-          hasCustomTint ? "border-slate-800 shadow-lg" : "shadow-sm",
-        ].join(" ")}
-        role="navigation"
-        aria-label="Budget Dashboard toolbar"
+        className={
+          contentClassName || "max-w-6xl mx-auto px-4 sm:px-6 lg:px-8"
+        }
       >
-        {/* Match PageContainer width (adjust if you changed PageContainer's max width) */}
-        <div className={contentClassName || "max-w-6xl mx-auto px-4 sm:px-6 lg:px-8"}>
-          {children}
-        </div>
+        {children}
       </div>
-    </>
+    </div>
   );
 }

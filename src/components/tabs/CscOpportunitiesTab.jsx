@@ -39,6 +39,7 @@ const VENUE_CONTACTS_STORAGE_KEY = 'cscVenueContacts.v1';
 const OPPORTUNITIES_SNAPSHOT_STORAGE_KEY = 'cscOpportunities.safetySnapshot.v1';
 const OPPORTUNITIES_DEDUPE_BACKUP_STORAGE_KEY = 'cscOpportunities.dedupeBackup.v1';
 const OPPORTUNITIES_EXCLUDED_BACKUP_STORAGE_KEY = 'cscOpportunities.excludedBackup.v1';
+const OPPORTUNITIES_DISMISSED_STORAGE_KEY = 'cscOpportunities.dismissed.v1';
 const CSC_STORAGE_KEY = 'cscShifts.v1';
 const CSC_ARCHIVE_STORAGE_KEY = 'cscShifts.archived.v1';
 const OPPORTUNITIES_UPDATE_EVENT = 'cscOpportunities:updated';
@@ -166,7 +167,7 @@ const VENUE_DEFINITIONS = [
       'shrine auditorium and expo hall los angeles',
     ],
     address: '665 W Jefferson Blvd, Los Angeles, CA 90007',
-    logoPath: '/budget-dashboard-fs/venue-logos/shrine-auditorium.png',
+    logoPath: '/budget-dashboard-fs/venue-logos/shrine-auditorium-logo.png',
     sourceUrl: SHRINE_EVENTS_URL,
     schedulerPhone: '310-320-7223',
   },
@@ -747,14 +748,77 @@ const isExcludedOpportunityEvent = (opportunity = {}) => {
   const venue = canonicalVenueName(opportunity.venue);
   const eventName = normalizeText(opportunity.eventName);
 
-  // Public venue tours are visitor attractions, not CSC staffing opportunities.
-  return venue === 'Rose Bowl' && /^(public tour|public tours)$/.test(eventName);
+  if (venue !== 'Rose Bowl') return false;
+
+  /*
+   * Exclude recurring public/visitor events that are not CSC staffing
+   * opportunities. These records are filtered from scanner imports, Event
+   * Watch sync, JSON imports, and existing active/archive data.
+   */
+  return (
+    /\bflea markets?\b/.test(eventName) ||
+    /^(?:tour|tours|public tours?|holiday tours?|stadium tours?|rose bowl tours?)$/.test(
+      eventName
+    )
+  );
 };
 
 const removeExcludedOpportunityRecords = (items = []) =>
   (Array.isArray(items) ? items : []).filter(
     (item) => !isExcludedOpportunityEvent(item)
   );
+
+const getOpportunityDismissalKeys = (opportunity = {}) => {
+  const keys = new Set();
+  const eventWatchIdentity = String(opportunity.eventWatchIdentity || opportunity.identity || '').trim();
+
+  if (eventWatchIdentity) {
+    keys.add(`event-watch:${eventWatchIdentity}`);
+  }
+
+  const venue = canonicalVenueName(opportunity.venue);
+  const eventName = normalizeText(opportunity.eventName);
+  const eventDate = String(opportunity.eventDate || '').trim();
+  const eventTime = String(opportunity.eventTime || '').trim();
+
+  if (venue && eventName && eventDate) {
+    keys.add(
+      `event:${normalizeText(venue)}|${eventDate}|${eventTime}|${eventName}`
+    );
+    // Also keep a time-agnostic key because venue feeds can adjust the public
+    // event time while still referring to the same event the user deleted.
+    keys.add(`event-date:${normalizeText(venue)}|${eventDate}|${eventName}`);
+  }
+
+  return Array.from(keys);
+};
+
+const readDismissedOpportunityKeys = () => {
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(OPPORTUNITIES_DISMISSED_STORAGE_KEY) || '[]'
+    );
+    return new Set(Array.isArray(parsed) ? parsed.filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const writeDismissedOpportunityKeys = (keys = new Set()) => {
+  localStorage.setItem(
+    OPPORTUNITIES_DISMISSED_STORAGE_KEY,
+    JSON.stringify(Array.from(keys))
+  );
+};
+
+const isDismissedOpportunity = (opportunity = {}, dismissedKeys = readDismissedOpportunityKeys()) =>
+  getOpportunityDismissalKeys(opportunity).some((key) => dismissedKeys.has(key));
+
+const rememberDismissedOpportunity = (opportunity = {}) => {
+  const dismissedKeys = readDismissedOpportunityKeys();
+  getOpportunityDismissalKeys(opportunity).forEach((key) => dismissedKeys.add(key));
+  writeDismissedOpportunityKeys(dismissedKeys);
+};
 
 const getCscGoogleClientId = () => {
   const envClientId =
@@ -1179,6 +1243,7 @@ const buildCscEmailCheckReport = (messages = [], allShifts = readCscShifts()) =>
   const activeLocalShifts = allShifts.filter((shift) => !isCancelledShiftStatus(shift.shiftStatus));
   const newShifts = [];
   const changedShifts = [];
+  const wishEssOverrides = [];
   const currentShifts = [];
 
   Array.from(newestRowsByIdentity.values())
@@ -1233,8 +1298,24 @@ const buildCscEmailCheckReport = (messages = [], allShifts = readCscShifts()) =>
         changes.push(`Role: ${localShift.roleName} -> ${emailShift.roleName}`);
       }
 
-      if (changes.length) changedShifts.push({ ...emailShift, localShiftId: localShift.id, changes });
-      else currentShifts.push({ ...emailShift, localShiftId: localShift.id });
+      if (changes.length) {
+        const wishEssConfirmed =
+          localShift.scheduleSource === 'wish-ess' &&
+          localShift.wishEssStatus === 'confirmed';
+
+        if (wishEssConfirmed) {
+          wishEssOverrides.push({
+            ...emailShift,
+            localShiftId: localShift.id,
+            changes,
+            authoritativeShift: localShift,
+          });
+        } else {
+          changedShifts.push({ ...emailShift, localShiftId: localShift.id, changes });
+        }
+      } else {
+        currentShifts.push({ ...emailShift, localShiftId: localShift.id });
+      }
     });
 
   return {
@@ -1244,6 +1325,7 @@ const buildCscEmailCheckReport = (messages = [], allShifts = readCscShifts()) =>
     scheduledRowsFound: newestRowsByIdentity.size,
     newShifts,
     changedShifts,
+    wishEssOverrides,
     currentShifts,
   };
 };
@@ -1259,6 +1341,7 @@ const loadCscEmailCheckReport = () => {
     const reportRows = [
       ...(Array.isArray(parsed.newShifts) ? parsed.newShifts : []),
       ...(Array.isArray(parsed.changedShifts) ? parsed.changedShifts : []),
+      ...(Array.isArray(parsed.wishEssOverrides) ? parsed.wishEssOverrides : []),
       ...(Array.isArray(parsed.currentShifts) ? parsed.currentShifts : []),
     ];
     const containsRawHtml = reportRows.some((shift) =>
@@ -1287,6 +1370,7 @@ const createBlankOpportunity = (defaults = {}) => ({
   callFrequency: defaults.callFrequency || 'Daily',
   lastCalledDate: defaults.lastCalledDate || '',
   nextCallDate: defaults.nextCallDate || '',
+  nextCallDateSetAt: defaults.nextCallDateSetAt || '',
   status: normalizeOpportunityStatus(defaults.status, defaults.linkedCscShiftId),
   linkedCscShiftId: defaults.linkedCscShiftId || '',
   linkedTodoTaskId: defaults.linkedTodoTaskId || '',
@@ -1378,14 +1462,17 @@ const archiveExpiredOpportunities = (items = []) => {
   return opportunities.filter((item) => !isExpiredOpportunity(item, currentDate));
 };
 
-const loadOpportunities = () =>
-  archiveExpiredOpportunities(
+const loadOpportunities = () => {
+  const dismissedKeys = readDismissedOpportunityKeys();
+
+  return archiveExpiredOpportunities(
     removeExcludedOpportunityRecords(
-      readArray(OPPORTUNITIES_STORAGE_KEY, []).map((item) =>
-        createBlankOpportunity(item)
-      )
+      readArray(OPPORTUNITIES_STORAGE_KEY, [])
+        .map((item) => createBlankOpportunity(item))
+        .filter((item) => !isDismissedOpportunity(item, dismissedKeys))
     )
   );
+};
 
 const loadArchivedOpportunities = () =>
   removeExcludedOpportunityRecords(
@@ -1486,7 +1573,41 @@ const opportunityEventTimesCompatible = (firstValue = '', secondValue = '') => {
   const first = String(firstValue || '').trim();
   const second = String(secondValue || '').trim();
 
-  return !first || !second || first === second;
+  if (!first || !second || first === second) return true;
+
+  const toMinutes = (value = '') => {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (
+      !Number.isFinite(hours) ||
+      !Number.isFinite(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      return null;
+    }
+
+    return hours * 60 + minutes;
+  };
+
+  const firstMinutes = toMinutes(first);
+  const secondMinutes = toMinutes(second);
+  if (firstMinutes === null || secondMinutes === null) return false;
+
+  /*
+   * A CSC shift call time and the public venue event time are often different.
+   * Treat same-event records within three hours as compatible so a 5:00 PM CSC
+   * shift and a 6:00 PM public event do not become duplicate opportunities.
+   * Larger gaps remain separate to protect legitimate same-day multiple shows.
+   */
+  const directDifference = Math.abs(firstMinutes - secondMinutes);
+  const wrappedDifference = 24 * 60 - directDifference;
+  return Math.min(directDifference, wrappedDifference) <= 180;
 };
 
 const areLikelyDuplicateOpportunities = (first = {}, second = {}) => {
@@ -1579,7 +1700,12 @@ const mergeDuplicateOpportunityRecords = (first = {}, second = {}) => {
     eventName,
     venue: canonicalVenueName(primary.venue || secondary.venue),
     eventDate: primary.eventDate || secondary.eventDate,
-    eventTime: primary.eventTime || secondary.eventTime,
+    eventTime:
+      secondary.eventUrl && secondary.eventTime
+        ? secondary.eventTime
+        : primary.eventUrl && primary.eventTime
+          ? primary.eventTime
+          : primary.eventTime || secondary.eventTime,
     expectedEndTime: primary.expectedEndTime || secondary.expectedEndTime,
     eventUrl: secondary.eventUrl || primary.eventUrl,
     sourceText:
@@ -1651,25 +1777,181 @@ const mergeDuplicateOpportunityRecords = (first = {}, second = {}) => {
   });
 };
 
-const dedupeOpportunityRecords = (items = []) => {
+const getExplicitOpportunityShiftForDedupe = (
+  opportunity = {},
+  allShifts = []
+) =>
+  allShifts.find(
+    (shift) =>
+      shift?.id &&
+      !isCancelledShiftStatus(shift.shiftStatus) &&
+      (
+        (opportunity.linkedCscShiftId &&
+          shift.id === opportunity.linkedCscShiftId) ||
+        (opportunity.id &&
+          (shift.createdFromOpportunityId === opportunity.id ||
+            shift.linkedOpportunityId === opportunity.id))
+      )
+  ) || null;
+
+const getOpportunityShiftForDedupe = (
+  opportunity = {},
+  allShifts = readCscShifts()
+) => {
+  const explicitShift = getExplicitOpportunityShiftForDedupe(
+    opportunity,
+    allShifts
+  );
+  if (explicitShift) return explicitShift;
+
+  const matchResult = getMatchingCscShiftResult(opportunity, allShifts);
+  return matchResult.match || null;
+};
+
+const getOpportunityShiftAuthorityScore = (
+  opportunity = {},
+  shift = {}
+) => {
+  let score = getOpportunityShiftEventScore(opportunity, shift) * 100;
+
+  if (opportunity.linkedCscShiftId === shift.id) score += 1000;
+  if (
+    opportunity.id &&
+    (shift.createdFromOpportunityId === opportunity.id ||
+      shift.linkedOpportunityId === opportunity.id)
+  ) {
+    score += 1000;
+  }
+  if (
+    opportunity.eventDate === shift.startDate &&
+    opportunity.eventTime &&
+    opportunity.eventTime === shift.startTime
+  ) {
+    score += 500;
+  }
+  if (
+    normalizeText(opportunity.eventName) ===
+    normalizeText(getShiftOpportunityEventName(shift))
+  ) {
+    score += 250;
+  }
+
+  return score;
+};
+
+const mergeDuplicateOpportunitiesUsingCscShift = (
+  first = {},
+  second = {},
+  shift = {}
+) => {
+  const firstScore = getOpportunityShiftAuthorityScore(first, shift);
+  const secondScore = getOpportunityShiftAuthorityScore(second, shift);
+  const primary = secondScore > firstScore ? second : first;
+  const secondary = primary === first ? second : first;
+  const merged = mergeDuplicateOpportunityRecords(primary, secondary);
+  const shiftEventName = getShiftOpportunityEventName(shift);
+
+  return createBlankOpportunity({
+    ...merged,
+    id: primary.id || merged.id,
+    eventName: shiftEventName || merged.eventName,
+    venue: canonicalVenueName(shift.venue || merged.venue),
+    eventDate: shift.startDate || merged.eventDate,
+    eventTime: shift.startTime || merged.eventTime,
+    expectedEndTime:
+      !shift.finishDate || shift.finishDate === shift.startDate
+        ? shift.finishTime || merged.expectedEndTime
+        : '',
+    linkedCscShiftId: shift.id || merged.linkedCscShiftId,
+    status: getOpportunityStatusFromLinkedShift(shift),
+    lastVerifiedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+};
+
+const getSharedCscShiftForOpportunityDuplicates = (
+  first = {},
+  second = {},
+  allShifts = readCscShifts()
+) => {
+  if (
+    !first ||
+    !second ||
+    !first.eventDate ||
+    first.eventDate !== second.eventDate ||
+    canonicalVenueName(first.venue) !== canonicalVenueName(second.venue)
+  ) {
+    return null;
+  }
+
+  const firstShift = getOpportunityShiftForDedupe(first, allShifts);
+  const secondShift = getOpportunityShiftForDedupe(second, allShifts);
+
+  if (!firstShift?.id || firstShift.id !== secondShift?.id) return null;
+
+  const firstEventScore = getOpportunityShiftEventScore(first, firstShift);
+  const secondEventScore = getOpportunityShiftEventScore(second, firstShift);
+
+  /*
+   * CSC Shifts is the authoritative tie-breaker only when both opportunity
+   * records independently look like the same scheduled job. This prevents a
+   * weak same-day venue match from collapsing two genuinely different events.
+   */
+  if (firstEventScore < 0.45 || secondEventScore < 0.45) return null;
+
+  return firstShift;
+};
+
+const dedupeOpportunityRecords = (
+  items = [],
+  allShifts = readCscShifts()
+) => {
   const deduped = [];
   let removedCount = 0;
 
   (Array.isArray(items) ? items : []).forEach((rawItem) => {
     const item = createBlankOpportunity(rawItem);
-    const duplicateIndex = deduped.findIndex((candidate) =>
-      areLikelyDuplicateOpportunities(candidate, item)
-    );
+    let duplicateIndex = -1;
+    let sharedShift = null;
+
+    for (let index = 0; index < deduped.length; index += 1) {
+      const candidate = deduped[index];
+
+      if (areLikelyDuplicateOpportunities(candidate, item)) {
+        duplicateIndex = index;
+        break;
+      }
+
+      const candidateSharedShift =
+        getSharedCscShiftForOpportunityDuplicates(
+          candidate,
+          item,
+          allShifts
+        );
+
+      if (candidateSharedShift) {
+        duplicateIndex = index;
+        sharedShift = candidateSharedShift;
+        break;
+      }
+    }
 
     if (duplicateIndex < 0) {
       deduped.push(item);
       return;
     }
 
-    deduped[duplicateIndex] = mergeDuplicateOpportunityRecords(
-      deduped[duplicateIndex],
-      item
-    );
+    deduped[duplicateIndex] = sharedShift
+      ? mergeDuplicateOpportunitiesUsingCscShift(
+          deduped[duplicateIndex],
+          item,
+          sharedShift
+        )
+      : mergeDuplicateOpportunityRecords(
+          deduped[duplicateIndex],
+          item
+        );
+
     removedCount += 1;
   });
 
@@ -1722,6 +2004,43 @@ const normalizeEventWatchFeedItem = (item = {}) => ({
   lastVerifiedAt: String(item.lastVerifiedAt || '').trim(),
   batchId: String(item.batchId || '').trim(),
 });
+
+const getEventWatchMeaningfulChanges = (existing = {}, nextCandidate = {}) => {
+  const changes = [];
+
+  const addChange = (label, beforeValue, afterValue, formatter = (value) => String(value || '')) => {
+    const before = String(beforeValue || '').trim();
+    const after = String(afterValue || '').trim();
+
+    if (before === after) return;
+
+    changes.push(
+      `${label}: ${before ? formatter(before) : 'Not set'} -> ${after ? formatter(after) : 'Not set'}`
+    );
+  };
+
+  addChange('Event', existing.eventName, nextCandidate.eventName);
+  addChange(
+    'Venue',
+    canonicalVenueName(existing.venue),
+    canonicalVenueName(nextCandidate.venue)
+  );
+  addChange('Date', existing.eventDate, nextCandidate.eventDate, formatDate);
+  addChange('Time', existing.eventTime, nextCandidate.eventTime, formatTime);
+  addChange('Event URL', existing.eventUrl, nextCandidate.eventUrl);
+  addChange(
+    'Status',
+    normalizeOpportunityStatus(existing.status, existing.linkedCscShiftId),
+    normalizeOpportunityStatus(nextCandidate.status, nextCandidate.linkedCscShiftId)
+  );
+
+  return changes;
+};
+
+const formatEventWatchChangeDetail = (opportunity = {}, changes = []) =>
+  `${canonicalVenueName(opportunity.venue) || 'Venue not entered'} - ${
+    opportunity.eventName || 'Event name not entered'
+  }: ${changes.join('; ')}`;
 
 const isValidEventWatchFeedItem = (item = {}) =>
   Boolean(item.eventName && item.venue);
@@ -3459,14 +3778,20 @@ const EVENT_IDENTITY_NOISE_TOKENS = new Set([
   'csc',
   'dns',
   'event',
+  'feat',
+  'featuring',
+  'guest',
+  'guests',
   'main',
   'preseason',
   'production',
   'sec',
   'security',
   'shift',
+  'special',
   'versus',
   'vs',
+  'with',
 ]);
 
 const normalizeEventIdentity = (value = '') =>
@@ -3541,19 +3866,82 @@ const getEventIdentityScore = (firstValue = '', secondValue = '') => {
   return matches / Math.max(firstTokens.length, secondTokens.length);
 };
 
+const getEventLeadIdentityTokens = (value = '') => {
+  const leadText = String(value || '')
+    .split(/\s+-\s+/)[0]
+    .trim();
+
+  return getEventIdentityTokens(leadText).filter(
+    (token) => !['the', 'a', 'an'].includes(token)
+  );
+};
+
+const getLeadIdentityScore = (firstValue = '', secondValue = '') => {
+  const firstTokens = getEventLeadIdentityTokens(firstValue);
+  const secondTokens = getEventLeadIdentityTokens(secondValue);
+
+  if (!firstTokens.length || !secondTokens.length) return 0;
+
+  const shorter =
+    firstTokens.length <= secondTokens.length ? firstTokens : secondTokens;
+  const longer =
+    firstTokens.length <= secondTokens.length ? secondTokens : firstTokens;
+
+  let matches = 0;
+  const usedIndexes = new Set();
+
+  shorter.forEach((token) => {
+    const matchIndex = longer.findIndex(
+      (candidate, index) =>
+        !usedIndexes.has(index) && eventIdentityTokensMatch(token, candidate)
+    );
+
+    if (matchIndex < 0) return;
+    usedIndexes.add(matchIndex);
+    matches += 1;
+  });
+
+  if (!matches) return 0;
+
+  /*
+   * CSC shift names frequently replace the public tour title with an internal
+   * assignment suffix such as "N1" or "N2". When the headliner identity
+   * matches, treat that as strong evidence on the same date and venue.
+   */
+  if (
+    matches === shorter.length &&
+    shorter.some((token) => token.length >= 4)
+  ) {
+    return 0.8;
+  }
+
+  return matches / Math.max(firstTokens.length, secondTokens.length);
+};
+
 const getOpportunityShiftEventScore = (opportunity = {}, shift = {}) =>
   Math.max(
     getEventIdentityScore(opportunity.eventName, shift.event),
     getEventIdentityScore(opportunity.eventName, shift.jobName),
-    getEventIdentityScore(opportunity.eventName, shift.shiftName)
+    getEventIdentityScore(opportunity.eventName, shift.shiftName),
+    getLeadIdentityScore(opportunity.eventName, shift.event),
+    getLeadIdentityScore(opportunity.eventName, shift.jobName),
+    getLeadIdentityScore(opportunity.eventName, shift.shiftName)
   );
 
 const readCscShifts = () => {
+  const preserveAuthorityMetadata = (shift = {}, recordSource = 'active') => ({
+    ...cleanCscDisplayShift({ ...shift, recordSource }),
+    scheduleSource: shift.scheduleSource || '',
+    wishEssStatus: shift.wishEssStatus || '',
+    wishEssVerifiedAt: shift.wishEssVerifiedAt || '',
+    wishEssSnapshotId: shift.wishEssSnapshotId || '',
+  });
+
   const active = readArray(CSC_STORAGE_KEY, []).map((shift) =>
-    cleanCscDisplayShift({ ...shift, recordSource: 'active' })
+    preserveAuthorityMetadata(shift, 'active')
   );
   const archived = readArray(CSC_ARCHIVE_STORAGE_KEY, []).map((shift) =>
-    cleanCscDisplayShift({ ...shift, recordSource: 'archived' })
+    preserveAuthorityMetadata(shift, 'archived')
   );
   return [...active, ...archived];
 };
@@ -3740,7 +4128,16 @@ const repairOpportunityShiftLinks = (
     changed = true;
   });
 
-  const sortedItems = repairedItems.sort((first, second) =>
+  const shiftAwareDedupe = dedupeOpportunityRecords(
+    repairedItems,
+    allShifts
+  );
+
+  if (shiftAwareDedupe.removedCount > 0) {
+    changed = true;
+  }
+
+  const sortedItems = shiftAwareDedupe.opportunities.sort((first, second) =>
     `${first.eventDate || ''} ${first.eventTime || ''} ${first.eventName || ''}`.localeCompare(
       `${second.eventDate || ''} ${second.eventTime || ''} ${second.eventName || ''}`
     )
@@ -3897,6 +4294,96 @@ const getStatusClass = (status) => {
   return 'bg-amber-100 text-amber-900 border-amber-200';
 };
 
+const getIsoDayDifference = (futureDate = '', currentDate = todayIso()) => {
+  const futureMatch = String(futureDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const currentMatch = String(currentDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!futureMatch || !currentMatch) return null;
+
+  const futureUtc = Date.UTC(Number(futureMatch[1]), Number(futureMatch[2]) - 1, Number(futureMatch[3]));
+  const currentUtc = Date.UTC(Number(currentMatch[1]), Number(currentMatch[2]) - 1, Number(currentMatch[3]));
+  return Math.round((futureUtc - currentUtc) / (24 * 60 * 60 * 1000));
+};
+
+const getOpportunityAttentionState = (
+  opportunity = {},
+  resolvedStatus = opportunity.status,
+  currentDate = todayIso()
+) => {
+  if (!isActiveOpportunityStatus(resolvedStatus) || resolvedStatus === 'Scheduled') return null;
+
+  const nextCallDate = String(opportunity.nextCallDate || '').trim();
+  const hasCallHistory = Boolean(opportunity.lastCalledDate || opportunity.callHistory?.length);
+  const hasExplicitFollowUp = Boolean(
+    opportunity.nextCallDateSetAt ||
+      opportunity.linkedTodoTaskId ||
+      hasCallHistory ||
+      resolvedStatus !== 'New'
+  );
+
+  /*
+   * Brand-new opportunities can carry stale legacy nextCallDate values from
+   * older data or merges. Do not label those OVERDUE unless the follow-up was
+   * explicitly set through the current workflow, linked to a To-Do, or backed
+   * by actual call history.
+   */
+  if (resolvedStatus === 'New' && !hasCallHistory && !hasExplicitFollowUp) {
+    return {
+      key: 'new-review',
+      label: 'NEW - REVIEW',
+      rank: 1,
+      className: 'border-violet-300 bg-violet-100 text-violet-900',
+    };
+  }
+
+  if (hasExplicitFollowUp && nextCallDate && nextCallDate < currentDate) {
+    return {
+      key: 'overdue',
+      label: 'OVERDUE',
+      rank: 1,
+      className: 'border-red-400 bg-red-700 text-white',
+    };
+  }
+
+  if (hasExplicitFollowUp && nextCallDate === currentDate) {
+    return {
+      key: 'call-today',
+      label: 'CALL TODAY',
+      rank: 2,
+      className: 'border-orange-400 bg-orange-600 text-white',
+    };
+  }
+
+  if (resolvedStatus === 'Shift Requested') {
+    return {
+      key: 'awaiting-shift',
+      label: 'AWAITING SHIFT',
+      rank: 3,
+      className: 'border-blue-300 bg-blue-100 text-blue-900',
+    };
+  }
+
+  if (resolvedStatus === 'New' && !hasCallHistory) {
+    return {
+      key: 'new-review',
+      label: 'NEW - REVIEW',
+      rank: 4,
+      className: 'border-violet-300 bg-violet-100 text-violet-900',
+    };
+  }
+
+  const daysUntilEvent = getIsoDayDifference(opportunity.eventDate, currentDate);
+  if (daysUntilEvent !== null && daysUntilEvent >= 0 && daysUntilEvent <= 7) {
+    return {
+      key: 'event-soon',
+      label: 'EVENT SOON',
+      rank: 5,
+      className: 'border-amber-300 bg-amber-100 text-amber-950',
+    };
+  }
+
+  return null;
+};
+
 const downloadJson = (data, filename) => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -3941,7 +4428,7 @@ const VenueLogo = ({ opportunity, sizeClass = 'h-12 w-12' }) => {
       src={logoSource}
       alt={`${venue} logo`}
       onError={() => setFailedSource(logoSource)}
-      className={`${sizeClass} shrink-0 rounded-xl border border-slate-200 bg-white object-contain p-1`}
+      className={`${sizeClass} shrink-0 rounded-xl object-cover`}
     />
   );
 };
@@ -4454,6 +4941,176 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     }, duration);
   };
 
+  const syncEmailCheckReportIntoOpportunities = (report) => {
+    const allShifts = readCscShifts();
+    const checkedAt = report?.checkedAt || new Date().toISOString();
+    const emailRows = [
+      ...(Array.isArray(report?.currentShifts)
+        ? report.currentShifts.map((row) => ({ ...row, emailCheckState: 'current' }))
+        : []),
+      ...(Array.isArray(report?.changedShifts)
+        ? report.changedShifts.map((row) => ({ ...row, emailCheckState: 'changed' }))
+        : []),
+      ...(Array.isArray(report?.wishEssOverrides)
+        ? report.wishEssOverrides.map((row) => ({ ...row, emailCheckState: 'wish-override' }))
+        : []),
+      ...(Array.isArray(report?.newShifts)
+        ? report.newShifts.map((row) => ({ ...row, emailCheckState: 'new' }))
+        : []),
+    ];
+
+    if (!emailRows.length) {
+      return { added: 0, updated: 0 };
+    }
+
+    writeOpportunitySnapshot(
+      'Before syncing CSC Gmail shift check into opportunities',
+      opportunitiesRef.current,
+      venueContactsRef.current,
+      archivedOpportunitiesRef.current
+    );
+
+    let added = 0;
+    let updated = 0;
+
+    setOpportunities((current) => {
+      const next = [...current];
+
+      emailRows.forEach((row) => {
+        const linkedShift =
+          (row.localShiftId
+            ? allShifts.find((shift) => shift.id === row.localShiftId)
+            : null) ||
+          findMatchingCscShift(
+            {
+              eventName: row.jobName || row.shiftName || '',
+              venue: row.venue || '',
+              eventDate: row.startDate || '',
+              eventTime: row.startTime || '',
+            },
+            allShifts
+          );
+
+        const linkedShiftEventName = linkedShift
+          ? getShiftOpportunityEventName(linkedShift)
+          : '';
+
+        const eventName = cleanCscDisplayTitle(
+          linkedShiftEventName ||
+            row.jobName ||
+            row.shiftName ||
+            'Scheduled CSC shift'
+        );
+
+        const eventDate = linkedShift?.startDate || row.startDate || '';
+        const eventTime = linkedShift?.startTime || row.startTime || '';
+        const expectedEndTime =
+          linkedShift &&
+          (!linkedShift.finishDate || linkedShift.finishDate === linkedShift.startDate)
+            ? linkedShift.finishTime || ''
+            : !row.finishDate || row.finishDate === row.startDate
+              ? row.finishTime || ''
+              : '';
+
+        const emailDetail =
+          row.emailCheckState === 'wish-override'
+            ? `CSC email differs, but Wish ESS remains authoritative: ${(row.changes || []).join('; ')}`
+            : row.emailCheckState === 'changed'
+              ? `CSC email reports changes that are not yet confirmed by Wish ESS: ${(row.changes || []).join('; ')}`
+              : row.emailCheckState === 'new'
+                ? 'CSC email shows this as scheduled, but it is not confirmed in CSC Shifts or Wish ESS.'
+                : 'CSC email scheduling details verified against CSC Shifts.';
+
+        const candidate = createBlankOpportunity({
+          eventName,
+          venue: canonicalVenueName(linkedShift?.venue || row.venue || ''),
+          eventDate,
+          eventTime,
+          expectedEndTime,
+          status: linkedShift
+            ? getOpportunityStatusFromLinkedShift(linkedShift)
+            : 'Monitoring',
+          linkedCscShiftId: linkedShift?.id || '',
+          sourceText: `CSC Gmail shift check: ${
+            row.emailSubject || 'Your Scheduling Details'
+          }`,
+          lastVerifiedAt: checkedAt,
+          activityLog: [
+            {
+              id: createId('csc-opportunity-activity'),
+              action:
+                row.emailCheckState === 'wish-override'
+                  ? 'Wish ESS retained over CSC email'
+                  : row.emailCheckState === 'changed'
+                    ? 'CSC email change detected'
+                    : row.emailCheckState === 'new'
+                      ? 'CSC email scheduled shift detected'
+                      : 'CSC email scheduling verified',
+              detail: emailDetail,
+              createdAt: checkedAt,
+            },
+          ],
+        });
+
+        const matchIndex = next.findIndex((existing) => {
+          if (
+            candidate.linkedCscShiftId &&
+            existing.linkedCscShiftId === candidate.linkedCscShiftId
+          ) {
+            return true;
+          }
+
+          if (areLikelyDuplicateOpportunities(existing, candidate)) {
+            return true;
+          }
+
+          return (
+            existing.eventDate === candidate.eventDate &&
+            canonicalVenueName(existing.venue) ===
+              canonicalVenueName(candidate.venue) &&
+            getEventIdentityScore(existing.eventName, candidate.eventName) >= 0.72
+          );
+        });
+
+        if (matchIndex >= 0) {
+          const existing = next[matchIndex];
+          const merged = mergeDuplicateOpportunityRecords(existing, candidate);
+
+          next[matchIndex] = createBlankOpportunity({
+            ...merged,
+            id: existing.id,
+            linkedCscShiftId:
+              candidate.linkedCscShiftId || existing.linkedCscShiftId,
+            status: candidate.linkedCscShiftId
+              ? candidate.status
+              : existing.status,
+            lastVerifiedAt: checkedAt,
+            activityLog: mergeOpportunityLogEntries(
+              existing.activityLog,
+              candidate.activityLog
+            ),
+            updatedAt: checkedAt,
+          });
+          updated += 1;
+          return;
+        }
+
+        next.push(candidate);
+        added += 1;
+      });
+
+      const deduped = dedupeOpportunityRecords(next, allShifts).opportunities;
+
+      return archiveExpiredOpportunities(deduped).sort((first, second) =>
+        `${first.eventDate || '9999-99-99'} ${first.eventTime || '99:99'}`.localeCompare(
+          `${second.eventDate || '9999-99-99'} ${second.eventTime || '99:99'}`
+        )
+      );
+    });
+
+    return { added, updated };
+  };
+
   const handleCheckCscEmail = async () => {
     setShowEmailCheckDrawer(true);
     setEmailCheckBusy(true);
@@ -4464,10 +5121,15 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       const report = buildCscEmailCheckReport(messages, readCscShifts());
       setEmailCheckReport(report);
       localStorage.setItem(CSC_EMAIL_CHECK_REPORT_STORAGE_KEY, JSON.stringify(report));
+
+      const opportunitySync = syncEmailCheckReportIntoOpportunities(report);
+
+      const wishOverrideCount = report.wishEssOverrides?.length || 0;
+
       flashMessage(
-        report.newShifts.length || report.changedShifts.length
-          ? `CSC email check found ${report.newShifts.length} scheduled shift${report.newShifts.length === 1 ? '' : 's'} missing from CSC Shifts and ${report.changedShifts.length} changed scheduled shift${report.changedShifts.length === 1 ? '' : 's'}.`
-          : 'CSC email check found no scheduled shifts missing from CSC Shifts and no changed upcoming scheduled shifts.'
+        report.newShifts.length || report.changedShifts.length || wishOverrideCount
+          ? `CSC email check updated CSC Opportunities: ${report.newShifts.length} email-only, ${report.changedShifts.length} unconfirmed change${report.changedShifts.length === 1 ? '' : 's'}, ${wishOverrideCount} difference${wishOverrideCount === 1 ? '' : 's'} overridden by Wish ESS.`
+          : `CSC email check verified CSC Opportunities against ${report.currentShifts.length} current scheduled shift${report.currentShifts.length === 1 ? '' : 's'}.`
       );
     } catch (error) {
       console.error('CSC Gmail shift check failed:', error);
@@ -4531,7 +5193,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     }
 
     if (isExcludedOpportunityEvent(prepared)) {
-      flashMessage('Public Tours are not CSC opportunities and will not be added.');
+      flashMessage('This Rose Bowl public event is not a CSC opportunity and will not be added.');
       return;
     }
 
@@ -4552,8 +5214,15 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const handleDeleteOpportunity = (opportunity) => {
     if (!window.confirm(`Permanently delete ${opportunity.eventName}?`)) return;
     saveSnapshot('Before CSC opportunity delete');
+
+    try {
+      rememberDismissedOpportunity(opportunity);
+    } catch (error) {
+      console.error('Failed to remember deleted CSC opportunity:', error);
+    }
+
     setOpportunities((current) => current.filter((item) => item.id !== opportunity.id));
-    flashMessage('CSC opportunity deleted.');
+    flashMessage('CSC opportunity deleted and blocked from automatic re-import.');
   };
 
   const handleArchiveOpportunity = (opportunity, reason = 'Archived manually') => {
@@ -4630,10 +5299,12 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   };
 
   const handleUpdateNextCallDate = (opportunity, nextCallDate) => {
+    const updatedAt = new Date().toISOString();
     saveSnapshot('Before CSC opportunity follow-up date update');
     updateOpportunity(opportunity.id, {
       nextCallDate,
-      updatedAt: new Date().toISOString(),
+      nextCallDateSetAt: nextCallDate ? updatedAt : '',
+      updatedAt,
     });
 
     if (!opportunity.linkedTodoTaskId) return;
@@ -4988,11 +5659,39 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
+
+      const responseText = await response.text();
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+
       if (!response.ok) {
         throw new Error(`Event Watch feed returned HTTP ${response.status}.`);
       }
 
-      const payload = await response.json();
+      const looksLikeHtml =
+        /<!doctype\s+html/i.test(responseText) ||
+        /<html\b/i.test(responseText) ||
+        contentType.includes('text/html');
+
+      if (looksLikeHtml) {
+        throw new Error(
+          'Event Watch feed is unavailable on this server. The feed URL returned an HTML page instead of JSON.'
+        );
+      }
+
+      let payload = null;
+
+      try {
+        payload = JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          'Event Watch feed returned an invalid response instead of valid JSON.'
+        );
+      }
+
+      if (!payload || typeof payload !== 'object') {
+        throw new Error('Event Watch feed returned an empty or invalid JSON response.');
+      }
+
       const feedItems = (Array.isArray(payload?.events) ? payload.events : payload?.rows || [])
         .map((item) => normalizeEventWatchFeedItem(item))
         .filter(isValidEventWatchFeedItem)
@@ -5013,7 +5712,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       let added = 0;
       let updated = 0;
       let cancelled = 0;
+      let verified = 0;
       let skipped = 0;
+      const updateDetails = [];
 
       const prepareFeedOpportunity = (feedItem, defaults = {}) => {
         const definition = getVenueDefinition(feedItem.venue);
@@ -5053,7 +5754,14 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         });
       };
 
+      const dismissedOpportunityKeys = readDismissedOpportunityKeys();
+
       feedItems.forEach((feedItem) => {
+        if (isDismissedOpportunity(feedItem, dismissedOpportunityKeys)) {
+          skipped += 1;
+          return;
+        }
+
         const archivedIndex = getEventWatchMatchIndex(currentArchived, feedItem);
         if (archivedIndex >= 0) {
           skipped += 1;
@@ -5140,8 +5848,21 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           if (JSON.stringify(nextCandidate) === JSON.stringify(existing)) {
             skipped += 1;
           } else {
+            const meaningfulChanges = getEventWatchMeaningfulChanges(
+              existing,
+              nextCandidate
+            );
+
             nextOpportunities[matchIndex] = nextCandidate;
-            updated += 1;
+
+            if (meaningfulChanges.length) {
+              updated += 1;
+              updateDetails.push(
+                formatEventWatchChangeDetail(nextCandidate, meaningfulChanges)
+              );
+            } else {
+              verified += 1;
+            }
           }
           return;
         }
@@ -5228,7 +5949,8 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             })
           ),
         scanStatus: [
-          `Automatic sync completed: ${added} added, ${updated} updated, ${cancelled} cancelled, ${skipped} skipped.`,
+          `Automatic sync completed: ${added} added, ${updated} updated, ${cancelled} cancelled, ${verified} verified, ${skipped} skipped.`,
+          ...updateDetails.map((detail) => `Updated: ${detail}`),
         ],
       });
 
@@ -5244,17 +5966,23 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         added,
         updated,
         cancelled,
+        verified,
         skipped,
+        updateDetails,
         error: '',
       };
       setEventWatchSyncState(completedState);
 
-      if (!silent && changedCount) {
+      if (!silent && (added > 0 || updated > 0 || cancelled > 0)) {
+        const updateSuffix =
+          updated > 0 && updateDetails.length
+            ? ` ${updateDetails.join(' | ')}`
+            : '';
+
         flashMessage(
-          `Event Watch synchronized automatically: ${added} added, ${updated} updated, ${cancelled} cancelled.`
+          `Event Watch synchronized automatically: ${added} added, ${updated} updated, ${cancelled} cancelled.${updateSuffix}`,
+          updated > 0 ? 9000 : 6000
         );
-      } else if (!silent) {
-        flashMessage('Event Watch is current. No opportunity changes were needed.');
       }
     } catch (error) {
       console.error('Failed to synchronize the CSC Event Watch feed:', error);
@@ -5264,7 +5992,13 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         error: error?.message || 'Event Watch synchronization failed.',
       };
       setEventWatchSyncState((current) => ({ ...current, ...failedState }));
-      if (!silent) flashMessage(failedState.error);
+      if (!silent) {
+        flashMessage(
+          failedState.error.startsWith('Event Watch feed')
+            ? failedState.error
+            : `Event Watch synchronization failed: ${failedState.error}`
+        );
+      }
     } finally {
       eventWatchSyncInProgressRef.current = false;
     }
@@ -5410,8 +6144,13 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     let skipped = 0;
     const nextOpportunities = [...opportunities];
 
+    const dismissedOpportunityKeys = readDismissedOpportunityKeys();
+
     scannedOpportunities.forEach((item) => {
-      if (isExcludedOpportunityEvent(item)) {
+      if (
+        isExcludedOpportunityEvent(item) ||
+        isDismissedOpportunity(item, dismissedOpportunityKeys)
+      ) {
         skipped += 1;
         return;
       }
@@ -5492,8 +6231,11 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     reader.onload = (loadEvent) => {
       try {
         const parsed = JSON.parse(String(loadEvent.target?.result || '{}'));
+        const dismissedOpportunityKeys = readDismissedOpportunityKeys();
         const incomingOpportunities = removeExcludedOpportunityRecords(
           Array.isArray(parsed.opportunities) ? parsed.opportunities : []
+        ).filter(
+          (item) => !isDismissedOpportunity(item, dismissedOpportunityKeys)
         );
         const incomingArchivedOpportunities = removeExcludedOpportunityRecords(
           Array.isArray(parsed.archivedOpportunities)
@@ -5604,6 +6346,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
   const matchesSummaryFilter = (opportunity, resolvedStatus) => {
     if (summaryFilter === 'active') return isActiveOpportunityStatus(resolvedStatus);
+    if (summaryFilter === 'attention') {
+      return Boolean(getOpportunityAttentionState(opportunity, resolvedStatus));
+    }
     if (summaryFilter === 'notes') {
       return isActiveOpportunityStatus(resolvedStatus) && Boolean(String(opportunity.notes || '').trim());
     }
@@ -5742,11 +6487,30 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   }, [opportunitiesMatchingNonMonthFilters]);
 
   const filteredOpportunities = useMemo(() => {
-    return opportunitiesMatchingNonMonthFilters.filter((opportunity) => {
+    const filtered = opportunitiesMatchingNonMonthFilters.filter((opportunity) => {
       if (monthFilter === 'All') return true;
       return getOpportunityMonthKey(opportunity.eventDate) === monthFilter;
     });
-  }, [monthFilter, opportunitiesMatchingNonMonthFilters]);
+
+    if (summaryFilter !== 'attention') return filtered;
+
+    return [...filtered].sort((first, second) => {
+      const firstStatus = getResolvedOpportunityStatus(first, allCscShiftsForStatus);
+      const secondStatus = getResolvedOpportunityStatus(second, allCscShiftsForStatus);
+      const firstAttention = getOpportunityAttentionState(first, firstStatus);
+      const secondAttention = getOpportunityAttentionState(second, secondStatus);
+      const rankDifference = (firstAttention?.rank || 99) - (secondAttention?.rank || 99);
+      if (rankDifference) return rankDifference;
+
+      const firstFollowUp = first.nextCallDate || '9999-99-99';
+      const secondFollowUp = second.nextCallDate || '9999-99-99';
+      if (firstFollowUp !== secondFollowUp) return firstFollowUp.localeCompare(secondFollowUp);
+
+      return `${first.eventDate || '9999-99-99'}|${first.eventTime || '99:99'}|${first.eventName || ''}`.localeCompare(
+        `${second.eventDate || '9999-99-99'}|${second.eventTime || '99:99'}|${second.eventName || ''}`
+      );
+    });
+  }, [allCscShiftsForStatus, monthFilter, opportunitiesMatchingNonMonthFilters, summaryFilter]);
 
   const handleViewMonth = (monthKey) => {
     setMonthFilter(monthKey);
@@ -5786,6 +6550,10 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
   const scheduledCount = activeOpportunities.filter(
     (item) => getResolvedOpportunityStatus(item, allCscShiftsForStatus) === 'Scheduled'
   ).length;
+  const attentionCount = activeOpportunities.filter((item) => {
+    const resolvedStatus = getResolvedOpportunityStatus(item, allCscShiftsForStatus);
+    return Boolean(getOpportunityAttentionState(item, resolvedStatus));
+  }).length;
   const notesCount = activeOpportunities.filter((item) => String(item.notes || '').trim()).length;
 
   const printOpportunityRows = useMemo(
@@ -5847,6 +6615,9 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
       : [];
     const changedShifts = Array.isArray(emailCheckReport.changedShifts)
       ? emailCheckReport.changedShifts
+      : [];
+    const wishEssOverrides = Array.isArray(emailCheckReport.wishEssOverrides)
+      ? emailCheckReport.wishEssOverrides
       : [];
     const currentShifts = Array.isArray(emailCheckReport.currentShifts)
       ? emailCheckReport.currentShifts
@@ -6073,13 +6844,18 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               <div class="summary-value">${changedShifts.length}</div>
             </div>
             <div class="summary-card">
+              <div class="summary-label">Wish ESS Wins</div>
+              <div class="summary-value">${wishEssOverrides.length}</div>
+            </div>
+            <div class="summary-card">
               <div class="summary-label">Already Current</div>
               <div class="summary-value">${currentShifts.length}</div>
             </div>
           </div>
 
           ${renderEmailShiftSection('Missing from CSC Shifts', newShifts, 'new')}
-          ${renderEmailShiftSection('Changed Scheduled Shifts', changedShifts, 'changed', true)}
+          ${renderEmailShiftSection('Email Changes Not Confirmed by Wish ESS', changedShifts, 'changed', true)}
+          ${renderEmailShiftSection('Wish ESS Overrides CSC Email', wishEssOverrides, 'changed', true)}
           ${renderEmailShiftSection('Already Current', currentShifts, 'current')}
 
           <script>window.addEventListener('load', () => { window.focus(); window.print(); });<\/script>
@@ -6201,32 +6977,74 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
     const notesExpanded = expandedNoteIds.has(opportunity.id);
     const notesHaveMore = overflowingNoteIds.has(opportunity.id);
     const opportunityExpanded = expandedOpportunityIds.has(opportunity.id);
+    const isLinkedScheduled = Boolean(match && resolvedStatus === 'Scheduled');
+    const attentionState = getOpportunityAttentionState(opportunity, resolvedStatus);
 
     return (
       <article
         id={`csc-opportunity-${opportunity.id}`}
         key={opportunity.id}
-        className={`csc-opportunity-mobile-card overflow-visible rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md ${
-          match && resolvedStatus === 'Scheduled' ? 'bg-slate-100' : 'bg-white'
+        className={`csc-opportunity-mobile-card overflow-visible rounded-2xl border p-4 transition-shadow hover:shadow-lg ${
+          isLinkedScheduled
+            ? 'border-emerald-400 bg-emerald-50 shadow-md ring-2 ring-emerald-200'
+            : 'bg-white shadow-sm'
         } ${
           scheduledShiftConflicts.length || dateConflicts.length
-            ? 'border-l-4 border-red-400'
+            ? 'border-l-4 border-l-red-500'
             : match
-              ? 'border-l-4 border-emerald-400'
-              : 'border-l-4 border-violet-300'
+              ? 'border-l-8 border-l-emerald-600'
+              : 'border-l-4 border-l-violet-300'
         }`}
       >
+        {isLinkedScheduled ? (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-300 bg-emerald-700 px-3 py-2.5 text-white shadow-sm">
+            <div className="flex items-center gap-2">
+              <CalendarCheck2 className="h-5 w-5 shrink-0" />
+              <span className="text-sm font-black uppercase tracking-wide">
+                Already Scheduled
+              </span>
+            </div>
+            <span className="rounded-full border border-emerald-200 bg-white/15 px-3 py-1 text-xs font-extrabold">
+              Linked to CSC Shifts
+            </span>
+          </div>
+        ) : null}
+
         <div className="csc-opportunity-top flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 gap-3">
             <VenueLogo opportunity={opportunity} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-lg font-black leading-snug text-slate-950"><FormattedEventName value={opportunity.eventName} /></h3>
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-extrabold ${getStatusClass(resolvedStatus)}`}>
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-xs font-extrabold ${
+                    isLinkedScheduled
+                      ? 'border-emerald-700 bg-emerald-700 text-white shadow-sm'
+                      : getStatusClass(resolvedStatus)
+                  }`}
+                >
                   {resolvedStatus}
                 </span>
+                {attentionState ? (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-black ${attentionState.className}`}
+                    title="This opportunity needs follow-up attention"
+                  >
+                    <CircleAlert className="h-3.5 w-3.5" />
+                    {attentionState.label}
+                  </span>
+                ) : null}
                 {match ? (
-                  <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-extrabold text-white">Shift Linked</span>
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold text-white ${
+                      isLinkedScheduled
+                        ? 'bg-emerald-900 shadow-sm ring-2 ring-emerald-300'
+                        : 'bg-emerald-600'
+                    }`}
+                  >
+                    <CalendarCheck2 className="h-3.5 w-3.5" />
+                    Shift Linked
+                  </span>
                 ) : null}
                 {dateConflicts.length ? (
                   <span className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-100 px-2.5 py-1 text-xs font-extrabold text-red-900">
@@ -6259,13 +7077,23 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             </div>
           </div>
 
-          <aside className="csc-opportunity-actions relative flex w-full shrink-0 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 shadow-sm lg:w-auto lg:max-w-[22rem]">
+          <aside
+            className={`csc-opportunity-actions relative flex w-full shrink-0 flex-wrap items-center gap-2 rounded-xl border p-2 shadow-sm lg:w-auto lg:max-w-[22rem] ${
+              isLinkedScheduled
+                ? 'border-emerald-300 bg-emerald-100'
+                : 'border-slate-200 bg-slate-50'
+            }`}
+          >
             <div className="csc-opportunity-actions-grid flex min-w-0 flex-1 flex-wrap items-center gap-2">
               {match ? (
                 <button
                   type="button"
                   onClick={() => handleOpenLinkedShift(match, opportunity)}
-                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-cyan-700 px-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 lg:flex-none"
+                  className={`inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-sm font-extrabold text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-2 lg:flex-none ${
+                    isLinkedScheduled
+                      ? 'bg-emerald-800 hover:bg-emerald-900 focus:ring-emerald-500'
+                      : 'bg-cyan-700 hover:bg-cyan-800 focus:ring-cyan-500'
+                  }`}
                   title="Open linked CSC shift"
                   aria-label="Open linked CSC shift"
                 >
@@ -6725,24 +7553,6 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             transform: rotate(180deg);
           }
 
-          .csc-opportunities-header .csc-header-actions {
-            width: auto;
-            max-width: 100%;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-          }
-
-          .csc-opportunities-header .csc-add-opportunity-action {
-            border-color: #334155 !important;
-            background-color: #020617 !important;
-            color: #ffffff !important;
-          }
-
-          .csc-opportunities-header .csc-add-opportunity-action:hover {
-            background-color: #1e293b !important;
-            color: #ffffff !important;
-          }
-
           @media (prefers-reduced-motion: reduce) {
             .csc-opportunities-page *,
             .csc-opportunities-page *::before,
@@ -6759,24 +7569,6 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
               gap: 0.75rem;
               padding-top: 0.75rem;
               padding-bottom: 0.75rem;
-            }
-
-            .csc-header-action {
-              width: 100%;
-              min-height: 2.75rem;
-              padding: 0 0.625rem;
-              font-size: 0.75rem;
-            }
-
-            .csc-header-actions {
-              display: grid;
-              width: 100%;
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-              gap: 0.375rem;
-            }
-
-            .csc-add-opportunity-action {
-              grid-column: 1 / -1;
             }
 
             .csc-opportunity-browser-heading,
@@ -6981,30 +7773,30 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
         <TabPageHeader
           icon={Sparkles}
           title="CSC Opportunities"
-          subtitle="Events, editable notes, and links to actual CSC shifts."
+          subtitle="Events, notes, and links to CSC shifts."
           theme="violet"
-          className="budget-mobile-header csc-opportunities-header"
+          className="budget-mobile-header"
           actions={
-            <div className="csc-header-actions flex max-w-full flex-wrap items-center justify-end gap-2">
+            <div className="flex w-max flex-nowrap items-center gap-2">
               <button
                 type="button"
                 onClick={openAddOpportunity}
                 title="Add opportunity"
                 aria-label="Add opportunity"
-                className={`csc-header-action csc-add-opportunity-action ${TAB_HEADER_ACTION_CLASS} border border-slate-700 bg-slate-950 text-white shadow-sm hover:bg-slate-800`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !min-w-0 !gap-2 !px-2.5 !text-sm border border-slate-700 bg-slate-950 text-white shadow-sm hover:bg-slate-800`}
               >
                 <Plus className="h-4 w-4" />
-                <span className="csc-header-action-label">Add Opportunity</span>
+                <span className="csc-header-action-label">Add</span>
               </button>
               <button
                 type="button"
                 onClick={() => setShowScanDrawer(true)}
                 title="Scan venue events"
                 aria-label="Scan venue events"
-                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-white/15 text-white hover:bg-white/25`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !min-w-0 !gap-2 !px-2.5 !text-sm border border-white/30 bg-white/15 text-white hover:bg-white/25`}
               >
                 <ClipboardCheck className="h-4 w-4" />
-                <span className="csc-header-action-label">Scan Venue Events</span>
+                <span className="csc-header-action-label">Scan</span>
               </button>
               <button
                 type="button"
@@ -7014,20 +7806,20 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 aria-label="Check Gmail now for new or changed CSC scheduled shifts"
                 aria-haspopup="dialog"
                 aria-expanded={showEmailCheckDrawer}
-                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-blue-700 text-white hover:bg-blue-600 disabled:cursor-wait disabled:opacity-75`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !min-w-0 !gap-2 !px-2.5 !text-sm border border-white/30 bg-blue-700 text-white hover:bg-blue-600 disabled:cursor-wait disabled:opacity-75`}
               >
                 <RefreshCcw className={`h-4 w-4 ${emailCheckBusy ? 'animate-spin' : ''}`} />
-                <span className="csc-header-action-label">Check CSC Email</span>
+                <span className="csc-header-action-label">Email</span>
               </button>
               <button
                 type="button"
                 onClick={openEventWatchReport}
                 title="Show the latest venue scan report"
                 aria-label="Show the latest venue scan report"
-                className={`csc-header-action csc-event-watch-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-emerald-700 text-white hover:bg-emerald-600`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !min-w-0 !gap-2 !px-2.5 !text-sm border border-white/30 bg-emerald-700 text-white hover:bg-emerald-600`}
               >
                 <CalendarCheck2 className="h-4 w-4" />
-                <span className="csc-header-action-label">Latest Scan Report</span>
+                <span className="csc-header-action-label">Report</span>
               </button>
               <button
                 type="button"
@@ -7036,7 +7828,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 aria-label={`Open archived opportunities, ${archivedOpportunities.length} saved`}
                 aria-haspopup="dialog"
                 aria-expanded={showArchiveDrawer}
-                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} border border-white/30 bg-violet-800 text-white hover:bg-violet-700`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !min-w-0 !gap-2 !px-2.5 !text-sm border border-white/30 bg-violet-800 text-white hover:bg-violet-700`}
               >
                 <Archive className="h-4 w-4" />
                 <span className="csc-header-action-label">Archive ({archivedOpportunities.length})</span>
@@ -7048,7 +7840,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                 aria-label="Open CSC opportunity data and backup tools"
                 aria-haspopup="dialog"
                 aria-expanded={showDataScreen}
-                className={`csc-header-action ${TAB_HEADER_ACTION_CLASS} bg-white text-violet-900 shadow-sm hover:bg-violet-50`}
+                className={`${TAB_HEADER_ACTION_CLASS} !h-11 !w-auto !min-w-0 !gap-2 !px-2.5 !text-sm bg-white text-violet-900 shadow-sm hover:bg-violet-50`}
               >
                 <Upload className="h-4 w-4" />
                 <span className="csc-header-action-label">Data</span>
@@ -7117,7 +7909,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                     CSC Email Shift Check
                   </h2>
                   <p className="mt-1 text-sm font-semibold text-slate-600">
-                    Read-only Gmail check for upcoming CSC scheduling details. Nothing is imported automatically.
+                    Secondary scheduling check. Wish ESS is authoritative. Gmail can update Opportunity notes and detect differences, but it cannot override Wish ESS-confirmed CSC Shift details.
                   </p>
                   {emailCheckReport?.checkedAt ? (
                     <p className="mt-2 text-xs font-bold text-slate-500">
@@ -7164,20 +7956,53 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
 
               {!emailCheckBusy && !emailCheckError && emailCheckReport ? (
                 <>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                       <p className="text-xs font-black uppercase tracking-wide text-emerald-800">Missing from CSC Shifts</p>
                       <p className="mt-1 text-3xl font-black text-emerald-950">{emailCheckReport.newShifts?.length || 0}</p>
                     </div>
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                      <p className="text-xs font-black uppercase tracking-wide text-amber-800">Changed Shifts</p>
+                      <p className="text-xs font-black uppercase tracking-wide text-amber-800">Email Changes</p>
                       <p className="mt-1 text-3xl font-black text-amber-950">{emailCheckReport.changedShifts?.length || 0}</p>
+                    </div>
+                    <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                      <p className="text-xs font-black uppercase tracking-wide text-violet-800">Wish ESS Wins</p>
+                      <p className="mt-1 text-3xl font-black text-violet-950">{emailCheckReport.wishEssOverrides?.length || 0}</p>
                     </div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <p className="text-xs font-black uppercase tracking-wide text-slate-600">Already Current</p>
                       <p className="mt-1 text-3xl font-black text-slate-950">{emailCheckReport.currentShifts?.length || 0}</p>
                     </div>
                   </div>
+
+                  {(emailCheckReport.wishEssOverrides?.length || 0) > 0 ? (
+                    <section className="mt-5 rounded-2xl border border-violet-300 bg-violet-50 p-4">
+                      <h3 className="text-base font-black text-violet-950">Wish ESS Overrides CSC Email</h3>
+                      <p className="mt-1 text-sm font-semibold text-violet-800">
+                        These Gmail rows disagree with CSC Shifts, but the linked Wish ESS-confirmed schedule remains unchanged.
+                      </p>
+                      <div className="mt-3 grid gap-2">
+                        {emailCheckReport.wishEssOverrides.map((shift) => (
+                          <article
+                            key={`wish-override-${getCscEmailShiftIdentityKey(shift)}`}
+                            className="rounded-xl border border-violet-200 bg-white p-3"
+                          >
+                            <p className="font-extrabold text-slate-950">
+                              {cleanCscDisplayTitle(shift.jobName || 'Job not listed')} - {canonicalVenueName(shift.venue) || shift.venue || 'Venue not listed'}
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-slate-700">
+                              Wish ESS kept: {shift.authoritativeShift?.startDate ? formatDate(shift.authoritativeShift.startDate) : 'Date not listed'} {shift.authoritativeShift?.startTime ? formatTime(shift.authoritativeShift.startTime) : ''} to {shift.authoritativeShift?.finishTime ? formatTime(shift.authoritativeShift.finishTime) : ''}
+                            </p>
+                            <div className="mt-2 text-sm text-violet-900">
+                              {(shift.changes || []).map((change) => (
+                                <div key={change}>{change}</div>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
 
                   {(emailCheckReport.changedShifts?.length || 0) > 0 ? (
                     <section className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-4">
@@ -7342,11 +8167,13 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                     </section>
                   ) : null}
 
-                  {!emailCheckReport.newShifts?.length && !emailCheckReport.changedShifts?.length ? (
+                  {!emailCheckReport.newShifts?.length &&
+                  !emailCheckReport.changedShifts?.length &&
+                  !emailCheckReport.wishEssOverrides?.length ? (
                     <div className="mt-5 rounded-2xl border border-emerald-300 bg-emerald-50 p-5 text-center">
                       <CalendarCheck2 className="mx-auto h-8 w-8 text-emerald-700" />
                       <p className="mt-2 text-base font-black text-emerald-950">No missing or changed upcoming CSC shifts found.</p>
-                      <p className="mt-1 text-sm font-semibold text-emerald-800">Your locally stored CSC shifts match the latest scheduling details found in Gmail.</p>
+                      <p className="mt-1 text-sm font-semibold text-emerald-800">No Gmail differences remain after applying the Wish ESS authority rule.</p>
                     </div>
                   ) : null}
                 </>
@@ -7355,7 +8182,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           </div>
         ) : null}
 
-        <section className="csc-summary-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="csc-summary-grid grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <button
             type="button"
             onClick={() => applySummaryFilter('active')}
@@ -7370,6 +8197,22 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
             <p className="csc-summary-count mt-1 text-3xl font-black">{activeOpportunities.length}</p>
             <p className="csc-summary-hint mt-1 text-xs font-bold text-indigo-800">
               {summaryFilter === 'active' ? 'Filtered' : 'Click to filter'}
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => applySummaryFilter('attention')}
+            aria-pressed={summaryFilter === 'attention'}
+            className={summaryCardClassName('attention', 'border-orange-200 bg-gradient-to-br from-white to-orange-100 text-orange-950')}
+            title="Show opportunities that need follow-up attention"
+          >
+            <p className="csc-summary-title text-sm font-bold">
+              <span className="csc-summary-title-desktop">Needs Attention</span>
+              <span className="csc-summary-title-mobile">Attention</span>
+            </p>
+            <p className="csc-summary-count mt-1 text-3xl font-black">{attentionCount}</p>
+            <p className="csc-summary-hint mt-1 text-xs font-bold text-orange-800">
+              {summaryFilter === 'attention' ? 'Filtered' : 'Click to filter'}
             </p>
           </button>
           <button
@@ -7893,8 +8736,24 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
                       {Number(eventWatchSyncState.added || 0)} added,{' '}
                       {Number(eventWatchSyncState.updated || 0)} updated,{' '}
                       {Number(eventWatchSyncState.cancelled || 0)} cancelled,{' '}
+                      {Number(eventWatchSyncState.verified || 0)} verified,{' '}
                       {Number(eventWatchSyncState.skipped || 0)} skipped
                     </p>
+                  ) : null}
+                  {Array.isArray(eventWatchSyncState.updateDetails) &&
+                  eventWatchSyncState.updateDetails.length ? (
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-white p-3">
+                      <p className="text-xs font-black uppercase tracking-wide text-amber-900">
+                        What changed
+                      </p>
+                      <ul className="mt-2 space-y-1 text-xs font-semibold text-slate-800">
+                        {eventWatchSyncState.updateDetails.map((detail, index) => (
+                          <li key={`${detail}-${index}`} className="leading-5">
+                            • {detail}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ) : null}
                   {eventWatchSyncState.error ? (
                     <p className="mt-2 text-sm font-extrabold text-red-700">

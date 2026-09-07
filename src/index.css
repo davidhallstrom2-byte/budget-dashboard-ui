@@ -13,7 +13,13 @@
     min-width: 0;
   }
   body {
-    overflow-x: hidden;
+    /*
+     * Do not use overflow-x: hidden here.
+     * `hidden` creates an overflow/scroll container and can prevent
+     * descendant position: sticky elements from sticking to the viewport.
+     * `clip` prevents horizontal spill without creating a scroll container.
+     */
+    overflow-x: clip;
   }
 
   @media (min-width: 768px) {
