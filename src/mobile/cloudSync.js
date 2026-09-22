@@ -1,7 +1,26 @@
 const MOBILE_API_ENDPOINT = "/budget-dashboard-fs/mobile-api.php";
 const META_STORAGE_KEY = "budgetMobileSync.keyMeta.v1";
+const FORCE_PUSH_STORAGE_KEY = "budgetMobileSync.forcePush.v1";
 const POLL_INTERVAL_MS = 1500;
-const PULL_INTERVAL_MS = 10000;
+const PULL_INTERVAL_MS = 5 * 60 * 1000;
+const UPLOAD_PAUSE_KEY = "budgetMobileSync.uploadPause.v2";
+const BATCH_TARGET_BYTES = 256 * 1024;
+const MAX_REQUEST_BYTES = 12 * 1024 * 1024;
+const MAX_VALUE_BYTES = 8 * 1024 * 1024;
+const byteLength = (text) => new TextEncoder().encode(text).length;
+
+// Navigate the document first; API cookies always remain same-origin.
+const ensureCanonicalHost = () => {
+  const url = new URL(window.location.href);
+  if (["businesswebcreations.com", "www.businesswebcreations.com"].includes(url.hostname.toLowerCase()) &&
+      (url.hostname !== "www.businesswebcreations.com" || url.protocol !== "https:" || url.port)) {
+    url.protocol = "https:";
+    url.hostname = "www.businesswebcreations.com";
+    url.port = "";
+    window.location.replace(url.href);
+    throw new Error("Opening the secure www dashboard before connecting...");
+  }
+};
 
 let csrfToken = "";
 let activeController = null;
@@ -38,7 +57,7 @@ const isSyncableKey = (key) => {
 };
 
 const collectLocalItems = () => {
-  const items = {};
+  const items = Object.create(null);
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index);
     if (!isSyncableKey(key)) continue;
@@ -49,7 +68,7 @@ const collectLocalItems = () => {
 
 const readKeyMeta = () => {
   const parsed = readJson(window.localStorage.getItem(META_STORAGE_KEY) || "{}", {});
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  return Object.assign(Object.create(null), parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {});
 };
 
 const writeKeyMeta = (meta) => {
@@ -57,23 +76,40 @@ const writeKeyMeta = (meta) => {
 };
 
 const mobileRequest = async (action, options = {}) => {
-  const response = await fetch(`${MOBILE_API_ENDPOINT}?action=${encodeURIComponent(action)}`, {
-    credentials: "same-origin",
-    cache: "no-store",
-    ...options,
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
-      ...(options.headers || {}),
-    },
-  });
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.ok) {
-    throw new Error(payload?.error || `Mobile request failed with status ${response.status}.`);
+  ensureCanonicalHost();
+  const { query = {}, signal, ...requestOptions } = options;
+  const params = new URLSearchParams({ action, ...query });
+  const abort = new AbortController();
+  const cancel = () => abort.abort();
+  if (signal?.aborted) abort.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  const timeout = window.setTimeout(cancel, 30000);
+  try {
+    const response = await fetch(`${MOBILE_API_ENDPOINT}?${params}`, {
+      ...requestOptions,
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      signal: abort.signal,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        ...(options.headers || {}),
+      },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      const error = new Error(payload?.error || `Mobile request failed with status ${response.status}.`);
+      error.status = response.status;
+      throw error;
+    }
+    if (abort.signal.aborted) throw new Error("Mobile request was cancelled.");
+    if (payload.csrfToken) csrfToken = payload.csrfToken;
+    return payload;
+  } finally {
+    window.clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
   }
-  if (payload.csrfToken) csrfToken = payload.csrfToken;
-  return payload;
 };
 
 export const isLocalDevelopmentHost = () => {
@@ -136,183 +172,265 @@ const applyRemoteItems = (remoteItems, meta, baseline) => {
 
 const createController = () => {
   let stopped = false;
+  let ready = false;
   let pollTimer = null;
   let pullTimer = null;
   let pushTimer = null;
-  let pushing = false;
-  let pulling = false;
+  let busy = false;
+  let pullRequested = false;
   let revision = 0;
-  let baseline = {};
+  let baseline = collectLocalItems();
   let keyMeta = readKeyMeta();
-  let pendingChanges = {};
-
-  const queuePush = () => {
-    if (stopped || pushTimer) return;
-    pushTimer = window.setTimeout(() => {
-      pushTimer = null;
-      pushPending();
-    }, 500);
-  };
-
-  const pushPending = async () => {
-    if (stopped || pushing || !Object.keys(pendingChanges).length) return;
-    pushing = true;
-    const changes = pendingChanges;
-    pendingChanges = {};
-    updateStatus({ state: "syncing", message: "Saving changes..." });
-
-    try {
-      const payload = await mobileRequest("sync", {
-        method: "POST",
-        body: JSON.stringify({ revision, changes }),
-      });
-      revision = Number(payload.revision || revision);
-      updateStatus({
-        state: "synced",
-        message: "Cloud sync current",
-        lastSyncedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      pendingChanges = { ...changes, ...pendingChanges };
-      updateStatus({ state: "error", message: error?.message || "Cloud sync failed." });
-    } finally {
-      pushing = false;
-      if (Object.keys(pendingChanges).length) queuePush();
+  let pendingChanges = Object.create(null);
+  let uploadPaused = Boolean(window.localStorage.getItem(UPLOAD_PAUSE_KEY));
+  let pullNotBefore = 0;
+  let lastReturnPull = -Infinity;
+  const abort = new AbortController();
+  const request = (action, options = {}) => mobileRequest(action, { ...options, signal: abort.signal });
+  const validate = (payload) => {
+    if (payload.protocol !== 2 || !Number.isSafeInteger(payload.revision) || payload.revision < 0 ||
+        !payload.items || typeof payload.items !== "object" || Array.isArray(payload.items)) {
+      throw new Error("Cloud sync needs the matching version 2 mobile-api.php. Uploads remain stopped.");
     }
   };
-
+  const showCurrentStatus = () => {
+    if (stopped) return;
+    updateStatus(uploadPaused
+      ? { state: "error", message: "Cloud uploads paused after an interrupted or failed save. Local data is retained; an explicit sync retry is required." }
+      : Object.keys(pendingChanges).length
+        ? { state: "syncing", message: "Local changes waiting to upload..." }
+        : { state: "synced", message: "Cloud sync current", lastSyncedAt: new Date().toISOString() });
+  };
+  const queuePush = () => {
+    if (stopped || !ready || uploadPaused || pushTimer || !Object.keys(pendingChanges).length) return;
+    pushTimer = window.setTimeout(() => {
+      pushTimer = null;
+      void pushPending();
+    }, 1000);
+  };
   const detectLocalChanges = () => {
     if (stopped) return;
     const current = collectLocalItems();
     const keys = new Set([...Object.keys(baseline), ...Object.keys(current)]);
     let foundChange = false;
-
     keys.forEach((key) => {
       const previousValue = Object.prototype.hasOwnProperty.call(baseline, key) ? baseline[key] : null;
-      const currentHasKey = Object.prototype.hasOwnProperty.call(current, key);
-      const currentValue = currentHasKey ? current[key] : null;
+      const currentValue = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : null;
       if (previousValue === currentValue) return;
-
-      const updatedAt = Date.now();
+      const updatedAt = Math.max(Date.now(), Number(keyMeta[key] || 0) + 1);
       keyMeta[key] = updatedAt;
       pendingChanges[key] = { value: currentValue, updatedAt };
       foundChange = true;
     });
-
     baseline = current;
     if (foundChange) {
       writeKeyMeta(keyMeta);
       queuePush();
     }
   };
-
-  const pullRemote = async () => {
-    if (stopped || pulling || pushing) return;
-    pulling = true;
-    try {
-      const payload = await mobileRequest("state");
-      revision = Number(payload.revision || revision);
-      const changed = applyRemoteItems(payload.items || {}, keyMeta, baseline);
-      keyMeta = readKeyMeta();
-      if (changed) {
-        baseline = collectLocalItems();
-        window.dispatchEvent(new CustomEvent("budgetMobileSyncApplied"));
+  const applyPayload = (payload, sent = null) => {
+    // Capture edits made while fetch was in flight before applying remote values.
+    detectLocalChanges();
+    const incoming = { ...payload.items };
+    for (const [key, time] of Object.entries(payload.accepted || {})) {
+      if (sent && Object.prototype.hasOwnProperty.call(sent, key) && !pendingChanges[key]) {
+        keyMeta[key] = Number(time);
       }
-      updateStatus({
-        state: "synced",
-        message: "Cloud sync current",
-        lastSyncedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      updateStatus({ state: "error", message: error?.message || "Could not check cloud data." });
-    } finally {
-      pulling = false;
+    }
+    for (const key of Object.keys(incoming)) {
+      // Reconcile a lost acknowledgement without uploading an already committed value again.
+      const pending = pendingChanges[key];
+      if (pending && incoming[key]?.value === pending.value && Number(incoming[key].updatedAt) >= pending.updatedAt) {
+        delete pendingChanges[key];
+      } else if (pending) {
+        // Other unsent edits survive until the next upload resolves them against the server.
+        delete incoming[key];
+      }
+    }
+    const changed = applyRemoteItems(incoming, keyMeta, baseline);
+    keyMeta = readKeyMeta();
+    revision = payload.revision;
+    if (changed) {
+      baseline = collectLocalItems();
+      window.dispatchEvent(new CustomEvent("budgetMobileSyncApplied"));
     }
   };
-
+  const pauseUploads = (message) => {
+    uploadPaused = true;
+    try { window.localStorage.setItem(UPLOAD_PAUSE_KEY, JSON.stringify({ at: Date.now(), message })); } catch { /* Already paused in memory. */ }
+    if (!stopped) updateStatus({ state: "error", message: `${message} Cloud uploads paused; local data is retained. Retry explicitly after fixing the cause.` });
+  };
+  const pushPending = async () => {
+    if (stopped || busy || uploadPaused || !Object.keys(pendingChanges).length) return;
+    busy = true;
+    const changes = Object.create(null);
+    try {
+      let size = 0;
+      for (const [key, change] of Object.entries(pendingChanges)) {
+        const entryBytes = byteLength(JSON.stringify({ [key]: change }));
+        if (Object.keys(changes).length && (size + entryBytes > BATCH_TARGET_BYTES || Object.keys(changes).length >= 500)) break;
+        if (byteLength(key) > 190 || byteLength(change.value || "") > MAX_VALUE_BYTES) {
+          throw new Error(`Storage item "${key}" exceeds the server sync limit.`);
+        }
+        changes[key] = change;
+        size += entryBytes;
+      }
+      const body = JSON.stringify({ protocol: 2, revision, changes });
+      if (byteLength(body) > MAX_REQUEST_BYTES) throw new Error("The encoded storage item exceeds the server request limit.");
+      // Persist BEFORE sending. A closed tab or lost response must not restart a large POST loop.
+      window.localStorage.setItem(UPLOAD_PAUSE_KEY, JSON.stringify({ at: Date.now(), message: "Upload acknowledgement pending" }));
+      for (const key of Object.keys(changes)) delete pendingChanges[key];
+      updateStatus({ state: "syncing", message: "Saving changes..." });
+      const payload = await request("sync", { method: "POST", body });
+      if (stopped) return;
+      validate(payload);
+      if (!payload.accepted || typeof payload.accepted !== "object") throw new Error("Missing upload acknowledgement.");
+      for (const key of Object.keys(changes)) {
+        if (!Object.prototype.hasOwnProperty.call(payload.accepted, key) && !Object.prototype.hasOwnProperty.call(payload.items, key)) {
+          throw new Error("Incomplete upload acknowledgement.");
+        }
+      }
+      applyPayload(payload, changes);
+      window.localStorage.removeItem(UPLOAD_PAUSE_KEY);
+      if (!Object.keys(pendingChanges).length) window.localStorage.removeItem(FORCE_PUSH_STORAGE_KEY);
+      showCurrentStatus();
+    } catch (error) {
+      if (stopped) return;
+      pendingChanges = Object.assign(Object.create(null), changes, pendingChanges);
+      pauseUploads(error?.message || "Cloud save failed.");
+    } finally {
+      busy = false;
+      queuePush();
+      if (pullRequested && !stopped) void pullRemote();
+    }
+  };
+  const pullRemote = async () => {
+    if (stopped || !ready) return;
+    if (busy) { pullRequested = true; return; }
+    if (Date.now() < pullNotBefore) { pullRequested = false; return; }
+    pullRequested = false;
+    busy = true;
+    try {
+      detectLocalChanges();
+      const payload = await request("state", { query: { protocol: "2", since: String(revision) } });
+      if (stopped) return;
+      validate(payload);
+      applyPayload(payload);
+      showCurrentStatus();
+    } catch (error) {
+      // Focus events cannot turn a failing read into a tight retry loop.
+      pullNotBefore = Date.now() + PULL_INTERVAL_MS;
+      if (!stopped) updateStatus({ state: "error", message: error?.message || "Could not check cloud data." });
+    } finally {
+      busy = false;
+      pullRequested = false;
+      queuePush();
+    }
+  };
+  const handleReturn = () => {
+    if (document.visibilityState !== "visible" || Date.now() - lastReturnPull < 1000) return;
+    lastReturnPull = Date.now();
+    void pullRemote();
+  };
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") handleReturn();
+    else detectLocalChanges();
+  };
   const initialize = async () => {
     updateStatus({ state: "syncing", message: "Connecting to cloud data..." });
-    const payload = await mobileRequest("state");
-    revision = Number(payload.revision || 0);
-    const remoteItems = payload.items || {};
-    const localItemsBefore = collectLocalItems();
-    const remoteKeys = new Set(Object.keys(remoteItems));
-
-    applyRemoteItems(remoteItems, keyMeta, localItemsBefore);
-    keyMeta = readKeyMeta();
-    const localItemsAfter = collectLocalItems();
-
-    Object.entries(localItemsAfter).forEach(([key, value]) => {
-      const remote = remoteItems[key];
-      const localTime = Number(keyMeta[key] || 0);
-      const remoteTime = Number(remote?.updatedAt || 0);
-      if (!remoteKeys.has(key) || localTime > remoteTime) {
-        const updatedAt = localTime || Date.now();
+    const payload = await request("state", { query: { protocol: "2" } });
+    if (stopped) return controller;
+    validate(payload);
+    detectLocalChanges();
+    revision = payload.revision;
+    const remoteItems = payload.items;
+    const force = readJson(window.localStorage.getItem(FORCE_PUSH_STORAGE_KEY) || "null", null);
+    if (force && typeof force === "object" && String(force.snapshotId || "").trim()) {
+      let updatedAt = Date.now();
+      for (const [key, value] of Object.entries(collectLocalItems())) {
+        updatedAt = Math.max(updatedAt + 1, Number(keyMeta[key] || 0) + 1);
         keyMeta[key] = updatedAt;
         pendingChanges[key] = { value, updatedAt };
       }
-    });
-
+    } else {
+      applyPayload(payload);
+      const local = collectLocalItems();
+      // Include deletion tombstones remembered in keyMeta across restarts.
+      for (const key of new Set([...Object.keys(local), ...Object.keys(keyMeta)])) {
+        if (!isSyncableKey(key) || pendingChanges[key]) continue;
+        const remote = remoteItems[key];
+        const localTime = Number(keyMeta[key] || 0);
+        const hasLocal = Object.prototype.hasOwnProperty.call(local, key);
+        if ((!remote && hasLocal) || localTime > Number(remote?.updatedAt || 0)) {
+          const updatedAt = localTime || Date.now();
+          keyMeta[key] = updatedAt;
+          pendingChanges[key] = { value: hasLocal ? local[key] : null, updatedAt };
+        }
+      }
+    }
     writeKeyMeta(keyMeta);
-    baseline = localItemsAfter;
-    if (Object.keys(pendingChanges).length) await pushPending();
-
-    updateStatus({
-      state: "synced",
-      message: "Cloud sync current",
-      lastSyncedAt: new Date().toISOString(),
-    });
-
+    baseline = collectLocalItems();
+    ready = true;
+    if (!Object.keys(pendingChanges).length) window.localStorage.removeItem(FORCE_PUSH_STORAGE_KEY);
+    await pushPending();
+    if (stopped) return controller;
+    showCurrentStatus();
     pollTimer = window.setInterval(detectLocalChanges, POLL_INTERVAL_MS);
-    pullTimer = window.setInterval(pullRemote, PULL_INTERVAL_MS);
+    pullTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void pullRemote();
+    }, PULL_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", pullRemote);
+    window.addEventListener("focus", handleReturn);
+    queuePush();
     return controller;
   };
-
-  const handleVisibilityChange = () => {
-    if (document.visibilityState === "visible") pullRemote();
-    else detectLocalChanges();
-  };
-
   const controller = {
     initialize,
+    // Explicit caller action only; timers/focus never clear the durable upload pause.
     syncNow: async () => {
+      if (stopped || !ready || busy) return;
+      uploadPaused = false;
+      window.localStorage.removeItem(UPLOAD_PAUSE_KEY);
+      pullNotBefore = 0;
       detectLocalChanges();
-      await pushPending();
       await pullRemote();
+      await pushPending();
     },
     stop: () => {
       stopped = true;
+      abort.abort();
       if (pollTimer) window.clearInterval(pollTimer);
       if (pullTimer) window.clearInterval(pullTimer);
       if (pushTimer) window.clearTimeout(pushTimer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", pullRemote);
+      window.removeEventListener("focus", handleReturn);
       updateStatus({ state: "idle", message: "Not connected" });
     },
   };
-
   return controller;
 };
 
-export const startCloudSync = async () => {
-  if (activeController) return activeController;
+let startPromise = null;
+export const startCloudSync = () => {
+  if (activeController) return startPromise || Promise.resolve(activeController);
   const controller = createController();
   activeController = controller;
-  try {
-    await controller.initialize();
-    return controller;
-  } catch (error) {
-    activeController = null;
-    updateStatus({ state: "error", message: error?.message || "Cloud sync could not start." });
+  startPromise = controller.initialize().catch((error) => {
+    if (activeController === controller) {
+      controller.stop();
+      activeController = null;
+      startPromise = null;
+      updateStatus({ state: "error", message: error?.message || "Cloud sync could not start." });
+    }
     throw error;
-  }
+  });
+  return startPromise;
 };
 
 export const stopCloudSync = () => {
   if (activeController) activeController.stop();
   activeController = null;
+  startPromise = null;
 };
 
 export const subscribeCloudSyncStatus = (listener) => {

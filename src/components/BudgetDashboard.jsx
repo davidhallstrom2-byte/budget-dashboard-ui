@@ -77,9 +77,13 @@ const isExcludedDashboardStorageKey = (key = '') =>
   key.startsWith('googleCalendar.') ||
   /(?:accessToken|refreshToken|idToken|tokenExpiresAt|openLinked|returnContext|createDraft)/i.test(key);
 
-const getAutomaticAppDataUrls = () => [
-  '/budget-dashboard-fs/save.php?action=app_data_download',
-];
+const getAutomaticAppDataUrls = () => {
+  if (supportsAutomaticFileAppData()) {
+    return ['/budget-dashboard-fs/save.php?action=app_data_download'];
+  }
+
+  return [`${import.meta.env.BASE_URL}restore/app-data-export.json`];
+};
 
 const hashDashboardAppData = (value = '') => {
   let hash = 2166136261;
@@ -171,14 +175,16 @@ const acknowledgeAutomaticAppDataRestore = async (snapshotId) => {
 };
 
 const restoreAutomaticAppDataIfNeeded = async () => {
-  if (!supportsAutomaticFileAppData() || typeof localStorage === 'undefined') return false;
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
 
   const exportData = await loadAutomaticAppDataExport();
   if (!exportData) return false;
 
   const appliedSnapshotId = localStorage.getItem(APP_DATA_RESTORE_MARKER_KEY);
   if (appliedSnapshotId === exportData.snapshotId) {
-    await acknowledgeAutomaticAppDataRestore(exportData.snapshotId);
+    if (supportsAutomaticFileAppData()) {
+      await acknowledgeAutomaticAppDataRestore(exportData.snapshotId);
+    }
     return false;
   }
 
@@ -190,14 +196,45 @@ const restoreAutomaticAppDataIfNeeded = async () => {
 
   currentKeys.forEach((key) => localStorage.removeItem(key));
 
+  const restoredKeys = [];
+
   Object.entries(exportData.items).forEach(([key, value]) => {
     if (!isExcludedDashboardStorageKey(key) && typeof value === 'string') {
       localStorage.setItem(key, value);
+      restoredKeys.push(key);
     }
   });
 
+  /*
+   * Production uses the authenticated cloud-sync service. Mark every bundled
+   * deployment value as newer than the existing cloud copy so the cloud-sync
+   * initializer pushes the just-restored localhost snapshot instead of pulling
+   * stale production values back over it.
+   */
+  if (!supportsAutomaticFileAppData() && restoredKeys.length) {
+    const now = Date.now();
+    const keyMeta = {};
+
+    restoredKeys.forEach((key, index) => {
+      keyMeta[key] = now + index;
+    });
+
+    localStorage.setItem('budgetMobileSync.keyMeta.v1', JSON.stringify(keyMeta));
+    localStorage.setItem(
+      'budgetMobileSync.forcePush.v1',
+      JSON.stringify({
+        snapshotId: exportData.snapshotId,
+        createdAt: new Date().toISOString(),
+      })
+    );
+  }
+
   localStorage.setItem(APP_DATA_RESTORE_MARKER_KEY, exportData.snapshotId);
-  await acknowledgeAutomaticAppDataRestore(exportData.snapshotId);
+
+  if (supportsAutomaticFileAppData()) {
+    await acknowledgeAutomaticAppDataRestore(exportData.snapshotId);
+  }
+
   return true;
 };
 

@@ -17,7 +17,6 @@ import {
   loginMobileAccess,
   logoutMobileAccess,
   setupMobileAccess,
-  startCloudSync,
   stopCloudSync,
   subscribeCloudSyncStatus,
 } from "./cloudSync";
@@ -339,7 +338,8 @@ export default function MobileAccessGate({ children }) {
 
   const activateCloud = async (migrationFile = null) => {
     if (migrationFile) await importMobileMigrationFile(migrationFile);
-    await startCloudSync();
+    // Keep cloud synchronization disabled until deployment verification is approved.
+    stopCloudSync();
     setMode("ready");
   };
 
