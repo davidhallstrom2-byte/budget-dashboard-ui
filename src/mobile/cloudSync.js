@@ -9,6 +9,19 @@ const MAX_REQUEST_BYTES = 12 * 1024 * 1024;
 const MAX_VALUE_BYTES = 8 * 1024 * 1024;
 const byteLength = (text) => new TextEncoder().encode(text).length;
 
+const AUTH_REQUIRED_STATE = "auth-required";
+const AUTH_REQUIRED_MESSAGE = "Session expired. Sign in again. Local data is retained.";
+
+const isAuthenticationError = (error) => Number(error?.status || 0) === 401;
+
+const clearStaleAuthenticationPause = () => {
+  const pause = readJson(window.localStorage.getItem(UPLOAD_PAUSE_KEY) || "null", null);
+  const message = String(pause?.message || "");
+  if (/authentication required/i.test(message)) {
+    window.localStorage.removeItem(UPLOAD_PAUSE_KEY);
+  }
+};
+
 // Navigate the document first; API cookies always remain same-origin.
 const ensureCanonicalHost = () => {
   const url = new URL(window.location.href);
@@ -19,6 +32,30 @@ const ensureCanonicalHost = () => {
     url.port = "";
     window.location.replace(url.href);
     throw new Error("Opening the secure www dashboard before connecting...");
+  }
+};
+
+const TRANSFER_PART_BYTES = 48 * 1024;
+const DIRECT_UPLOAD_BYTES = 96 * 1024;
+const uploadSyncBody = async (request, body, supportsChunks) => {
+  const bytes = new TextEncoder().encode(body);
+  if (bytes.length <= DIRECT_UPLOAD_BYTES) return request("sync", { method: "POST", body });
+  if (!supportsChunks) throw new Error("Install the matching chunk-transfer API before uploading this large storage entry.");
+  const random = crypto.getRandomValues(new Uint8Array(16));
+  const id = Array.from(random, n => n.toString(16).padStart(2, "0")).join("");
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const sha256 = Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, "0")).join("");
+  const total = Math.ceil(bytes.length / TRANSFER_PART_BYTES);
+  for (let index = 0; index < total; index += 1) {
+    const part = bytes.subarray(index * TRANSFER_PART_BYTES, (index + 1) * TRANSFER_PART_BYTES);
+    let binary = "";
+    for (let offset = 0; offset < part.length; offset += 8192) binary += String.fromCharCode(...part.subarray(offset, offset + 8192));
+    const payload = await request("sync", { method: "POST", body: JSON.stringify({
+      protocol: 2, transfer: { id, index, total, bytes: bytes.length, sha256, data: btoa(binary) }
+    }) });
+    if (index === total - 1) return payload;
+    if (payload.transfer?.id !== id || payload.transfer?.next !== index + 1 || payload.transfer?.complete !== false)
+      throw new Error("Incomplete chunk acknowledgement. Uploads paused.");
   }
 };
 
@@ -171,6 +208,8 @@ const applyRemoteItems = (remoteItems, meta, baseline) => {
 };
 
 const createController = () => {
+  clearStaleAuthenticationPause();
+
   let stopped = false;
   let ready = false;
   let pollTimer = null;
@@ -183,6 +222,7 @@ const createController = () => {
   let keyMeta = readKeyMeta();
   let pendingChanges = Object.create(null);
   let uploadPaused = Boolean(window.localStorage.getItem(UPLOAD_PAUSE_KEY));
+  let supportsChunks = false;
   let pullNotBefore = 0;
   let lastReturnPull = -Infinity;
   const abort = new AbortController();
@@ -255,6 +295,12 @@ const createController = () => {
       window.dispatchEvent(new CustomEvent("budgetMobileSyncApplied"));
     }
   };
+  const requireAuthentication = () => {
+    uploadPaused = true;
+    try { window.localStorage.removeItem(UPLOAD_PAUSE_KEY); } catch { /* Local data remains authoritative. */ }
+    if (!stopped) updateStatus({ state: AUTH_REQUIRED_STATE, message: AUTH_REQUIRED_MESSAGE });
+  };
+
   const pauseUploads = (message) => {
     uploadPaused = true;
     try { window.localStorage.setItem(UPLOAD_PAUSE_KEY, JSON.stringify({ at: Date.now(), message })); } catch { /* Already paused in memory. */ }
@@ -281,7 +327,7 @@ const createController = () => {
       window.localStorage.setItem(UPLOAD_PAUSE_KEY, JSON.stringify({ at: Date.now(), message: "Upload acknowledgement pending" }));
       for (const key of Object.keys(changes)) delete pendingChanges[key];
       updateStatus({ state: "syncing", message: "Saving changes..." });
-      const payload = await request("sync", { method: "POST", body });
+      const payload = await uploadSyncBody(request, body, supportsChunks);
       if (stopped) return;
       validate(payload);
       if (!payload.accepted || typeof payload.accepted !== "object") throw new Error("Missing upload acknowledgement.");
@@ -297,7 +343,11 @@ const createController = () => {
     } catch (error) {
       if (stopped) return;
       pendingChanges = Object.assign(Object.create(null), changes, pendingChanges);
-      pauseUploads(error?.message || "Cloud save failed.");
+      if (isAuthenticationError(error)) {
+        requireAuthentication();
+      } else {
+        pauseUploads(error?.message || "Cloud save failed.");
+      }
     } finally {
       busy = false;
       queuePush();
@@ -320,7 +370,11 @@ const createController = () => {
     } catch (error) {
       // Focus events cannot turn a failing read into a tight retry loop.
       pullNotBefore = Date.now() + PULL_INTERVAL_MS;
-      if (!stopped) updateStatus({ state: "error", message: error?.message || "Could not check cloud data." });
+      if (isAuthenticationError(error)) {
+        requireAuthentication();
+      } else if (!stopped) {
+        updateStatus({ state: "error", message: error?.message || "Could not check cloud data." });
+      }
     } finally {
       busy = false;
       pullRequested = false;
@@ -343,6 +397,7 @@ const createController = () => {
     validate(payload);
     detectLocalChanges();
     revision = payload.revision;
+    supportsChunks = payload.chunkTransfer === 1;
     const remoteItems = payload.items;
     const force = readJson(window.localStorage.getItem(FORCE_PUSH_STORAGE_KEY) || "null", null);
     if (force && typeof force === "object" && String(force.snapshotId || "").trim()) {
@@ -420,7 +475,11 @@ export const startCloudSync = () => {
       controller.stop();
       activeController = null;
       startPromise = null;
-      updateStatus({ state: "error", message: error?.message || "Cloud sync could not start." });
+      updateStatus(
+        isAuthenticationError(error)
+          ? { state: AUTH_REQUIRED_STATE, message: AUTH_REQUIRED_MESSAGE }
+          : { state: "error", message: error?.message || "Cloud sync could not start." }
+      );
     }
     throw error;
   });

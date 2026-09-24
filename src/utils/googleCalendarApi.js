@@ -1,5 +1,8 @@
 const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
-const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
+const GOOGLE_CALENDAR_SCOPE = [
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.calendars",
+].join(" ");
 const GOOGLE_CALENDAR_ENDPOINT =
   "https://www.googleapis.com/calendar/v3/calendars/primary";
 const GOOGLE_CALENDAR_API_ROOT =
@@ -7,9 +10,11 @@ const GOOGLE_CALENDAR_API_ROOT =
 const GOOGLE_CALENDAR_EVENTS_ENDPOINT =
   "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
-const GOOGLE_TOKEN_STORAGE_KEY = "googleCalendarApi.accessToken.v2";
-const GOOGLE_TOKEN_EXPIRES_AT_STORAGE_KEY = "googleCalendarApi.accessTokenExpiresAt.v2";
+const GOOGLE_TOKEN_STORAGE_KEY = "googleCalendarApi.accessToken.v3";
+const GOOGLE_TOKEN_EXPIRES_AT_STORAGE_KEY = "googleCalendarApi.accessTokenExpiresAt.v3";
 const LEGACY_GOOGLE_TOKEN_STORAGE_KEYS = [
+  "googleCalendarApi.accessToken.v2",
+  "googleCalendarApi.accessTokenExpiresAt.v2",
   "googleCalendarApi.accessToken.v1",
   "googleCalendarApi.accessTokenExpiresAt.v1",
 ];

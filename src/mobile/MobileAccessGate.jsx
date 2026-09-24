@@ -17,6 +17,7 @@ import {
   loginMobileAccess,
   logoutMobileAccess,
   setupMobileAccess,
+  startCloudSync,
   stopCloudSync,
   subscribeCloudSyncStatus,
 } from "./cloudSync";
@@ -100,6 +101,12 @@ function AccessScreen({ mode, error, onSubmit, onRetry }) {
           </div>
         ) : (
           <form className="mt-6 space-y-4" onSubmit={submit}>
+            {error ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm font-bold text-amber-950">
+                {error}
+              </div>
+            ) : null}
+
             {isSetup ? (
               <label className="block text-sm font-bold text-slate-700">
                 Setup key
@@ -216,6 +223,14 @@ function AccessScreen({ mode, error, onSubmit, onRetry }) {
 
 function MobileSessionBar({ localMode, email, onLogout }) {
   const sessionBarRef = useRef(null);
+  const [retrying, setRetrying] = useState(false);
+  const retrySync = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try { const controller = await startCloudSync(); await controller.syncNow(); }
+    catch (error) { setStatus({ state: "error", message: error?.message || "Sync retry failed. Local data is retained." }); }
+    finally { setRetrying(false); }
+  };
   const [status, setStatus] = useState({
     state: localMode ? "local" : "syncing",
     message: localMode ? "Local app" : "Connecting...",
@@ -270,7 +285,9 @@ function MobileSessionBar({ localMode, email, onLogout }) {
         <div className="flex min-w-0 items-center gap-2 text-xs font-bold sm:text-sm">
           <Cloud
             className={`h-4 w-4 shrink-0 sm:h-3.5 sm:w-3.5 ${
-              status.state === "error" ? "text-red-400" : "text-cyan-400"
+              status.state === "error" || status.state === "auth-required"
+                ? "text-red-400"
+                : "text-cyan-400"
             }`}
           />
 
@@ -286,6 +303,12 @@ function MobileSessionBar({ localMode, email, onLogout }) {
         </div>
 
         <div className="flex items-center gap-2">
+          {!localMode && status.state === "error" ? (
+            <button type="button" onClick={retrySync} disabled={retrying}
+              className="inline-flex h-8 items-center rounded-md bg-blue-700 px-2.5 text-xs font-black hover:bg-blue-800 disabled:opacity-50 sm:h-7">
+              {retrying ? "Retrying..." : "Retry sync"}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={exportMobileMigrationFile}
@@ -338,8 +361,7 @@ export default function MobileAccessGate({ children }) {
 
   const activateCloud = async (migrationFile = null) => {
     if (migrationFile) await importMobileMigrationFile(migrationFile);
-    // Keep cloud synchronization disabled until deployment verification is approved.
-    stopCloudSync();
+    await startCloudSync();
     setMode("ready");
   };
 
@@ -365,6 +387,14 @@ export default function MobileAccessGate({ children }) {
       setEmail(status.user?.email || "");
       await activateCloud();
     } catch (statusError) {
+      if (Number(statusError?.status || 0) === 401) {
+        stopCloudSync();
+        setEmail("");
+        setError("Your session expired. Sign in again. Local data is retained.");
+        setMode("login");
+        return;
+      }
+
       setError(statusError?.message || "Could not reach the mobile service.");
       setMode("unavailable");
     }
@@ -376,6 +406,19 @@ export default function MobileAccessGate({ children }) {
     // The host does not change during the lifetime of the app.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (localMode) return undefined;
+
+    return subscribeCloudSyncStatus((nextStatus) => {
+      if (nextStatus.state !== "auth-required") return;
+
+      stopCloudSync();
+      setEmail("");
+      setError("Your session expired. Sign in again. Local data is retained.");
+      setMode("login");
+    });
+  }, [localMode]);
 
   const submitAccess = async ({
     setupKey,
@@ -398,6 +441,7 @@ export default function MobileAccessGate({ children }) {
       });
     }
 
+    setError("");
     setEmail(normalizedEmail);
     await activateCloud(migrationFile);
   };

@@ -4435,6 +4435,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [showScanDrawer, setShowScanDrawer] = useState(false);
   const [showArchiveDrawer, setShowArchiveDrawer] = useState(false);
   const [showDataScreen, setShowDataScreen] = useState(false);
+  const [isCompleteBackupDragActive, setIsCompleteBackupDragActive] = useState(false);
   const [archiveSearch, setArchiveSearch] = useState('');
   const [archiveStatusFilter, setArchiveStatusFilter] = useState('All');
   const [shiftEmailText, setShiftEmailText] = useState('');
@@ -4466,6 +4467,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [selectedPaidMonthKey, setSelectedPaidMonthKey] = useState('');
   const [selectedWeekKey, setSelectedWeekKey] = useState('');
   const toolbarImportInputRef = useRef(null);
+  const completeBackupImportInputRef = useRef(null);
+  const completeBackupDragDepthRef = useRef(0);
   const venueFilterRef = useRef(null);
   const shiftBrowserRef = useRef(null);
   const calendarAddLockRef = useRef(new Set());
@@ -7853,6 +7856,220 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     }
   };
 
+  const handleExportCompleteCscBackup = () => {
+    try {
+      const backup = {
+        format: 'budget-dashboard-csc-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        activeShifts: shifts,
+        archivedShifts,
+        metadata: {
+          deletedSeedIds: JSON.parse(localStorage.getItem(CSC_DELETED_SEED_STORAGE_KEY) || '[]'),
+          googleCalendarAdded: JSON.parse(localStorage.getItem(CSC_CALENDAR_ADDED_STORAGE_KEY) || '[]'),
+          wishEssLatest: JSON.parse(localStorage.getItem(CSC_WISH_ESS_LATEST_STORAGE_KEY) || 'null'),
+          september1RecoveryState: localStorage.getItem(CSC_SEPT_1_2026_RECOVERY_STORAGE_KEY),
+        },
+      };
+
+      const dataBlob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: 'application/json;charset=utf-8;',
+      });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = `CSC_Complete_Backup_David_Hallstrom_${new Date().toISOString().slice(0, 10)}.json`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setSaveMessage(
+        `Complete CSC backup exported: ${shifts.length} active, ${archivedShifts.length} archived.`
+      );
+      setTimeout(() => setSaveMessage(''), 3500);
+    } catch (error) {
+      console.error('Failed to export complete CSC backup:', error);
+      setSaveMessage('Complete CSC backup export failed.');
+      setTimeout(() => setSaveMessage(''), 3500);
+    }
+  };
+
+  const restoreCompleteCscBackupFile = (file) => {
+    if (!file) return;
+
+    const fileName = String(file.name || '').trim();
+    const fileType = String(file.type || '').toLowerCase();
+    const looksLikeJson =
+      fileName.toLowerCase().endsWith('.json') ||
+      fileType === 'application/json' ||
+      fileType === 'text/json';
+
+    if (!looksLikeJson) {
+      setSaveMessage('Choose or drop a JSON complete CSC backup file.');
+      setTimeout(() => setSaveMessage(''), 5000);
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = (loadEvent) => {
+      try {
+        const parsed = JSON.parse(String(loadEvent.target?.result || ''));
+
+        if (
+          !parsed ||
+          parsed.format !== 'budget-dashboard-csc-backup' ||
+          parsed.version !== 1 ||
+          !Array.isArray(parsed.activeShifts) ||
+          !Array.isArray(parsed.archivedShifts)
+        ) {
+          throw new Error('Invalid CSC backup file.');
+        }
+
+        const nextActive = parsed.activeShifts.map(normalizeShift);
+        const nextArchived = parsed.archivedShifts.map(normalizeShift);
+        const combined = [...nextActive, ...nextArchived];
+        const ids = combined.map((shift) => String(shift?.id || '').trim());
+
+        if (ids.some((id) => !id)) {
+          throw new Error('CSC backup contains a shift without an ID.');
+        }
+
+        if (new Set(ids).size !== ids.length) {
+          throw new Error('CSC backup contains duplicate shift IDs across active and archived records.');
+        }
+
+        const snapshotSaved = writeCscSafetySnapshot(
+          'Before complete CSC backup restore',
+          shifts,
+          archivedShifts
+        );
+
+        if (!snapshotSaved) {
+          throw new Error('Could not save the pre-restore CSC safety snapshot. Restore cancelled.');
+        }
+
+        const metadata = parsed.metadata && typeof parsed.metadata === 'object' ? parsed.metadata : {};
+
+        localStorage.setItem(CSC_STORAGE_KEY, JSON.stringify(nextActive));
+        localStorage.setItem(CSC_ARCHIVE_STORAGE_KEY, JSON.stringify(nextArchived));
+        localStorage.setItem(
+          CSC_DELETED_SEED_STORAGE_KEY,
+          JSON.stringify(Array.isArray(metadata.deletedSeedIds) ? metadata.deletedSeedIds : [])
+        );
+        localStorage.setItem(
+          CSC_CALENDAR_ADDED_STORAGE_KEY,
+          JSON.stringify(Array.isArray(metadata.googleCalendarAdded) ? metadata.googleCalendarAdded : [])
+        );
+
+        if (metadata.wishEssLatest == null) {
+          localStorage.removeItem(CSC_WISH_ESS_LATEST_STORAGE_KEY);
+        } else {
+          localStorage.setItem(CSC_WISH_ESS_LATEST_STORAGE_KEY, JSON.stringify(metadata.wishEssLatest));
+        }
+
+        if (metadata.september1RecoveryState == null || metadata.september1RecoveryState === '') {
+          localStorage.removeItem(CSC_SEPT_1_2026_RECOVERY_STORAGE_KEY);
+        } else {
+          localStorage.setItem(
+            CSC_SEPT_1_2026_RECOVERY_STORAGE_KEY,
+            String(metadata.september1RecoveryState)
+          );
+        }
+
+        setShifts(nextActive);
+        setArchivedShifts(nextArchived);
+        syncOpportunityLinksFromShifts(nextActive, nextArchived);
+
+        setSaveMessage(
+          `Complete CSC backup restored exactly: ${nextActive.length} active, ${nextArchived.length} archived.`
+        );
+        setTimeout(() => setSaveMessage(''), 5000);
+      } catch (error) {
+        console.error('Failed to restore complete CSC backup:', error);
+        setSaveMessage(error?.message || 'Complete CSC backup restore failed.');
+        setTimeout(() => setSaveMessage(''), 5000);
+      }
+    };
+
+    reader.onerror = () => {
+      setSaveMessage('Complete CSC backup could not be read.');
+      setTimeout(() => setSaveMessage(''), 5000);
+    };
+
+    reader.readAsText(file);
+  };
+
+  const handleRestoreCompleteCscBackup = (event) => {
+    const input = event.target;
+    const file = input.files?.[0];
+
+    if (file) {
+      restoreCompleteCscBackupFile(file);
+    }
+
+    input.value = '';
+  };
+
+  const handleCompleteBackupDragEnter = (event) => {
+    if (!showDataScreen || !Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+
+    event.preventDefault();
+    completeBackupDragDepthRef.current += 1;
+    setIsCompleteBackupDragActive(true);
+  };
+
+  const handleCompleteBackupDragOver = (event) => {
+    if (!showDataScreen || !Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleCompleteBackupDragLeave = (event) => {
+    if (!showDataScreen) return;
+
+    event.preventDefault();
+    completeBackupDragDepthRef.current = Math.max(completeBackupDragDepthRef.current - 1, 0);
+
+    if (completeBackupDragDepthRef.current === 0) {
+      setIsCompleteBackupDragActive(false);
+    }
+  };
+
+  const handleCompleteBackupDrop = (event) => {
+    if (!showDataScreen) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    completeBackupDragDepthRef.current = 0;
+    setIsCompleteBackupDragActive(false);
+
+    const files = Array.from(event.dataTransfer?.files || []);
+    const jsonFile = files.find((file) => {
+      const fileName = String(file?.name || '').toLowerCase();
+      const fileType = String(file?.type || '').toLowerCase();
+
+      return (
+        fileName.endsWith('.json') ||
+        fileType === 'application/json' ||
+        fileType === 'text/json'
+      );
+    });
+
+    if (!jsonFile) {
+      setSaveMessage('Drop a JSON complete CSC backup file.');
+      setTimeout(() => setSaveMessage(''), 5000);
+      return;
+    }
+
+    restoreCompleteCscBackupFile(jsonFile);
+  };
+
   const handleExportCsv = () => {
     const csv = buildCsv(shifts);
     const dataBlob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -9786,60 +10003,110 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
         />
 
         <input ref={toolbarImportInputRef} type="file" accept=".csv,text/csv" onChange={handleImportCsv} className="hidden" />
+        <input
+          ref={completeBackupImportInputRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={handleRestoreCompleteCscBackup}
+          className="hidden"
+        />
 
         {showDataScreen ? (
-          <DataToolsScreen
-            title="CSC Shift Data and Backups"
-            subtitle="Import or export CSC shift data, save a safety snapshot, or reconcile Google Calendar against current CSC Shifts."
-            onClose={() => setShowDataScreen(false)}
-            tools={[
-              {
-                key: 'export',
-                icon: Download,
-                tone: 'sky',
-                title: 'Export CSC Shifts',
-                description: 'Download the current CSC shift list as a CSV file.',
-                buttonLabel: 'Export CSC Shifts',
-                onClick: handleExportCsv,
-              },
-              {
-                key: 'import',
-                icon: FileUp,
-                tone: 'indigo',
-                title: 'Import CSC Shifts',
-                description: 'Add or update CSC shifts from a previously exported CSV file.',
-                buttonLabel: 'Choose CSV File',
-                onClick: () => toolbarImportInputRef.current?.click(),
-              },
-              {
-                key: 'snapshot',
-                icon: History,
-                tone: 'emerald',
-                title: 'Safety Snapshot',
-                description: 'Save active and archived CSC shifts locally before bulk imports or edits.',
-                buttonLabel: 'Save Safety Snapshot',
-                onClick: handleManualSafetySnapshot,
-              },
-              {
-                key: 'calendar-cleanup',
-                icon: Eraser,
-                tone: 'indigo',
-                title: 'Clean Google Calendar',
-                description: 'Compare future CSC calendar events against current CSC Shifts, keep one event per real shift, and remove only duplicate or stale CSC events.',
-                buttonLabel: 'Remove Calendar Duplicates',
-                onClick: handleCleanGoogleCalendarDuplicates,
-              },
-              {
-                key: 'dashboard-export',
-                icon: Download,
-                tone: 'violet',
-                title: 'Complete Dashboard Backup',
-                description: 'Download all dashboard data as one JSON backup file.',
-                buttonLabel: 'Export Complete Dashboard',
-                onClick: () => window.dispatchEvent(new CustomEvent('dashboard-toolbar:export-all')),
-              },
-            ]}
-          />
+          <div
+            onDragEnter={handleCompleteBackupDragEnter}
+            onDragOver={handleCompleteBackupDragOver}
+            onDragLeave={handleCompleteBackupDragLeave}
+            onDrop={handleCompleteBackupDrop}
+          >
+            <DataToolsScreen
+              title="CSC Shift Data and Backups"
+              subtitle="Import or export CSC shift data, save a safety snapshot, restore a complete CSC backup by file picker or drag and drop, or reconcile Google Calendar against current CSC Shifts."
+              onClose={() => {
+                completeBackupDragDepthRef.current = 0;
+                setIsCompleteBackupDragActive(false);
+                setShowDataScreen(false);
+              }}
+              tools={[
+                {
+                  key: 'complete-csc-export',
+                  icon: Download,
+                  tone: 'emerald',
+                  title: 'Export Complete CSC Backup',
+                  description: 'Download active and archived CSC shifts plus CSC restore metadata as one JSON backup.',
+                  buttonLabel: 'Export Complete CSC Backup',
+                  onClick: handleExportCompleteCscBackup,
+                },
+                {
+                  key: 'complete-csc-restore',
+                  icon: FileUp,
+                  tone: 'amber',
+                  title: 'Restore Complete CSC Backup',
+                  description: 'Drag a complete CSC backup JSON file anywhere onto this screen, or choose a file. A safety snapshot is saved before active and archived CSC data are replaced.',
+                  buttonLabel: 'Choose CSC Backup',
+                  onClick: () => completeBackupImportInputRef.current?.click(),
+                },
+                {
+                  key: 'export',
+                  icon: Download,
+                  tone: 'sky',
+                  title: 'Export Active CSC Shifts (CSV)',
+                  description: 'Download active CSC shifts only as a CSV file. Archived shifts are not included.',
+                  buttonLabel: 'Export Active CSV',
+                  onClick: handleExportCsv,
+                },
+                {
+                  key: 'import',
+                  icon: FileUp,
+                  tone: 'indigo',
+                  title: 'Import Active CSC Shifts (CSV)',
+                  description: 'Add or update active CSC shifts from CSV. Existing archived shifts are preserved and skipped.',
+                  buttonLabel: 'Choose CSV File',
+                  onClick: () => toolbarImportInputRef.current?.click(),
+                },
+                {
+                  key: 'snapshot',
+                  icon: History,
+                  tone: 'emerald',
+                  title: 'Safety Snapshot',
+                  description: 'Save active and archived CSC shifts locally before bulk imports or edits.',
+                  buttonLabel: 'Save Safety Snapshot',
+                  onClick: handleManualSafetySnapshot,
+                },
+                {
+                  key: 'calendar-cleanup',
+                  icon: Eraser,
+                  tone: 'indigo',
+                  title: 'Clean Google Calendar',
+                  description: 'Compare future CSC calendar events against current CSC Shifts, keep one event per real shift, and remove only duplicate or stale CSC events.',
+                  buttonLabel: 'Remove Calendar Duplicates',
+                  onClick: handleCleanGoogleCalendarDuplicates,
+                },
+                {
+                  key: 'dashboard-export',
+                  icon: Download,
+                  tone: 'violet',
+                  title: 'Complete Dashboard Backup',
+                  description: 'Download all dashboard data as one JSON backup file.',
+                  buttonLabel: 'Export Complete Dashboard',
+                  onClick: () => window.dispatchEvent(new CustomEvent('dashboard-toolbar:export-all')),
+                },
+              ]}
+            />
+
+            {isCompleteBackupDragActive ? (
+              <div className="pointer-events-none fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4">
+                <div className="w-full max-w-xl rounded-3xl border-2 border-dashed border-amber-300 bg-amber-50 px-6 py-10 text-center shadow-2xl">
+                  <FileUp className="mx-auto h-12 w-12 text-amber-700" />
+                  <p className="mt-4 text-xl font-black text-slate-950">
+                    Drop Complete CSC Backup
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-700">
+                    Release the JSON backup file to validate it, save a safety snapshot, and restore CSC data.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         <section aria-labelledby="csc-current-month-summary-title" className="min-w-0">
