@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Archive,
   BriefcaseBusiness,
@@ -4436,6 +4437,8 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
   const [showArchiveDrawer, setShowArchiveDrawer] = useState(false);
   const [showDataScreen, setShowDataScreen] = useState(false);
   const [isCompleteBackupDragActive, setIsCompleteBackupDragActive] = useState(false);
+  const [calendarAuditRunning, setCalendarAuditRunning] = useState(false);
+  const [calendarAuditReport, setCalendarAuditReport] = useState(null);
   const [archiveSearch, setArchiveSearch] = useState('');
   const [archiveStatusFilter, setArchiveStatusFilter] = useState('All');
   const [shiftEmailText, setShiftEmailText] = useState('');
@@ -4488,6 +4491,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       showArchiveDrawer ||
       showScanDrawer ||
       showAddDrawer ||
+      Boolean(calendarAuditReport) ||
       showDataScreen;
     if (!hasOpenLayer) return undefined;
 
@@ -4518,6 +4522,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       else if (selectedPaidMonthKey) setSelectedPaidMonthKey('');
       else if (showArchiveDrawer) setShowArchiveDrawer(false);
       else if (showScanDrawer) setShowScanDrawer(false);
+      else if (calendarAuditReport) setCalendarAuditReport(null);
       else if (showDataScreen) setShowDataScreen(false);
     };
 
@@ -4532,6 +4537,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     showAddDrawer,
     showArchiveDrawer,
     showDataScreen,
+    calendarAuditReport,
     showPremiumOverlay,
     showScanDrawer,
     showUpcomingScheduleOverlay,
@@ -7544,6 +7550,230 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     setTimeout(() => setSaveMessage(''), 2500);
   };
 
+  const handleVerifyCscDataAgainstGoogleCalendar = async () => {
+    if (calendarAuditRunning || calendarCleanupLockRef.current || calendarAddLockRef.current.size) {
+      setSaveMessage('A Google Calendar operation is already running.');
+      window.setTimeout(() => setSaveMessage(''), 3000);
+      return;
+    }
+
+    calendarCleanupLockRef.current = true;
+    setCalendarAuditRunning(true);
+    setCalendarAuditReport(null);
+    setSaveMessage('Verifying CSC data against Google Calendar. No data will be changed...');
+
+    try {
+      const currentRecords = Array.from(
+        new Map(
+          [...shifts, ...archivedShifts]
+            .filter((shift) => shift?.id)
+            .map((shift) => [shift.id, shift])
+        ).values()
+      );
+      const snapshotOnlyRecords = pastShiftRecords.filter(
+        (shift) => shift?.recordSource === 'snapshot'
+      );
+      const allDateSources = [...currentRecords, ...snapshotOnlyRecords]
+        .map((shift) => String(shift?.startDate || '').trim())
+        .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+      const currentYear = new Date().getFullYear();
+      const years = allDateSources
+        .map((value) => Number(value.slice(0, 4)))
+        .filter(Number.isFinite);
+      const firstYear = years.length ? Math.min(...years, currentYear) : currentYear;
+      const lastYear = years.length ? Math.max(...years, currentYear) : currentYear;
+      const rangeStart = new Date(`${firstYear}-01-01T00:00:00`);
+      const rangeEnd = new Date(`${lastYear + 2}-01-01T00:00:00`);
+
+      const calendarEvents = await listGoogleCalendarEvents({
+        timeMin: rangeStart.toISOString(),
+        timeMax: rangeEnd.toISOString(),
+        query: 'CSC Shift',
+      });
+      const cscCalendarEvents = calendarEvents.filter(isCscManagedGoogleCalendarEvent);
+      const calendarRegistry = readCalendarRegistry();
+      const claimedEventIds = new Set();
+
+      const currentComparable = dedupeShiftRecords(
+        currentRecords.filter(
+          (shift) =>
+            shift.startDate &&
+            shift.startTime &&
+            shift.finishTime &&
+            normalizeShiftStatus(shift.shiftStatus) !== 'Cancelled'
+        )
+      ).shifts;
+      const currentCancelled = currentRecords.filter(
+        (shift) => normalizeShiftStatus(shift.shiftStatus) === 'Cancelled'
+      );
+
+      const orderedCurrent = [...currentComparable].sort((first, second) => {
+        const firstRegistry = findCalendarRegistryEntry(first, calendarRegistry);
+        const secondRegistry = findCalendarRegistryEntry(second, calendarRegistry);
+        const firstLinked = Boolean(
+          first.googleCalendarEventId || firstRegistry?.googleCalendarEventId
+        );
+        const secondLinked = Boolean(
+          second.googleCalendarEventId || secondRegistry?.googleCalendarEventId
+        );
+
+        if (firstLinked !== secondLinked) return firstLinked ? -1 : 1;
+
+        return getCscShiftCalendarStartKey(first).localeCompare(
+          getCscShiftCalendarStartKey(second)
+        );
+      });
+
+      const matchedCurrent = [];
+      orderedCurrent.forEach((shift) => {
+        const registryEntry = findCalendarRegistryEntry(shift, calendarRegistry);
+        const availableEvents = cscCalendarEvents.filter(
+          (event) => event?.id && !claimedEventIds.has(event.id)
+        );
+        const matchedEvent = findBestCscGoogleCalendarEventForShift(
+          shift,
+          availableEvents,
+          registryEntry
+        );
+
+        if (!matchedEvent?.id) return;
+
+        claimedEventIds.add(matchedEvent.id);
+        matchedCurrent.push({ shift, event: matchedEvent });
+      });
+
+      const matchedCurrentIds = new Set(
+        matchedCurrent.map(({ shift }) => shift.id)
+      );
+      const missingCurrent = currentComparable.filter(
+        (shift) => !matchedCurrentIds.has(shift.id)
+      );
+
+      const snapshotComparable = dedupeShiftRecords(
+        snapshotOnlyRecords.filter(
+          (shift) =>
+            shift.startDate &&
+            shift.startTime &&
+            shift.finishTime &&
+            normalizeShiftStatus(shift.shiftStatus) !== 'Cancelled'
+        )
+      ).shifts;
+      const matchedSnapshotOnly = [];
+
+      snapshotComparable.forEach((shift) => {
+        const availableEvents = cscCalendarEvents.filter(
+          (event) => event?.id && !claimedEventIds.has(event.id)
+        );
+        const matchedEvent = findBestCscGoogleCalendarEventForShift(
+          shift,
+          availableEvents,
+          findCalendarRegistryEntry(shift, calendarRegistry)
+        );
+
+        if (!matchedEvent?.id) return;
+
+        claimedEventIds.add(matchedEvent.id);
+        matchedSnapshotOnly.push({ shift, event: matchedEvent });
+      });
+
+      const matchedSnapshotIds = new Set(
+        matchedSnapshotOnly.map(({ shift }) => shift.id)
+      );
+      const unsupportedSnapshotOnly = snapshotComparable.filter(
+        (shift) => !matchedSnapshotIds.has(shift.id)
+      );
+
+      const matchedGroups = new Set(
+        [...matchedCurrent, ...matchedSnapshotOnly].map(({ shift }) =>
+          [
+            getCscShiftCalendarStartKey(shift),
+            normalizeCalendarVenueIdentity(shift.venue),
+          ].join('|')
+        )
+      );
+
+      const unmatchedCalendarEvents = cscCalendarEvents
+        .filter((event) => event?.id && !claimedEventIds.has(event.id))
+        .map((event) => {
+          const eventGroup = [
+            getCscGoogleCalendarEventStartKey(event),
+            getCscGoogleCalendarEventVenueIdentity(event),
+          ].join('|');
+
+          return {
+            event,
+            reason: matchedGroups.has(eventGroup) ? 'duplicate' : 'unmatched',
+          };
+        });
+
+      const duplicateCalendarEvents = unmatchedCalendarEvents.filter(
+        ({ reason }) => reason === 'duplicate'
+      );
+      const unlinkedCalendarEvents = unmatchedCalendarEvents.filter(
+        ({ reason }) => reason === 'unmatched'
+      );
+
+      const archiveRecordIds = new Set(archivedShifts.map((shift) => shift?.id).filter(Boolean));
+      const activePastRecords = pastShiftRecords.filter(
+        (shift) => shift?.recordSource === 'active'
+      );
+      const snapshotPastRecords = pastShiftRecords.filter(
+        (shift) => shift?.recordSource === 'snapshot'
+      );
+      const archivedPastRecords = pastShiftRecords.filter(
+        (shift) => shift?.recordSource === 'archived' && archiveRecordIds.has(shift.id)
+      );
+
+      setShowDataScreen(false);
+      setCalendarAuditReport({
+        checkedAt: new Date().toISOString(),
+        rangeStart: `${firstYear}-01-01`,
+        rangeEnd: `${lastYear + 1}-12-31`,
+        counts: {
+          activeStored: shifts.length,
+          archivedStored: archivedShifts.length,
+          pastDrawer: pastShiftRecords.length,
+          archivedPastRecords: archivedPastRecords.length,
+          activePastRecords: activePastRecords.length,
+          snapshotOnlyPast: snapshotPastRecords.length,
+          cancelledStored: currentCancelled.length,
+          calendarEvents: cscCalendarEvents.length,
+          comparableCurrent: currentComparable.length,
+          matchedCurrent: matchedCurrent.length,
+          missingCurrent: missingCurrent.length,
+          snapshotCalendarSupported: matchedSnapshotOnly.length,
+          snapshotUnsupported: unsupportedSnapshotOnly.length,
+          duplicateCalendarEvents: duplicateCalendarEvents.length,
+          unlinkedCalendarEvents: unlinkedCalendarEvents.length,
+        },
+        missingCurrent,
+        matchedSnapshotOnly,
+        unsupportedSnapshotOnly,
+        duplicateCalendarEvents,
+        unlinkedCalendarEvents,
+      });
+
+      setSaveMessage(
+        `CSC Calendar audit complete. ${matchedCurrent.length} current shift${
+          matchedCurrent.length === 1 ? '' : 's'
+        } matched; ${missingCurrent.length} missing from Calendar; ${
+          matchedSnapshotOnly.length
+        } snapshot-only record${matchedSnapshotOnly.length === 1 ? '' : 's'} supported by Calendar. No data changed.`
+      );
+      window.setTimeout(() => setSaveMessage(''), 9000);
+    } catch (error) {
+      console.error('CSC Google Calendar audit failed:', error);
+      setSaveMessage(
+        error?.message ||
+          'CSC Google Calendar audit failed. No CSC or Calendar data was changed.'
+      );
+      window.setTimeout(() => setSaveMessage(''), 7000);
+    } finally {
+      setCalendarAuditRunning(false);
+      calendarCleanupLockRef.current = false;
+    }
+  };
+
   const handleCleanGoogleCalendarDuplicates = async () => {
     if (calendarCleanupLockRef.current || calendarAddLockRef.current.size) {
       setSaveMessage('A Google Calendar operation is already running.');
@@ -8600,6 +8830,205 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       window.print();
       window.setTimeout(cleanup, 1000);
     });
+  };
+
+
+  const handlePrintCalendarAudit = () => {
+    if (!calendarAuditReport) return;
+
+    const formatAuditShiftLine = (shift = {}) => {
+      const title = shift.jobName || shift.event || shift.shiftName || shift.id || 'CSC Shift';
+      const venue = shift.venue || 'Venue unknown';
+      const date = formatShortDate(shift.startDate);
+      const time = formatTime(shift.startTime);
+
+      return {
+        heading: `${date}${time ? ` ${time}` : ''} · ${venue}`,
+        detail: title,
+      };
+    };
+
+    const buildAuditShiftRows = (items = []) =>
+      items.length
+        ? items
+            .map((shift) => {
+              const line = formatAuditShiftLine(shift);
+              return `<tr><td>${escapeHtml(line.heading)}</td><td>${escapeHtml(line.detail)}</td></tr>`;
+            })
+            .join('')
+        : '<tr><td colspan="2" class="empty">None.</td></tr>';
+
+    const buildAuditMatchedSnapshotRows = (items = []) =>
+      items.length
+        ? items
+            .map(({ shift, event }) => {
+              const line = formatAuditShiftLine(shift);
+              return `<tr><td>${escapeHtml(line.heading)}</td><td>${escapeHtml(line.detail)}</td><td>${escapeHtml(
+                event?.summary || event?.id || ''
+              )}</td></tr>`;
+            })
+            .join('')
+        : '<tr><td colspan="3" class="empty">None.</td></tr>';
+
+    const extraCalendarEvents = [
+      ...(calendarAuditReport.duplicateCalendarEvents || []),
+      ...(calendarAuditReport.unlinkedCalendarEvents || []),
+    ];
+
+    const buildAuditCalendarRows = (items = []) =>
+      items.length
+        ? items
+            .map(({ event, reason }) => {
+              const start = event?.start?.dateTime || event?.start?.date || '';
+              return `<tr><td>${escapeHtml(event?.summary || event?.id || 'CSC Calendar event')}</td><td>${escapeHtml(
+                start
+              )}</td><td>${escapeHtml(reason === 'duplicate' ? 'Likely duplicate' : 'No current CSC match')}</td></tr>`;
+            })
+            .join('')
+        : '<tr><td colspan="3" class="empty">None.</td></tr>';
+
+    const summaryCards = [
+      ['Active stored', calendarAuditReport.counts.activeStored],
+      ['Archived stored', calendarAuditReport.counts.archivedStored],
+      ['Past Shifts badge', calendarAuditReport.counts.pastDrawer],
+      ['Snapshot-only past', calendarAuditReport.counts.snapshotOnlyPast],
+      ['CSC Calendar events', calendarAuditReport.counts.calendarEvents],
+      ['Current shifts matched', calendarAuditReport.counts.matchedCurrent],
+      ['Current missing Calendar', calendarAuditReport.counts.missingCurrent],
+      ['Snapshot-only matched', calendarAuditReport.counts.snapshotCalendarSupported],
+      ['Duplicate Calendar events', calendarAuditReport.counts.duplicateCalendarEvents],
+      ['Unmatched Calendar events', calendarAuditReport.counts.unlinkedCalendarEvents],
+      ['Active records in Past Shifts', calendarAuditReport.counts.activePastRecords],
+      ['Cancelled stored', calendarAuditReport.counts.cancelledStored],
+    ]
+      .map(
+        ([label, value]) =>
+          `<div class="summary-card"><div class="summary-label">${escapeHtml(label)}</div><div class="summary-value">${escapeHtml(
+            value
+          )}</div></div>`
+      )
+      .join('');
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setSaveMessage('Print window was blocked. Allow pop-ups for this site and try again.');
+      window.setTimeout(() => setSaveMessage(''), 5000);
+      return;
+    }
+
+    try {
+      printWindow.opener = null;
+    } catch (error) {
+      console.warn('Could not clear audit print window opener:', error);
+    }
+
+    const auditHtml = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>CSC Data vs Google Calendar Audit</title>
+  <style>
+    @page { size: portrait; margin: 0.45in; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #0f172a; font-family: Arial, Helvetica, sans-serif; }
+    body { font-size: 11px; line-height: 1.35; }
+    h1, h2, p { margin: 0; }
+    .report { width: 100%; }
+    .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 12px; }
+    .header h1 { font-size: 21px; line-height: 1.15; }
+    .subtitle { margin-top: 5px; font-size: 11px; font-weight: 700; color: #475569; }
+    .range { margin-top: 3px; font-size: 10px; font-weight: 700; color: #64748b; }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-bottom: 14px; }
+    .summary-card { border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px; break-inside: avoid; }
+    .summary-label { font-size: 8px; font-weight: 800; text-transform: uppercase; color: #475569; }
+    .summary-value { margin-top: 4px; font-size: 20px; line-height: 1; font-weight: 800; }
+    .section { margin-top: 13px; break-inside: auto; }
+    .section h2 { font-size: 13px; margin-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 7px; vertical-align: top; word-wrap: break-word; }
+    th { background: #f1f5f9; text-align: left; font-size: 9px; text-transform: uppercase; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    .empty { color: #047857; font-weight: 700; }
+    .note { margin-top: 14px; border: 1px solid #bfdbfe; background: #eff6ff; padding: 9px; border-radius: 7px; font-weight: 700; break-inside: avoid; }
+    @media print {
+      html, body { width: auto !important; height: auto !important; overflow: visible !important; }
+      .report { position: static !important; transform: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="report">
+    <header class="header">
+      <h1>CSC Data vs Google Calendar Audit</h1>
+      <p class="subtitle">Read-only comparison. No CSC data or Google Calendar events were changed.</p>
+      <p class="range">Calendar range: ${escapeHtml(calendarAuditReport.rangeStart)} through ${escapeHtml(
+        calendarAuditReport.rangeEnd
+      )}</p>
+    </header>
+
+    <section class="summary-grid">${summaryCards}</section>
+
+    <section class="section">
+      <h2>Current CSC shifts missing from Calendar (${calendarAuditReport.missingCurrent.length})</h2>
+      <table>
+        <thead><tr><th style="width:42%">Shift</th><th>Event / Job</th></tr></thead>
+        <tbody>${buildAuditShiftRows(calendarAuditReport.missingCurrent)}</tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Snapshot-only records supported by Calendar (${calendarAuditReport.matchedSnapshotOnly.length})</h2>
+      <table>
+        <thead><tr><th style="width:34%">Shift</th><th style="width:33%">Event / Job</th><th>Calendar Match</th></tr></thead>
+        <tbody>${buildAuditMatchedSnapshotRows(calendarAuditReport.matchedSnapshotOnly)}</tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Snapshot-only records without Calendar support (${calendarAuditReport.unsupportedSnapshotOnly.length})</h2>
+      <table>
+        <thead><tr><th style="width:42%">Shift</th><th>Event / Job</th></tr></thead>
+        <tbody>${buildAuditShiftRows(calendarAuditReport.unsupportedSnapshotOnly)}</tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Extra Calendar events (${extraCalendarEvents.length})</h2>
+      <table>
+        <thead><tr><th>Calendar Event</th><th style="width:29%">Start</th><th style="width:24%">Reason</th></tr></thead>
+        <tbody>${buildAuditCalendarRows(extraCalendarEvents)}</tbody>
+      </table>
+    </section>
+
+    <div class="note">
+      The Past Shifts badge currently counts archived records, qualifying active past/Done/Cancelled records, and snapshot-only historical records. Use this audit to determine whether snapshot-only records are corroborated by Google Calendar before changing the badge logic or restoring records.
+    </div>
+  </main>
+</body>
+</html>`;
+
+    printWindow.document.open();
+    printWindow.document.write(auditHtml);
+    printWindow.document.close();
+
+    const triggerAuditPrint = () => {
+      if (printWindow.closed) return;
+
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch (error) {
+        console.error('CSC audit print failed:', error);
+      }
+    };
+
+    if (printWindow.document.readyState === 'complete') {
+      window.setTimeout(triggerAuditPrint, 150);
+    } else {
+      printWindow.addEventListener('load', () => {
+        window.setTimeout(triggerAuditPrint, 150);
+      }, { once: true });
+    }
   };
 
   const handlePrintSelectedAiMonthSchedule = () => {
@@ -10024,6 +10453,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
               onClose={() => {
                 completeBackupDragDepthRef.current = 0;
                 setIsCompleteBackupDragActive(false);
+                setCalendarAuditReport(null);
                 setShowDataScreen(false);
               }}
               tools={[
@@ -10073,6 +10503,15 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   onClick: handleManualSafetySnapshot,
                 },
                 {
+                  key: 'calendar-audit',
+                  icon: Search,
+                  tone: 'sky',
+                  title: 'Verify CSC Data vs Google Calendar',
+                  description: 'Run a read-only audit of active shifts, archived shifts, Past Shifts, snapshot-only records, and managed CSC Google Calendar events. Nothing is changed or deleted.',
+                  buttonLabel: calendarAuditRunning ? 'Verifying...' : 'Verify CSC Data',
+                  onClick: handleVerifyCscDataAgainstGoogleCalendar,
+                },
+                {
                   key: 'calendar-cleanup',
                   icon: Eraser,
                   tone: 'indigo',
@@ -10108,6 +10547,180 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             ) : null}
           </div>
         ) : null}
+
+        {calendarAuditReport ? createPortal((
+              <div className="fixed inset-0 flex items-center justify-center bg-slate-950/70 p-3 sm:p-6" style={{ zIndex: 10050 }}>
+                <div
+                  id="csc-calendar-audit-print"
+                  className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-300 bg-white shadow-2xl"
+                >
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-6 w-6 text-emerald-700" />
+                        <h2 className="text-xl font-black text-slate-950">
+                          CSC Data vs Google Calendar Audit
+                        </h2>
+                      </div>
+                      <p className="mt-1 text-sm font-semibold text-slate-600">
+                        Read-only comparison. No CSC data or Google Calendar events were changed.
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        Calendar range: {calendarAuditReport.rangeStart} through {calendarAuditReport.rangeEnd}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handlePrintCalendarAudit}
+                        className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-black text-white shadow-sm hover:bg-emerald-600"
+                        aria-label="Print CSC Data vs Google Calendar Audit"
+                        title="Print CSC Data vs Google Calendar Audit"
+                      >
+                        <Printer className="h-4 w-4" />
+                        Print Audit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCalendarAuditReport(null)}
+                        className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white hover:bg-slate-800"
+                      >
+                        <X className="h-4 w-4" />
+                        Close
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="csc-print-scroll min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      {[
+                        ['Active stored', calendarAuditReport.counts.activeStored],
+                        ['Archived stored', calendarAuditReport.counts.archivedStored],
+                        ['Past Shifts badge', calendarAuditReport.counts.pastDrawer],
+                        ['Snapshot-only past', calendarAuditReport.counts.snapshotOnlyPast],
+                        ['CSC Calendar events', calendarAuditReport.counts.calendarEvents],
+                        ['Current shifts matched', calendarAuditReport.counts.matchedCurrent],
+                        ['Current missing Calendar', calendarAuditReport.counts.missingCurrent],
+                        ['Snapshot-only matched', calendarAuditReport.counts.snapshotCalendarSupported],
+                        ['Duplicate Calendar events', calendarAuditReport.counts.duplicateCalendarEvents],
+                        ['Unmatched Calendar events', calendarAuditReport.counts.unlinkedCalendarEvents],
+                        ['Active records in Past Shifts', calendarAuditReport.counts.activePastRecords],
+                        ['Cancelled stored', calendarAuditReport.counts.cancelledStored],
+                      ].map(([label, value]) => (
+                        <div
+                          key={label}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <p className="text-xs font-black uppercase tracking-wide text-slate-600">
+                            {label}
+                          </p>
+                          <p className="mt-2 text-3xl font-black text-slate-950">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                      <section className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                        <h3 className="font-black text-red-950">
+                          Current CSC shifts missing from Calendar ({calendarAuditReport.missingCurrent.length})
+                        </h3>
+                        <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+                          {calendarAuditReport.missingCurrent.length ? (
+                            calendarAuditReport.missingCurrent.map((shift) => (
+                              <div key={shift.id} className="rounded-xl bg-white p-3 text-sm shadow-sm">
+                                <p className="font-black text-slate-950">
+                                  {formatShortDate(shift.startDate)} {formatTime(shift.startTime)} · {shift.venue || 'Venue unknown'}
+                                </p>
+                                <p className="mt-1 text-slate-700">
+                                  {shift.jobName || shift.event || shift.shiftName || shift.id}
+                                </p>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm font-bold text-emerald-800">None.</p>
+                          )}
+                        </div>
+                      </section>
+
+                      <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                        <h3 className="font-black text-amber-950">
+                          Snapshot-only records supported by Calendar ({calendarAuditReport.matchedSnapshotOnly.length})
+                        </h3>
+                        <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+                          {calendarAuditReport.matchedSnapshotOnly.length ? (
+                            calendarAuditReport.matchedSnapshotOnly.map(({ shift, event }) => (
+                              <div key={shift.id} className="rounded-xl bg-white p-3 text-sm shadow-sm">
+                                <p className="font-black text-slate-950">
+                                  {formatShortDate(shift.startDate)} {formatTime(shift.startTime)} · {shift.venue || 'Venue unknown'}
+                                </p>
+                                <p className="mt-1 text-slate-700">
+                                  {shift.jobName || shift.event || shift.shiftName || shift.id}
+                                </p>
+                                <p className="mt-1 text-xs font-bold text-emerald-700">
+                                  Calendar match: {event.summary || event.id}
+                                </p>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm font-bold text-slate-700">None.</p>
+                          )}
+                        </div>
+                      </section>
+
+                      <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <h3 className="font-black text-slate-950">
+                          Snapshot-only records without Calendar support ({calendarAuditReport.unsupportedSnapshotOnly.length})
+                        </h3>
+                        <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+                          {calendarAuditReport.unsupportedSnapshotOnly.length ? (
+                            calendarAuditReport.unsupportedSnapshotOnly.map((shift) => (
+                              <div key={shift.id} className="rounded-xl bg-white p-3 text-sm shadow-sm">
+                                <p className="font-black text-slate-950">
+                                  {formatShortDate(shift.startDate)} {formatTime(shift.startTime)} · {shift.venue || 'Venue unknown'}
+                                </p>
+                                <p className="mt-1 text-slate-700">
+                                  {shift.jobName || shift.event || shift.shiftName || shift.id}
+                                </p>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm font-bold text-emerald-800">None.</p>
+                          )}
+                        </div>
+                      </section>
+
+                      <section className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                        <h3 className="font-black text-violet-950">
+                          Extra Calendar events ({calendarAuditReport.duplicateCalendarEvents.length + calendarAuditReport.unlinkedCalendarEvents.length})
+                        </h3>
+                        <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+                          {[...calendarAuditReport.duplicateCalendarEvents, ...calendarAuditReport.unlinkedCalendarEvents].length ? (
+                            [...calendarAuditReport.duplicateCalendarEvents, ...calendarAuditReport.unlinkedCalendarEvents].map(
+                              ({ event, reason }) => (
+                                <div key={event.id} className="rounded-xl bg-white p-3 text-sm shadow-sm">
+                                  <p className="font-black text-slate-950">
+                                    {event.summary || event.id}
+                                  </p>
+                                  <p className="mt-1 text-xs font-black uppercase tracking-wide text-violet-700">
+                                    {reason === 'duplicate' ? 'Likely duplicate' : 'No current CSC match'}
+                                  </p>
+                                </div>
+                              )
+                            )
+                          ) : (
+                            <p className="text-sm font-bold text-emerald-800">None.</p>
+                          )}
+                        </div>
+                      </section>
+                    </div>
+
+                    <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-950">
+                      The Past Shifts badge currently counts archived records, qualifying active past/Done/Cancelled records, and snapshot-only historical records. Use this audit to determine whether any snapshot-only records are corroborated by Google Calendar before changing the badge logic or restoring records.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ), document.body) : null}
 
         <section aria-labelledby="csc-current-month-summary-title" className="min-w-0">
           <div className="mb-2 flex items-center justify-between gap-3 px-1">
