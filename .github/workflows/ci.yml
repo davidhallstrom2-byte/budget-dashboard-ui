@@ -50,6 +50,20 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Prepare WordPress production deployer
+        if: ${{ hashFiles('dist/**') != '' }}
+        run: |
+          mkdir -p wordpress-deployer/dist
+          cp tools/wordpress-deployer/bwc-budget-dashboard-deployer.php wordpress-deployer/
+          cp -R dist/. wordpress-deployer/dist/
+
+      - name: Upload WordPress production deployer
+        if: ${{ hashFiles('dist/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-production-deployer
+          path: wordpress-deployer/
+
   prerelease_main:
     name: Prerelease (named backups)
     needs: build
