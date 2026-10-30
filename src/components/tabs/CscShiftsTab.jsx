@@ -2861,6 +2861,11 @@ const normalizeWishEssAssignmentIdentity = (shift = {}) =>
       .filter(Boolean)
       .join(' ')
   )
+    // Wish ESS and older CSC records may format the same performance night as
+    // "Tour N3" or "TourN3". Split the compact form before comparing the
+    // assignment identity so the authoritative scan can reconcile the stale
+    // overlapping record instead of leaving a second active shift.
+    .replace(/\b([a-z]+)(n\d+)\b/g, ' $1 $2 ')
     .replace(/\br\s+and\s+b\b/g, ' rnb ')
     .replace(/\brandb\b/g, ' rnb ')
     .replace(/\br\s*&\s*b\b/g, ' rnb ')
@@ -2958,6 +2963,25 @@ const isScannedAssignmentCandidate = (existingShift = {}, scannedShift = {}) => 
 };
 
 const isSafeScannedDuplicateForCleanup = (existingShift = {}, scannedShift = {}) => {
+  /*
+   * A complete Wish ESS schedule is authoritative for David's assignments.
+   * Two active shifts for the same person cannot both be valid when they are
+   * at the same venue on the same date and their work windows overlap. Older
+   * email records may also use a different post label, such as Sec Main versus
+   * Production, so do not require title identity before reconciling that stale
+   * overlapping record.
+   */
+  if (
+    isWishEssScannedShift(scannedShift) &&
+    existingShift.startDate === scannedShift.startDate &&
+    wishEssVenueOrAddressMatches(existingShift, scannedShift) &&
+    scannerShiftWindowsOverlap(existingShift, scannedShift)
+  ) {
+    const existingStatus = normalizeShiftStatus(existingShift.shiftStatus);
+
+    if (existingStatus !== 'Done' && existingStatus !== 'Cancelled') return true;
+  }
+
   if (isWishEssAuthoritativeMatch(existingShift, scannedShift)) return true;
   if (!isScannedAssignmentCandidate(existingShift, scannedShift)) return false;
   if (shiftWindowsMatch(existingShift, scannedShift)) return true;
@@ -8564,6 +8588,40 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       authoritativeKeepIds.add(safeId);
       addedCount += 1;
     });
+
+    /*
+     * Final authoritative conflict pass. A prior email record can survive the
+     * per-row matcher when its generated ID or assignment label sends it down
+     * a different matching branch. After every Wish ESS row has been resolved,
+     * remove any remaining active record that is not part of the authoritative
+     * snapshot and overlaps one of David's confirmed Wish ESS assignments.
+     * Venue is intentionally not required here: one person cannot work two
+     * overlapping assignments at SoFi Stadium and Kia Forum at the same time.
+     */
+    if (wishEssImport) {
+      normalizedScannedShifts.forEach((scannedShift) => {
+        const canonicalShift = Array.from(currentById.values()).find(
+          (candidateShift) =>
+            authoritativeKeepIds.has(candidateShift.id) &&
+            shiftWindowsMatch(candidateShift, scannedShift)
+        );
+
+        if (!canonicalShift) return;
+
+        Array.from(currentById.values()).forEach((candidateShift) => {
+          if (candidateShift.id === canonicalShift.id) return;
+          if (authoritativeKeepIds.has(candidateShift.id)) return;
+          if (!scannerShiftWindowsOverlap(candidateShift, scannedShift)) return;
+
+          const candidateStatus = normalizeShiftStatus(candidateShift.shiftStatus);
+          if (candidateStatus === 'Done' || candidateStatus === 'Cancelled') return;
+
+          currentById.delete(candidateShift.id);
+          scannerReplacementIds.set(candidateShift.id, canonicalShift.id);
+          reconciledDuplicateCount += 1;
+        });
+      });
+    }
 
     /*
      * Wish ESS is authoritative for the upcoming schedule, but disappearance
