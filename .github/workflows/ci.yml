@@ -41,6 +41,8 @@ jobs:
         run: npm ci
 
       - name: Build
+        env:
+          VITE_GOOGLE_CALENDAR_CLIENT_ID: 370719090635-v44pitt2jq4fl6g0asnf8lv67ai60aku.apps.googleusercontent.com
         run: npm run build --if-present
 
       - name: Upload dist artifact (if present)
