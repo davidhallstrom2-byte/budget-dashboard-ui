@@ -7777,7 +7777,7 @@ const CscOpportunitiesTab = ({ searchQuery = '' }) => {
           theme="violet"
           className="budget-mobile-header"
           actions={
-            <div className="flex w-max flex-nowrap items-center gap-2">
+            <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={openAddOpportunity}
