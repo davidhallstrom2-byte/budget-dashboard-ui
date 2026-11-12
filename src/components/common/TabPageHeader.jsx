@@ -67,12 +67,12 @@ export default function TabPageHeader({
 }) {
   const selectedTheme = THEME_CLASSES[theme] || THEME_CLASSES.blue;
   const shellLayoutClass =
-    'min-h-0 rounded-2xl px-3 py-3 sm:px-4 lg:h-[136px] lg:min-h-[136px] lg:px-5 lg:py-3';
+    'min-h-0 rounded-2xl px-3 py-3 sm:px-4 lg:min-h-[136px] lg:px-5 lg:py-3';
   const contentLayoutClass =
-    'grid w-full min-w-0 grid-cols-1 gap-3 xl:h-full xl:grid-cols-[minmax(18rem,1fr)_minmax(0,60vw)] xl:items-center xl:gap-4';
+    'grid w-full min-w-0 grid-cols-1 gap-3 xl:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.3fr)] xl:items-center xl:gap-4';
   const iconLayoutClass = 'h-10 w-10 rounded-xl';
   const titleLayoutClass =
-    'min-w-0 break-normal whitespace-normal text-xl leading-7 sm:text-2xl sm:leading-8';
+    'min-w-0 break-words whitespace-normal text-xl leading-7 sm:text-2xl sm:leading-8';
   const subtitleLayoutClass = compactMobile ? 'hidden sm:block' : '';
   const messageLayoutClass = compactMobile && !message ? 'hidden lg:block' : 'hidden lg:block';
 
@@ -112,7 +112,7 @@ export default function TabPageHeader({
         </div>
 
         {actions ? (
-          <div className="tab-page-header-actions relative z-10 min-h-11 w-full min-w-0 overflow-hidden rounded-xl border border-white/30 bg-slate-950/20 p-1 shadow-sm xl:min-h-14 xl:w-auto xl:max-w-none xl:justify-self-end xl:p-1.5 [&>div]:!flex [&>div]:!w-auto [&>div]:!min-w-0 [&>div]:!flex-nowrap [&>div]:!items-center [&>div]:!gap-2 [&_button]:!shrink-0 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-white [&_button]:focus-visible:ring-offset-2 [&_button]:focus-visible:ring-offset-slate-800 [&_label]:!shrink-0 [&_label]:focus-within:ring-2 [&_label]:focus-within:ring-white [&_label]:focus-within:ring-offset-2 [&_label]:focus-within:ring-offset-slate-800 [&_svg]:shrink-0">
+          <div className="tab-page-header-actions relative z-10 min-h-11 w-full min-w-0 overflow-hidden rounded-xl border border-white/30 bg-slate-950/20 p-1 shadow-sm xl:min-h-14 xl:w-full xl:max-w-none xl:justify-self-stretch xl:p-1.5 [&>div]:!flex [&>div]:!w-full [&>div]:!min-w-0 [&>div]:!flex-wrap [&>div]:!items-center [&>div]:!justify-end [&>div]:!gap-2 [&_button]:!shrink-0 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-white [&_button]:focus-visible:ring-offset-2 [&_button]:focus-visible:ring-offset-slate-800 [&_label]:!shrink-0 [&_label]:focus-within:ring-2 [&_label]:focus-within:ring-white [&_label]:focus-within:ring-offset-2 [&_label]:focus-within:ring-offset-slate-800 [&_svg]:shrink-0">
             {actions}
           </div>
         ) : (
