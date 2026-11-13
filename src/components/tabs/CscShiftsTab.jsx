@@ -7399,8 +7399,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const calendarMonthEndDate = toLocalDateKey(new Date(reportYear, reportMonth, 0));
     const firstReportWeek = getWeekRange(calendarMonthStartDate);
     const lastReportWeek = getWeekRange(calendarMonthEndDate);
-    const reportStartDate = firstReportWeek?.startDate || calendarMonthStartDate;
-    const reportEndDate = lastReportWeek?.endDate || calendarMonthEndDate;
+    const reportStartDate = firstReportWeek
+      ? toLocalDateKey(firstReportWeek.startDate)
+      : calendarMonthStartDate;
+    const reportEndDate = lastReportWeek
+      ? toLocalDateKey(lastReportWeek.endDate)
+      : calendarMonthEndDate;
     const monthShifts = allStoredShifts
       .filter(
         (shift) =>
