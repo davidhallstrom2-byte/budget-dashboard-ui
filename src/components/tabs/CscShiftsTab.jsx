@@ -3817,6 +3817,42 @@ const getPaycheckEarningsLineHours = (line = {}) =>
       0
   );
 
+const getPayrollOnlyEarningsLines = (
+  reportPaychecks = [],
+  reportShifts = [],
+  reportStartDate = '',
+  reportEndDate = ''
+) => {
+  const savedShiftDates = new Set(
+    reportShifts
+      .map((shift) => normalizePaycheckDate(shift.startDate))
+      .filter(Boolean)
+  );
+
+  return reportPaychecks
+    .flatMap((paycheck, paycheckIndex) =>
+      (Array.isArray(paycheck.earningsLines) ? paycheck.earningsLines : []).map(
+        (line, lineIndex) => ({
+          id: `${getPaycheckIdentity(paycheck, paycheckIndex)}-${line?.id || lineIndex}`,
+          date: getPaycheckEarningsLineDate(line, paycheck),
+          type: String(line?.type || line?.earningType || 'Payroll earnings').trim(),
+          rate: parsePaycheckMoney(line?.rate || line?.hourlyRate || 0),
+          hours: getPaycheckEarningsLineHours(line),
+          amount: getPaycheckEarningsLineAmount(line),
+          checkNumber: String(paycheck.checkNumber || '').trim(),
+        })
+      )
+    )
+    .filter(
+      (line) =>
+        line.date &&
+        line.date >= reportStartDate &&
+        line.date <= reportEndDate &&
+        !savedShiftDates.has(line.date)
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+};
+
 const getPaycheckReportAllocation = (
   paycheck = {},
   reportDoneShifts = [],
@@ -3846,7 +3882,10 @@ const getPaycheckReportAllocation = (
     }))
     .filter((line) => line.date);
   const selectedDatedLines = datedLines.filter((line) =>
-    reportShiftDates.has(line.date)
+    reportStartDate &&
+    reportEndDate &&
+    line.date >= reportStartDate &&
+    line.date <= reportEndDate
   );
   const totalDatedAmount = datedLines.reduce((sum, line) => sum + line.amount, 0);
   const selectedDatedAmount = selectedDatedLines.reduce(
@@ -7429,6 +7468,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           reportEndDate
         )
     );
+    const payrollOnlyEntries = getPayrollOnlyEarningsLines(
+      actualPaychecks,
+      monthShifts,
+      reportStartDate,
+      reportEndDate
+    );
+    const payrollOnlyHours = payrollOnlyEntries.reduce(
+      (sum, entry) => sum + entry.hours,
+      0
+    );
     const weeklyGroups = new Map();
 
     monthShifts.forEach((shift) => {
@@ -7482,6 +7531,16 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
             week.endDate
           )
         );
+        const weekPayrollOnlyEntries = getPayrollOnlyEarningsLines(
+          weekPaychecks,
+          week.shifts,
+          week.startDate,
+          week.endDate
+        );
+        const weekPayrollOnlyHours = weekPayrollOnlyEntries.reduce(
+          (sum, entry) => sum + entry.hours,
+          0
+        );
 
         return {
           ...week,
@@ -7489,6 +7548,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
           shifts: week.shifts.sort((a, b) =>
             `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`)
           ),
+          payrollOnlyEntries: weekPayrollOnlyEntries,
+          payrollOnlyHours: weekPayrollOnlyHours,
+          workedHours: week.workedHours + weekPayrollOnlyHours,
           actualPaychecks: weekPaychecks,
           actualGrossPaid: weekPaychecks.reduce(
             (sum, paycheck) => sum + getReportPaycheckGross(paycheck),
@@ -7514,8 +7576,12 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       openCount: openShifts.length,
       cancelledCount: cancelledShifts.length,
       actualPaychecks,
+      payrollOnlyEntries,
+      payrollOnlyHours,
       totalHours: payableShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0),
-      workedHours: doneShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0),
+      workedHours:
+        doneShifts.reduce((sum, shift) => sum + getShiftHours(shift), 0) +
+        payrollOnlyHours,
       projectedPay: payableShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
       earnedPay: doneShifts.reduce((sum, shift) => sum + getEstimatedPay(shift), 0),
       actualGrossPaid: actualPaychecks.reduce(
@@ -13235,6 +13301,9 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
 
                   <div className="csc-monthly-status-strip mt-3 flex flex-wrap gap-x-5 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-800">
                     <span>{selectedPaidMonth.paidShifts.length} saved shifts</span>
+                    {selectedPaidMonth.payrollOnlyEntries.length ? (
+                      <span>{selectedPaidMonth.payrollOnlyEntries.length} payroll-only earning</span>
+                    ) : null}
                     <span>{selectedPaidMonth.paidCount} marked paid</span>
                     <span>{selectedPaidMonth.owedCount} completed and unpaid</span>
                     <span>{selectedPaidMonth.actualPaychecks.length} matching saved paychecks</span>
@@ -13440,6 +13509,52 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                               );
                             })}
 
+                            {week.payrollOnlyEntries.map((entry) => (
+                              <article
+                                key={`mobile-payroll-${entry.id}`}
+                                className="min-w-0 rounded-xl border border-violet-200 bg-violet-50 p-3 shadow-sm"
+                              >
+                                <div className="flex min-w-0 items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="csc-title-wrap text-sm font-black text-slate-950">
+                                      Training / payroll-only earnings
+                                    </p>
+                                    <p className="mt-0.5 break-words text-xs font-bold text-slate-700">
+                                      No venue or event was saved
+                                    </p>
+                                  </div>
+                                  <span className="shrink-0 rounded-full bg-violet-200 px-2 py-1 text-[9px] font-extrabold uppercase text-violet-900">
+                                    Paid
+                                  </span>
+                                </div>
+                                <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                                  <div className="col-span-2 rounded-lg bg-white/80 p-2">
+                                    <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-700">Work Date</p>
+                                    <p className="mt-0.5 font-extrabold text-slate-900">{formatShortDate(entry.date)}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-700">Earning Type</p>
+                                    <p className="mt-0.5 font-bold">{entry.type}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-700">Hours</p>
+                                    <p className="mt-0.5 font-bold">{entry.hours.toFixed(2)}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-700">Rate</p>
+                                    <p className="mt-0.5 font-black text-violet-800">{formatCurrency(entry.rate)}/hr</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-700">Actual Gross</p>
+                                    <p className="mt-0.5 font-black text-violet-800">{formatCurrency(entry.amount)}</p>
+                                  </div>
+                                </div>
+                                <div className="mt-3 border-t border-violet-200 pt-2 text-[10px] font-extrabold uppercase text-emerald-700">
+                                  Paycheck {entry.checkNumber ? `#${entry.checkNumber}` : 'saved'}
+                                </div>
+                              </article>
+                            ))}
+
                             <div className="grid grid-cols-2 gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-slate-900">
                               <div>
                                 <p className="text-[9px] font-extrabold uppercase text-slate-700">Week Hours</p>
@@ -13518,6 +13633,30 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                     </tr>
                                   );
                                 })}
+                                {week.payrollOnlyEntries.map((entry) => (
+                                  <tr key={`payroll-${entry.id}`} className="bg-violet-50 text-slate-800">
+                                    <td className="whitespace-nowrap px-3 py-2 align-top font-bold">
+                                      <div>{formatShortDate(entry.date)}</div>
+                                      <div className="mt-0.5 font-semibold text-slate-600">Time not saved</div>
+                                    </td>
+                                    <td className="csc-title-wrap px-3 py-2 align-top font-bold text-slate-950">
+                                      Training / payroll-only earnings
+                                    </td>
+                                    <td className="csc-title-wrap px-3 py-2 align-top">Not recorded</td>
+                                    <td className="csc-title-wrap px-3 py-2 align-top">{entry.type}</td>
+                                    <td className="whitespace-nowrap px-3 py-2 text-right align-top">{entry.hours.toFixed(2)}</td>
+                                    <td className="whitespace-nowrap px-3 py-2 text-right align-top font-bold">
+                                      {formatCurrency(entry.amount)} actual
+                                    </td>
+                                    <td className="px-3 py-2 text-right align-top font-bold text-emerald-800">
+                                      {entry.checkNumber ? `#${entry.checkNumber}` : 'Saved'}
+                                    </td>
+                                    <td className="px-3 py-2 align-top">
+                                      <div className="font-bold">Payroll only</div>
+                                      <div className="mt-0.5 text-[9px] font-extrabold uppercase text-emerald-700">Paid</div>
+                                    </td>
+                                  </tr>
+                                ))}
                               </tbody>
                               <tfoot className="border-t-2 border-slate-300 bg-amber-50 font-extrabold text-slate-950">
                                 <tr>
@@ -13527,7 +13666,10 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                                   <td className="whitespace-nowrap px-3 py-2 text-right text-emerald-800">
                                     {week.actualPaychecks.length} saved
                                   </td>
-                                  <td className="px-3 py-2">{week.workedCount} worked</td>
+                                  <td className="px-3 py-2">
+                                    {week.workedCount} worked
+                                    {week.payrollOnlyEntries.length ? ` + ${week.payrollOnlyEntries.length} payroll` : ''}
+                                  </td>
                                 </tr>
                               </tfoot>
                             </table>
@@ -13538,7 +13680,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                   )}
 
                   <footer className="csc-monthly-footer mt-6 border-t border-slate-300 pt-3 text-[9px] leading-relaxed text-slate-700">
-                    Estimated earned pay is calculated from completed shift hours and saved rates, including overtime and double time. Actual gross and net use saved CSC paychecks whose pay periods match completed shifts in this report. When a pay period crosses a month or report boundary, only the earnings tied to completed shifts inside this report are included, and net pay uses the same share. Each paycheck is counted once. Estimated still owed includes completed shifts not marked Paid.
+                    Estimated earned pay is calculated from completed shift hours and saved rates, including overtime and double time. Actual gross and net use dated earnings from saved CSC paychecks inside this report. Dated paycheck earnings without a saved shift appear as payroll-only entries, such as paid online training. When a pay period crosses a report boundary, only earnings dated inside the report are included, and net pay uses the same share. Each paycheck is counted once. Estimated still owed includes completed shifts not marked Paid.
                   </footer>
                 </div>
               </div>
