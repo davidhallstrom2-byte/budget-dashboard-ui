@@ -7394,8 +7394,18 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
       ...shifts.map((shift) => ({ ...shift, recordSource: 'active' })),
       ...archivedShifts.map((shift) => ({ ...shift, recordSource: 'archived' })),
     ];
+    const calendarMonthStartDate = `${selectedPaidMonthKey}-01`;
+    const [reportYear, reportMonth] = selectedPaidMonthKey.split('-').map(Number);
+    const calendarMonthEndDate = toLocalDateKey(new Date(reportYear, reportMonth, 0));
+    const firstReportWeek = getWeekRange(calendarMonthStartDate);
+    const lastReportWeek = getWeekRange(calendarMonthEndDate);
+    const reportStartDate = firstReportWeek?.startDate || calendarMonthStartDate;
+    const reportEndDate = lastReportWeek?.endDate || calendarMonthEndDate;
     const monthShifts = allStoredShifts
-      .filter((shift) => getMonthKey(shift.startDate) === selectedPaidMonthKey)
+      .filter(
+        (shift) =>
+          shift.startDate >= reportStartDate && shift.startDate <= reportEndDate
+      )
       .sort((a, b) => `${a.startDate}T${a.startTime}`.localeCompare(`${b.startDate}T${b.startTime}`));
 
     const payableShifts = monthShifts.filter((shift) => shift.shiftStatus !== 'Cancelled');
@@ -7405,9 +7415,6 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
     const owedShifts = doneShifts.filter((shift) => shift.paidStatus !== 'Paid');
     const openShifts = payableShifts.filter((shift) => !['Done', 'Cancelled'].includes(shift.shiftStatus));
     const cancelledShifts = monthShifts.filter((shift) => shift.shiftStatus === 'Cancelled');
-    const reportStartDate = `${selectedPaidMonthKey}-01`;
-    const [reportYear, reportMonth] = selectedPaidMonthKey.split('-').map(Number);
-    const reportEndDate = toLocalDateKey(new Date(reportYear, reportMonth, 0));
     const actualPaychecks = getUniquePaychecksMatchingShifts(doneShifts, paychecks).map(
       (paycheck) =>
         getPaycheckReportAllocation(
@@ -13161,7 +13168,7 @@ const CscShiftsTab = ({ searchQuery = '' }) => {
                 <div className="min-w-0">
                   <h2 className="text-lg font-extrabold text-slate-950 sm:text-xl">Monthly CSC Work Report</h2>
                   <p className="mt-1 text-sm text-slate-800">
-                    {selectedPaidMonth.label}, monthly totals and Saturday-through-Friday weekly breakdowns.
+                    {selectedPaidMonth.label}, complete Saturday-through-Friday workweeks and totals.
                   </p>
                 </div>
                 <div className="csc-no-print flex w-full flex-shrink-0 items-center gap-2 sm:w-auto">
